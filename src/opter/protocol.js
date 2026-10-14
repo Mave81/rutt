@@ -179,9 +179,14 @@ function parseLogon(payload) {
 /* Meddelanden (chatt) ur en synk → sorterade bubblor */
 function messageList(decoded) {
   const out = [];
+  const seen = new Set();
   for (const r of decoded.rows) {
     if (r.table !== 'FreeTextMessage') continue;
     const c = r.columns;
+    // dedupe: samma meddelande kan komma flera gånger i synken
+    const sig = (c.externalId || '') + '|' + r.key.identityId + '|' + r.key.xxxId + '|' + (c.text || '') + '|' + (c.created || '');
+    if (seen.has(sig)) continue;
+    seen.add(sig);
     const received = c.fromName ? true : c.outgoing === false;
     out.push({
       key: r.key,

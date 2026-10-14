@@ -6,8 +6,9 @@
 import React, {useMemo, useState} from 'react';
 import {
   View, StatusBar, StyleSheet, Text, TextInput, Pressable,
-  FlatList, ActivityIndicator, ScrollView,
+  FlatList, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform,
 } from 'react-native';
+import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 // @ts-ignore
 import OpterClient from './src/opter/OpterClient';
 // @ts-ignore
@@ -39,6 +40,14 @@ const DEMO = {
 const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
 export default function App(): React.JSX.Element {
+  return (
+    <SafeAreaProvider>
+      <AppInner />
+    </SafeAreaProvider>
+  );
+}
+
+function AppInner(): React.JSX.Element {
   const [step, setStep] = useState<'login' | 'pick' | 'route'>('login');
   const [tab, setTab] = useState<'plan' | 'last' | 'chat'>('plan');
   const [msgs, setMsgs] = useState<any[]>([]);
@@ -111,7 +120,7 @@ export default function App(): React.JSX.Element {
   const title = step === 'login' ? 'Logga in mot Opter' : step === 'pick' ? 'Välj ditt namn' : (orders.stops.length ? 'Din dag' : demo ? 'Demo' : 'Dina jobb');
 
   return (
-    <View style={s.safe}>
+    <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <View style={s.head}><Text style={s.brand}>RUTT</Text><Text style={s.tag}>{title}</Text></View>
 
@@ -167,7 +176,7 @@ export default function App(): React.JSX.Element {
           {tab !== 'chat' && route && (route as any).error && <Text style={s.err}>Optimeringsfel: {(route as any).error}</Text>}
         </View>
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -241,32 +250,39 @@ function LastView({route}: {route: any}) {
 }
 
 function ChatView({msgs, msgText, setMsgText, onSend}: any) {
-  const line = (m: any) => {
-    const t = m.created ? `${m.created.getFullYear()}-${String(m.created.getMonth() + 1).padStart(2, '0')}-${String(m.created.getDate()).padStart(2, '0')} ${hhmm(m.created)}` : '';
-    return m.received ? `Mottaget ${t}${m.from ? '  Från: ' + m.from : ''}` : `Skickat ${t}`;
+  const stamp = (m: any) => {
+    const t = m.created ? hhmm(m.created) : '';
+    const sameDay = m.created && new Date().toDateString() === m.created.toDateString();
+    const d = m.created && !sameDay ? `${String(m.created.getDate()).padStart(2, '0')}/${m.created.getMonth() + 1} ` : '';
+    return m.received ? `${m.from || ''}${m.from ? ' · ' : ''}${d}${t}` : `${d}${t}`;
   };
+  const data = [...msgs].reverse(); // nyast sist visuellt (inverted)
   return (
-    <View style={{flex: 1}}>
-      <FlatList
-        style={{flex: 1}}
-        contentContainerStyle={{padding: 14}}
-        data={msgs}
-        keyExtractor={(_, i) => String(i)}
-        renderItem={({item}) => (
-          <View style={[s.bubbleWrap, item.received ? s.bwL : s.bwR]}>
-            <Text style={s.bubbleHead}>{line(item)}</Text>
-            <View style={[s.bubble, item.received ? s.bubbleIn : s.bubbleOut]}>
-              <Text style={s.bubbleTxt}>{item.text}</Text>
+    <KeyboardAvoidingView style={{flex: 1}} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {msgs.length === 0 ? (
+        <View style={{flex: 1, padding: 18}}><Text style={s.empty}>Inga meddelanden.</Text></View>
+      ) : (
+        <FlatList
+          style={{flex: 1}}
+          contentContainerStyle={{padding: 14, paddingTop: 18}}
+          data={data}
+          inverted
+          keyExtractor={(_, i) => String(i)}
+          renderItem={({item}) => (
+            <View style={[s.bubbleWrap, item.received ? s.bwL : s.bwR]}>
+              <View style={[s.bubble, item.received ? s.bubbleIn : s.bubbleOut]}>
+                <Text style={s.bubbleTxt}>{item.text}</Text>
+              </View>
+              <Text style={[s.bubbleStamp, item.received ? s.stampL : s.stampR]}>{stamp(item)}</Text>
             </View>
-          </View>
-        )}
-        ListEmptyComponent={<Text style={s.empty}>Inga meddelanden.</Text>}
-      />
+          )}
+        />
+      )}
       <View style={s.sendRow}>
         <TextInput style={s.sendInput} value={msgText} onChangeText={setMsgText} placeholder="Skriv ett meddelande…" placeholderTextColor={C.dim} multiline />
         <Pressable style={s.sendBtn} onPress={onSend}><Text style={s.sendBtnTxt}>Skicka</Text></Pressable>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -315,14 +331,16 @@ const s = StyleSheet.create({
   slotNo: {color: C.accent, fontWeight: '700', width: 26, textAlign: 'center'},
   slotName: {color: C.ink, fontSize: 15},
   slotWhere: {color: C.dim, fontSize: 12, marginTop: 1},
-  bubbleWrap: {marginBottom: 12, maxWidth: '88%'},
+  bubbleWrap: {marginBottom: 12, maxWidth: '82%'},
   bwL: {alignSelf: 'flex-start'},
   bwR: {alignSelf: 'flex-end'},
-  bubbleHead: {color: C.dim, fontSize: 11, marginBottom: 3},
-  bubble: {borderRadius: 12, paddingHorizontal: 13, paddingVertical: 10, borderWidth: 1},
-  bubbleIn: {backgroundColor: '#3a2f1e', borderColor: C.accent},
-  bubbleOut: {backgroundColor: C.panel2, borderColor: C.edge},
-  bubbleTxt: {color: C.ink, fontSize: 15, lineHeight: 20},
+  bubble: {borderRadius: 16, paddingHorizontal: 13, paddingVertical: 10},
+  bubbleIn: {backgroundColor: '#2c2824', borderBottomLeftRadius: 5},
+  bubbleOut: {backgroundColor: '#4a3a22', borderBottomRightRadius: 5},
+  bubbleTxt: {color: C.ink, fontSize: 15, lineHeight: 21},
+  bubbleStamp: {color: C.dim, fontSize: 11, marginTop: 4},
+  stampL: {textAlign: 'left', marginLeft: 6},
+  stampR: {textAlign: 'right', marginRight: 6},
   sendRow: {flexDirection: 'row', gap: 8, padding: 12, borderTopColor: C.edge, borderTopWidth: StyleSheet.hairlineWidth, alignItems: 'flex-end'},
   sendInput: {flex: 1, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 10, color: C.ink, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, maxHeight: 120},
   sendBtn: {backgroundColor: C.accent, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 11},
