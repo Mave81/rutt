@@ -82,6 +82,14 @@ export default class OpterClient {
     return {rutt: P.toRutt(decoded), decoded};
   }
 
+  // Arbetstidsstatus (rast/lunch/avsluta dag) → Opter.
+  async workStatus(rstType) {
+    const payload = P.encodeWorkStatus({rstType, resId: this.resId, vhcId: this.logon.vhcId});
+    const res = await this.send(P.MessageType.Synchronize, payload);
+    this.lastDecoded = P.decodeSync(res.payload);
+    return true;
+  }
+
   // Hämta färsk data (jobb + chatt) – används vid server-push och periodiskt.
   async poll() {
     await this.syncRef();

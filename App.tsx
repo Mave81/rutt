@@ -6,7 +6,7 @@
 import React, {useMemo, useState, useEffect} from 'react';
 import {
   View, StatusBar, StyleSheet, Text, TextInput, Pressable,
-  FlatList, ActivityIndicator, ScrollView, Keyboard,
+  FlatList, ActivityIndicator, ScrollView, Keyboard, Modal, PanResponder,
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 // @ts-ignore
@@ -21,7 +21,12 @@ const C = {
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '14 okt · skrivruta v2';
+const BUILD = '14 okt · status + POD';
+// Arbetstids-typer (RST) – matchar protokollet.
+const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
+// Avvikelseorsaker för "extra tid / tidsavvikelse" vid leverans.
+const DEV_REASONS = ['Kund ej anträffbar', 'Fick vänta på lastning', 'Trafik/kö', 'Fel/saknad adress', 'Mottagare sen', 'Omlastning', 'Annat'];
+const stopKey = (st: any) => `${st.verb}:${st.drop || st.pickup || ''}`;
 
 const DEMO = {
   cargo: {
@@ -58,6 +63,13 @@ function AppInner(): React.JSX.Element {
   const [err, setErr] = useState('');
   const [status, setStatus] = useState('');
   const [demo, setDemo] = useState(false);
+
+  // Arbetstid, stopp-status och POD
+  const [work, setWork] = useState<'igång' | 'rast' | 'lunch' | 'slut'>('igång');
+  const [workSheet, setWorkSheet] = useState(false);
+  const [stopIx, setStopIx] = useState<number | null>(null); // valt stopp (index i route.order)
+  const [stat, setStat] = useState<Record<string, string>>({}); // stopKey -> statusetikett
+  const [pod, setPod] = useState<Record<string, any>>({}); // cid -> POD-data
 
   const [server, setServer] = useState('foriase.opter.cloud');
   const [port, setPort] = useState('443');
@@ -117,6 +129,28 @@ function AppInner(): React.JSX.Element {
     if (!t) return;
     setMsgText('');
     try { const m = await client.sendMessage(t); setMsgs(m); } catch (e: any) { setErr(String(e?.message || e)); }
+  }
+
+  const live = !demo && orders.stops.length > 0; // skarpt läge = riktiga jobb inloggade
+
+  // Arbetstid → Opter (live). RST-typ + nytt visningsläge.
+  async function doWork(rst: number, newState: 'igång' | 'rast' | 'lunch' | 'slut') {
+    setWork(newState);
+    setWorkSheet(false);
+    if (live) { try { await client.workStatus(rst); } catch (e) {} }
+  }
+
+  // Stopp-status (lokalt nu; skarp uplink slås på efter verifiering mot riktigt jobb).
+  function markStop(st: any, label: string) {
+    setStat(s => ({...s, [stopKey(st)]: label}));
+    setStopIx(null);
+  }
+  // POD sparad (lokalt nu).
+  function savePod(st: any, data: any) {
+    const cid = st.drop || st.pickup || '';
+    setPod(p => ({...p, [cid]: data}));
+    setStat(s => ({...s, [stopKey(st)]: 'Levererad'}));
+    setStopIx(null);
   }
 
   // Live-uppdatering: servern säger till (StartServerInitiatedSync) när nåt ändrats
@@ -200,6 +234,14 @@ function AppInner(): React.JSX.Element {
             </Pressable>
           </View>
 
+          {tab !== 'chat' && (
+            <Pressable style={s.workBar} onPress={() => setWorkSheet(true)}>
+              <View style={[s.workDot, work === 'igång' ? {backgroundColor: C.accent2} : work === 'slut' ? {backgroundColor: C.dim} : {backgroundColor: C.accent}]} />
+              <Text style={s.workTxt}>{work === 'igång' ? 'Arbetspass igång' : work === 'rast' ? 'På rast' : work === 'lunch' ? 'På lunch' : 'Pass avslutat'}</Text>
+              <Text style={s.workAction}>Rast / lunch ›</Text>
+            </Pressable>
+          )}
+
           {tab !== 'chat' && !orders.stops.length && (
             <View style={s.emptyBox}>
               <Text style={s.empty}>Inga aktiva jobb just nu.</Text>
@@ -207,17 +249,26 @@ function AppInner(): React.JSX.Element {
             </View>
           )}
 
-          {tab === 'plan' && route && !(route as any).error && <PlanView route={route} />}
+          {tab === 'plan' && route && !(route as any).error && <PlanView route={route} stat={stat} onStop={setStopIx} />}
           {tab === 'last' && route && !(route as any).error && <LastView route={route} />}
           {tab === 'chat' && <ChatView msgs={msgs} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} />}
           {tab !== 'chat' && route && (route as any).error && <Text style={s.err}>Optimeringsfel: {(route as any).error}</Text>}
         </View>
       )}
+
+      <WorkSheet open={workSheet} work={work} live={live} onClose={() => setWorkSheet(false)} onPick={doWork} />
+      <StopSheet
+        stop={stopIx != null && route && (route as any).order ? (route as any).order[stopIx] : null}
+        live={live}
+        onClose={() => setStopIx(null)}
+        onStatus={markStop}
+        onPod={savePod}
+      />
     </SafeAreaView>
   );
 }
 
-function PlanView({route}: {route: any}) {
+function PlanView({route, stat, onStop}: {route: any; stat: Record<string, string>; onStop: (i: number) => void}) {
   const p = route.plan;
   const rows = route.order.map((st: any, i: number) => ({st, row: p.rows[i]}));
   return (
@@ -232,13 +283,17 @@ function PlanView({route}: {route: any}) {
         keyExtractor={(_, i) => String(i)}
         renderItem={({item, index}) => {
           const {st, row} = item;
+          const done = stat[stopKey(st)];
           return (
-            <View style={s.stop}>
-              <Text style={s.num}>{index + 1}</Text>
+            <Pressable style={({pressed}) => [s.stop, pressed && {opacity: 0.7}, done && {opacity: 0.85}]} onPress={() => onStop(index)}>
+              <Text style={[s.num, done && {backgroundColor: C.accent2, color: '#1f1d1a'}]}>{done ? '✓' : index + 1}</Text>
               <View style={{flex: 1}}>
-                <Text style={[s.verb, {color: st.verb === 'Hämta' ? C.accent : C.accent2}]}>
-                  {st.verb} · {st.who || '—'}
-                </Text>
+                <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
+                  <Text style={[s.verb, {color: st.verb === 'Hämta' ? C.accent : C.accent2, flexShrink: 1}]} numberOfLines={1}>
+                    {st.verb} · {st.who || '—'}
+                  </Text>
+                  {done ? <Text style={s.chip}>{done}</Text> : <Text style={s.chevron}>›</Text>}
+                </View>
                 <Text style={s.addr}>{[st.adr, st.area].filter(Boolean).join(', ') || '(adress saknas)'}</Text>
                 <Text style={s.meta}>
                   {row ? `ca ${hhmm(row.eta)}` : ''}
@@ -248,7 +303,7 @@ function PlanView({route}: {route: any}) {
                   {row ? `  ·  ${row.leg.km.toFixed(1)} km` : ''}
                 </Text>
               </View>
-            </View>
+            </Pressable>
           );
         }}
         ListFooterComponent={
@@ -345,6 +400,158 @@ function Stat({b, t}: {b: string; t: string}) {
   return <View style={s.stat}><Text style={s.statB}>{b}</Text><Text style={s.statT}>{t}</Text></View>;
 }
 
+// ---- Signaturruta (ingen native-dep: PanResponder + segment som roterade vyer) ----
+type Pt = {x: number; y: number};
+function Segments({stroke}: {stroke: Pt[]}) {
+  const out = [];
+  for (let i = 1; i < stroke.length; i++) {
+    const a = stroke[i - 1], b = stroke[i];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    out.push(<View key={i} style={{position: 'absolute', left: mx - len / 2, top: my - 1.4, width: len, height: 2.8, borderRadius: 2, backgroundColor: C.ink, transform: [{rotate: `${ang}deg`}]}} />);
+  }
+  return <>{out}</>;
+}
+function SignaturePad({onChange}: {onChange: (has: boolean) => void}) {
+  const [committed, setCommitted] = useState<Pt[][]>([]);
+  const [curr, setCurr] = useState<Pt[]>([]);
+  const ref = React.useRef<Pt[]>([]);
+  const pan = React.useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: e => { const p = [{x: e.nativeEvent.locationX, y: e.nativeEvent.locationY}]; ref.current = p; setCurr(p); },
+      onPanResponderMove: e => {
+        const x = e.nativeEvent.locationX, y = e.nativeEvent.locationY;
+        const last = ref.current[ref.current.length - 1];
+        if (!last || Math.hypot(x - last.x, y - last.y) > 1.8) { const p = [...ref.current, {x, y}]; ref.current = p; setCurr(p); }
+      },
+      onPanResponderRelease: () => { if (ref.current.length > 1) { setCommitted(c => [...c, ref.current]); onChange(true); } ref.current = []; setCurr([]); },
+    }),
+  ).current;
+  function clear() { setCommitted([]); setCurr([]); ref.current = []; onChange(false); }
+  return (
+    <View>
+      <View style={s.sigPad} {...pan.panHandlers}>
+        {committed.length === 0 && curr.length === 0 && <Text style={s.sigHint}>Skriv under här</Text>}
+        {committed.map((st, i) => <Segments key={i} stroke={st} />)}
+        <Segments stroke={curr} />
+      </View>
+      <Pressable onPress={clear} style={s.sigClear}><Text style={s.sigClearTxt}>Rensa</Text></Pressable>
+    </View>
+  );
+}
+
+// ---- Arbetstid (rast/lunch/avsluta) ----
+function WorkSheet({open, work, live, onClose, onPick}: any) {
+  const B = (label: string, rst: number, state: string, kind?: string) => (
+    <Pressable style={[s.sheetBtn, kind === 'bad' && s.sheetBtnBad]} onPress={() => onPick(rst, state)}>
+      <Text style={[s.sheetBtnTxt, kind === 'bad' && {color: C.bad}]}>{label}</Text>
+    </Pressable>
+  );
+  return (
+    <Sheet open={open} onClose={onClose} title="Arbetstid">
+      {work === 'igång' && (<>
+        {B('Påbörja rast', RST.StartBreak, 'rast')}
+        {B('Påbörja lunch', RST.StartLunch, 'lunch')}
+        {B('Avsluta arbetsdag', RST.EndWork, 'slut', 'bad')}
+      </>)}
+      {work === 'rast' && B('Avsluta rast', RST.EndBreak, 'igång')}
+      {work === 'lunch' && B('Avsluta lunch', RST.EndLunch, 'igång')}
+      {work === 'slut' && B('Återuppta arbetspass', 1, 'igång')}
+      {!live && <Text style={s.sheetNote}>I demoläge ändras bara visningen. Inloggad på riktiga jobb skickas detta till Opter.</Text>}
+    </Sheet>
+  );
+}
+
+// ---- Stopp: status + POD ----
+function StopSheet({stop, live, onClose, onStatus, onPod}: any) {
+  const [mode, setMode] = useState<'status' | 'pod'>('status');
+  const [name, setName] = useState('');
+  const [comment, setComment] = useState('');
+  const [hasSig, setHasSig] = useState(false);
+  const [dev, setDev] = useState<string | null>(null);
+  const [devMin, setDevMin] = useState<number | null>(null);
+  React.useEffect(() => { setMode('status'); setName(''); setComment(''); setHasSig(false); setDev(null); setDevMin(null); }, [stop]);
+  if (!stop) return null;
+  const pickup = stop.verb === 'Hämta';
+  const title = `${stop.verb} · ${stop.who || '—'}`;
+  const sub = [stop.adr, stop.area].filter(Boolean).join(', ');
+
+  if (mode === 'pod') {
+    const canSave = hasSig || name.trim().length > 0;
+    return (
+      <Sheet open onClose={onClose} title="Leverans – POD" sub={sub} scroll>
+        <Text style={s.podLabel}>Namnteckning</Text>
+        <SignaturePad onChange={setHasSig} />
+        <Text style={s.podLabel}>Namnförtydligande</Text>
+        <TextInput style={s.input} value={name} onChangeText={setName} placeholder="Vem tog emot?" placeholderTextColor={C.dim} />
+        <Text style={s.podLabel}>Avvikelse / extra tid (om något drog ut)</Text>
+        <View style={s.chipsWrap}>
+          {DEV_REASONS.map(r => (
+            <Pressable key={r} style={[s.rChip, dev === r && s.rChipOn]} onPress={() => setDev(dev === r ? null : r)}>
+              <Text style={[s.rChipTxt, dev === r && s.rChipTxtOn]}>{r}</Text>
+            </Pressable>
+          ))}
+        </View>
+        {dev && (
+          <View style={s.chipsWrap}>
+            {[15, 30, 45, 60].map(m => (
+              <Pressable key={m} style={[s.rChip, devMin === m && s.rChipOn]} onPress={() => setDevMin(devMin === m ? null : m)}>
+                <Text style={[s.rChipTxt, devMin === m && s.rChipTxtOn]}>+{m} min</Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+        <Text style={s.podLabel}>Kommentar</Text>
+        <TextInput style={[s.input, {minHeight: 60}]} value={comment} onChangeText={setComment} placeholder="Valfritt" placeholderTextColor={C.dim} multiline />
+        {!live && <Text style={s.sheetNote}>Sparas i appen nu. Sändning till Opter slås på efter test mot ett riktigt jobb.</Text>}
+        <View style={{flexDirection: 'row', gap: 10, marginTop: 14}}>
+          <Pressable style={[s.sheetBtn, {flex: 1}]} onPress={() => setMode('status')}><Text style={s.sheetBtnTxt}>Tillbaka</Text></Pressable>
+          <Pressable style={[s.primaryBtn, {flex: 1.4, opacity: canSave ? 1 : 0.4}]} disabled={!canSave} onPress={() => onPod(stop, {name, comment, dev, devMin, hasSig, at: new Date()})}>
+            <Text style={s.primaryBtnTxt}>Spara leverans</Text>
+          </Pressable>
+        </View>
+      </Sheet>
+    );
+  }
+
+  return (
+    <Sheet open onClose={onClose} title={title} sub={sub}>
+      {pickup ? (<>
+        <Pressable style={s.sheetBtn} onPress={() => onStatus(stop, 'Lastar')}><Text style={s.sheetBtnTxt}>Lastning påbörjad</Text></Pressable>
+        <Pressable style={s.sheetBtn} onPress={() => onStatus(stop, 'Lastat')}><Text style={s.sheetBtnTxt}>Lastat / klar här</Text></Pressable>
+      </>) : (<>
+        <Pressable style={s.sheetBtn} onPress={() => onStatus(stop, 'Framme')}><Text style={s.sheetBtnTxt}>Framme hos mottagare</Text></Pressable>
+        <Pressable style={s.sheetBtn} onPress={() => onStatus(stop, 'Lossar')}><Text style={s.sheetBtnTxt}>Lossning påbörjad</Text></Pressable>
+        <Pressable style={s.primaryBtn} onPress={() => setMode('pod')}><Text style={s.primaryBtnTxt}>Signera leverans (POD) ›</Text></Pressable>
+      </>)}
+      <View style={s.sheetDiv} />
+      <Pressable style={s.sheetBtn} onPress={() => onStatus(stop, 'Ankom terminal')}><Text style={s.sheetBtnTxt}>Ankom terminal</Text></Pressable>
+      <Pressable style={s.sheetBtn} onPress={() => onStatus(stop, 'Avgick terminal')}><Text style={s.sheetBtnTxt}>Avgick terminal</Text></Pressable>
+      {!live && <Text style={s.sheetNote}>Status sparas i appen nu. Sändning till Opter slås på efter test mot ett riktigt jobb.</Text>}
+    </Sheet>
+  );
+}
+
+// Generisk bottensheet
+function Sheet({open, onClose, title, sub, scroll, children}: any) {
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal visible={!!open} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+      <Pressable style={s.overlay} onPress={onClose} />
+      <View style={[s.sheet, {paddingBottom: 16 + insets.bottom}]}>
+        <View style={s.sheetHandle} />
+        <Text style={s.sheetTitle}>{title}</Text>
+        {sub ? <Text style={s.sheetSub}>{sub}</Text> : null}
+        {scroll ? <ScrollView style={{maxHeight: 460}} keyboardShouldPersistTaps="handled">{children}</ScrollView> : <View style={{marginTop: 6}}>{children}</View>}
+      </View>
+    </Modal>
+  );
+}
+
 const s = StyleSheet.create({
   safe: {flex: 1, backgroundColor: C.bg},
   head: {paddingHorizontal: 22, paddingTop: 28, paddingBottom: 8},
@@ -401,4 +608,40 @@ const s = StyleSheet.create({
   sendInput: {flex: 1, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 10, color: C.ink, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, maxHeight: 120},
   sendBtn: {backgroundColor: C.accent, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 11},
   sendBtnTxt: {color: '#2a1d0c', fontSize: 15, fontWeight: '700'},
+
+  // Arbetstidsrad
+  workBar: {flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 18, marginBottom: 10, backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14},
+  workDot: {width: 9, height: 9, borderRadius: 5},
+  workTxt: {color: C.ink, fontSize: 14, flex: 1, fontWeight: '600'},
+  workAction: {color: C.accent, fontSize: 13, fontWeight: '700'},
+
+  // Status-brickor på stopp
+  chip: {color: C.accent2, fontSize: 12, fontWeight: '700', marginLeft: 8},
+  chevron: {color: C.dim, fontSize: 20, marginLeft: 8, marginTop: -2},
+
+  // Sheets
+  overlay: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.55)'},
+  sheet: {position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: C.panel, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 18, paddingTop: 10},
+  sheetHandle: {alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: C.edge, marginBottom: 12},
+  sheetTitle: {color: C.ink, fontSize: 18, fontWeight: '800'},
+  sheetSub: {color: C.dim, fontSize: 13, marginTop: 2, marginBottom: 2},
+  sheetBtn: {backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16, marginTop: 10},
+  sheetBtnBad: {borderColor: '#5a2f2a'},
+  sheetBtnTxt: {color: C.ink, fontSize: 15, fontWeight: '600'},
+  sheetDiv: {height: 1, backgroundColor: C.edge, marginVertical: 12, opacity: 0.6},
+  sheetNote: {color: C.dim, fontSize: 12, marginTop: 12, lineHeight: 17},
+  primaryBtn: {backgroundColor: C.accent, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 10},
+  primaryBtnTxt: {color: '#2a1d0c', fontSize: 15, fontWeight: '800'},
+
+  // POD
+  podLabel: {color: C.dim, fontSize: 12, marginTop: 14, marginBottom: 6, fontWeight: '600'},
+  sigPad: {height: 170, backgroundColor: '#26231f', borderColor: C.edge, borderWidth: 1, borderRadius: 12, overflow: 'hidden', justifyContent: 'center', alignItems: 'center'},
+  sigHint: {color: C.dim, fontSize: 14},
+  sigClear: {alignSelf: 'flex-end', paddingVertical: 6, paddingHorizontal: 4, marginTop: 4},
+  sigClearTxt: {color: C.accent, fontSize: 13, fontWeight: '700'},
+  chipsWrap: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
+  rChip: {backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 18, paddingVertical: 8, paddingHorizontal: 13},
+  rChipOn: {backgroundColor: C.accent, borderColor: C.accent},
+  rChipTxt: {color: C.dim, fontSize: 13, fontWeight: '600'},
+  rChipTxtOn: {color: '#2a1d0c'},
 });

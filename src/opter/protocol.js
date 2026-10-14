@@ -157,6 +157,22 @@ function encodeStartWork({ offId, resId, vhcId }) {
   return w.build();
 }
 
+/* Arbetstidsstatus (rast/lunch/avsluta dag) – samma ResourceStatusLog-mekanism
+ * som StartWork, bara annan RST-typ. Verifierad shape. */
+function encodeWorkStatus({ rstType, resId, vhcId }) {
+  const w = W();
+  wStartTable(w, 'ResourceStatusLog', { identityId: 0, offId: 0, xxxId: 0 });
+  wInt(w, 1, resId);          // RSL_RES_Id
+  wInt(w, 2, rstType);        // RSL_RST_Id
+  wInt(w, 3, vhcId);          // RSL_VHC_Id
+  wBool(w, 4, false);         // RSL_Outgoing
+  wStr(w, 5, '');             // RSL_PhoneNumber
+  wDate(w, 10, new Date());   // RSL_LogTime
+  wEndTable(w, 'ResourceStatusLog');
+  wEndData(w, null, null);
+  return w.build();
+}
+
 /* ---- inloggning ---- */
 function logonPayload({ user, pass, major = 2, minor = 1, build = 12, sysInfo = 'rutt', deviceId }) {
   return Buffer.from([user, pass, major, minor, build, sysInfo, deviceId].join('\n'), CHARSET);
@@ -269,6 +285,6 @@ function toRutt(decoded) {
 
 module.exports = {
   MessageType, Table, DT, RST, F, frame, unframe, decodeSync, ticksToDate,
-  logonPayload, parseLogon, resourceList, encodeStartWork, toRutt,
+  logonPayload, parseLogon, resourceList, encodeStartWork, encodeWorkStatus, toRutt,
   messageList, encodeMarkRead, encodeSendMessage,
 };
