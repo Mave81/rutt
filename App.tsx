@@ -20,6 +20,8 @@ const C = {
 };
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
+// Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
+const BUILD = '14 okt · tangentbord + läskvitton';
 
 const DEMO = {
   cargo: {
@@ -151,7 +153,13 @@ function AppInner(): React.JSX.Element {
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
-      <View style={s.head}><Text style={s.brand}>RUTT</Text><Text style={s.tag}>{title}</Text></View>
+      <View style={s.head}>
+        <View style={{flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between'}}>
+          <Text style={s.brand}>RUTT</Text>
+          <Text style={s.build}>{BUILD}</Text>
+        </View>
+        <Text style={s.tag}>{title}</Text>
+      </View>
 
       {busy && <View style={s.busy}><ActivityIndicator color={C.accent} /><Text style={s.busyTxt}>{status}</Text></View>}
       {!!err && <Text style={s.err}>{err}</Text>}
@@ -340,6 +348,7 @@ const s = StyleSheet.create({
   head: {paddingHorizontal: 22, paddingTop: 28, paddingBottom: 8},
   brand: {color: C.ink, fontSize: 32, fontWeight: '800', letterSpacing: 2},
   tag: {color: C.dim, fontSize: 15, marginTop: 2},
+  build: {color: C.accent, fontSize: 11, opacity: 0.8},
   wrap: {flexGrow: 1, paddingHorizontal: 18, paddingTop: 8},
   card: {backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, borderRadius: 16, padding: 16},
   label: {color: C.dim, fontSize: 12, marginBottom: 5, marginTop: 10},
