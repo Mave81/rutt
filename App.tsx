@@ -6,9 +6,10 @@
 import React, {useMemo, useState} from 'react';
 import {
   View, StatusBar, StyleSheet, Text, TextInput, Pressable,
-  FlatList, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform,
+  FlatList, ActivityIndicator, ScrollView,
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
+import {KeyboardProvider, KeyboardAvoidingView} from 'react-native-keyboard-controller';
 // @ts-ignore
 import OpterClient from './src/opter/OpterClient';
 // @ts-ignore
@@ -41,9 +42,11 @@ const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.g
 
 export default function App(): React.JSX.Element {
   return (
-    <SafeAreaProvider>
-      <AppInner />
-    </SafeAreaProvider>
+    <KeyboardProvider>
+      <SafeAreaProvider>
+        <AppInner />
+      </SafeAreaProvider>
+    </KeyboardProvider>
   );
 }
 
