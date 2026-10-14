@@ -21,7 +21,7 @@ const C = {
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '14 okt · tangentbord + läskvitton';
+const BUILD = '14 okt · skrivruta v2';
 
 const DEMO = {
   cargo: {
@@ -303,9 +303,11 @@ function ChatView({msgs, msgText, setMsgText, onSend}: any) {
     const hide = Keyboard.addListener('keyboardDidHide', () => setKb(0));
     return () => { show.remove(); hide.remove(); };
   }, []);
-  // endCoordinates.height mäts från skärmens botten till tangentbordets topp,
-  // så lyft med hela höjden (att dra av navbar riskerar att gömma rutan igen).
-  const lift = kb;
+  // endCoordinates.height räknar INTE in tangentbordets verktygsrad (emoji/urklipp/
+  // kugghjul) på många Android-tangentbord, så skrivrutan hamnar bakom den.
+  // Lägg på en buffert så rutan garanterat klarar hela tangentbordet.
+  const KB_BUFFER = 64;
+  const lift = kb > 0 ? kb + KB_BUFFER : 0;
   return (
     <View style={{flex: 1, paddingBottom: lift}}>
       {msgs.length === 0 ? (
