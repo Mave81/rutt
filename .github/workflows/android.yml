@@ -37,10 +37,14 @@ jobs:
           ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee /tmp/gradle.log
           CODE=${PIPESTATUS[0]}
           if [ "$CODE" != "0" ]; then
-            echo "::group::gradle-fail-tail"
-            grep -nE "FAILURE|What went wrong|> Task|error:|Error:|Exception|> A problem|Could not|ReactNativeKeyboardController|keyboard|ndk|cmake|C/C\+\+|Execution failed" /tmp/gradle.log | tail -60 | while IFS= read -r L; do echo "::error::$L"; done
-            tail -40 /tmp/gradle.log | while IFS= read -r L; do echo "::error::TAIL $L"; done
-            echo "::endgroup::"
+            # Plocka ut sektionen från "FAILURE:" till slut (rotorsaken), cappa till 10 rader (GH-gräns)
+            awk '/FAILURE: Build failed/{f=1} f' /tmp/gradle.log | grep -vE "^\s*$" | head -10 \
+              | while IFS= read -r L; do echo "::error::$L"; done
+            # Reserv: om ingen FAILURE-sektion, ta rader med error:/failed/Exception
+            if ! grep -q "FAILURE: Build failed" /tmp/gradle.log; then
+              grep -nE "error:|Execution failed|Exception|ninja:|clang|undefined reference|cannot find" /tmp/gradle.log \
+                | grep -vE "> Task" | tail -10 | while IFS= read -r L; do echo "::error::$L"; done
+            fi
           fi
           exit $CODE
 
