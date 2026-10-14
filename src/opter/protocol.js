@@ -47,6 +47,7 @@ const F = {
     55: 'driverMessage', 58: 'shipmentId', 59: 'orderId',
   },
   ShipmentPackage: { 1: 'shiId', 2: 'quantity', 3: 'weight', 14: 'text', 15: 'packageType' },
+  FreeTextMessage: { 1: 'resId', 2: 'vhcId', 3: 'shiId', 4: 'outgoing', 5: 'confirmed', 6: 'text', 7: 'created', 8: 'externalId', 9: 'fromName' },
 };
 
 /* ---- byte-läsare ---- */
@@ -175,6 +176,53 @@ function parseLogon(payload) {
   return info;
 }
 
+/* Meddelanden (chatt) ur en synk → sorterade bubblor */
+function messageList(decoded) {
+  const out = [];
+  for (const r of decoded.rows) {
+    if (r.table !== 'FreeTextMessage') continue;
+    const c = r.columns;
+    const received = c.fromName ? true : c.outgoing === false;
+    out.push({
+      key: r.key,
+      text: c.text || '',
+      from: c.fromName || '',
+      created: c.created instanceof Date ? c.created : (typeof c.created === 'string' ? new Date(c.created) : null),
+      received,                       // true = Mottaget (från kontoret), false = Skickat (av dig)
+      confirmed: c.confirmed === true,
+    });
+  }
+  out.sort((a, b) => (a.created ? a.created.getTime() : 0) - (b.created ? b.created.getTime() : 0));
+  return out;
+}
+
+/* Markera mottagna meddelanden lästa (FTM_Confirmed = true) → synka upp */
+function encodeMarkRead(keys) {
+  const w = W();
+  for (const key of keys) {
+    wStartTable(w, 'FreeTextMessage', key);
+    wBool(w, 5, true);              // FTM_Confirmed
+    wEndTable(w, 'FreeTextMessage');
+  }
+  wEndData(w, null, null);
+  return w.build();
+}
+
+/* Skicka ett nytt meddelande (FTM_Outgoing = true) → synka upp */
+function encodeSendMessage({resId, vhcId, text}) {
+  const w = W();
+  wStartTable(w, 'FreeTextMessage', {identityId: 0, offId: 0, xxxId: 0});
+  wInt(w, 1, resId);               // FTM_RES_Id
+  wInt(w, 2, vhcId);               // FTM_VHC_Id
+  wBool(w, 4, true);               // FTM_Outgoing
+  wBool(w, 5, false);              // FTM_Confirmed
+  wStr(w, 6, text);                // FTM_Text
+  wDate(w, 7, new Date());         // FTM_Created
+  wEndTable(w, 'FreeTextMessage');
+  wEndData(w, null, null);
+  return w.build();
+}
+
 /* Resource-listan ur en synk → [{resId, name}] (för namnvalet) */
 function resourceList(decoded) {
   const out = [];
@@ -217,4 +265,5 @@ function toRutt(decoded) {
 module.exports = {
   MessageType, Table, DT, RST, F, frame, unframe, decodeSync, ticksToDate,
   logonPayload, parseLogon, resourceList, encodeStartWork, toRutt,
+  messageList, encodeMarkRead, encodeSendMessage,
 };

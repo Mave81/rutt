@@ -40,7 +40,9 @@ const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.g
 
 export default function App(): React.JSX.Element {
   const [step, setStep] = useState<'login' | 'pick' | 'route'>('login');
-  const [tab, setTab] = useState<'plan' | 'last'>('plan');
+  const [tab, setTab] = useState<'plan' | 'last' | 'chat'>('plan');
+  const [msgs, setMsgs] = useState<any[]>([]);
+  const [msgText, setMsgText] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [status, setStatus] = useState('');
@@ -87,9 +89,23 @@ export default function App(): React.JSX.Element {
   }
   async function pull(resId: number) {
     setBusy(true); setStatus('Hämtar dina jobb…');
-    try { const {rutt} = await client.startWork(resId); setOrders(rutt); setStep('route'); }
+    try { const {rutt} = await client.startWork(resId); setOrders(rutt); setMsgs(client.messages()); setStep('route'); }
     catch (e: any) { setErr(String(e?.message || e)); }
     finally { setBusy(false); }
+  }
+
+  const unread = msgs.filter(m => m.received && !m.confirmed).length;
+
+  async function openChat() {
+    setTab('chat');
+    const toRead = msgs.filter(m => m.received && !m.confirmed).map(m => m.key);
+    if (toRead.length) { try { await client.markRead(toRead); setMsgs(client.messages()); } catch (e) {} }
+  }
+  async function sendMsg() {
+    const t = msgText.trim();
+    if (!t) return;
+    setMsgText('');
+    try { const m = await client.sendMessage(t); setMsgs(m); } catch (e: any) { setErr(String(e?.message || e)); }
   }
 
   const title = step === 'login' ? 'Logga in mot Opter' : step === 'pick' ? 'Välj ditt namn' : (orders.stops.length ? 'Din dag' : demo ? 'Demo' : 'Dina jobb');
@@ -130,25 +146,25 @@ export default function App(): React.JSX.Element {
 
       {step === 'route' && !busy && (
         <View style={{flex: 1}}>
-          {!orders.stops.length && (
+          <View style={s.tabs}>
+            <Pressable onPress={() => setTab('plan')} style={[s.tabBtn, tab === 'plan' && s.tabOn]}><Text style={[s.tabTxt, tab === 'plan' && s.tabTxtOn]}>Plan</Text></Pressable>
+            <Pressable onPress={() => setTab('last')} style={[s.tabBtn, tab === 'last' && s.tabOn]}><Text style={[s.tabTxt, tab === 'last' && s.tabTxtOn]}>Last</Text></Pressable>
+            <Pressable onPress={openChat} style={[s.tabBtn, tab === 'chat' && s.tabOn]}>
+              <Text style={[s.tabTxt, tab === 'chat' && s.tabTxtOn]}>Chatt{unread ? `  ${unread}` : ''}</Text>
+            </Pressable>
+          </View>
+
+          {tab !== 'chat' && !orders.stops.length && (
             <View style={s.emptyBox}>
               <Text style={s.empty}>Inga aktiva jobb just nu.</Text>
               {!demo && <Pressable style={s.ghost} onPress={() => setDemo(true)}><Text style={s.ghostTxt}>Visa demo så du ser planen</Text></Pressable>}
             </View>
           )}
 
-          {route && !(route as any).error && (
-            <>
-              <View style={s.tabs}>
-                <Pressable onPress={() => setTab('plan')} style={[s.tabBtn, tab === 'plan' && s.tabOn]}><Text style={[s.tabTxt, tab === 'plan' && s.tabTxtOn]}>Plan</Text></Pressable>
-                <Pressable onPress={() => setTab('last')} style={[s.tabBtn, tab === 'last' && s.tabOn]}><Text style={[s.tabTxt, tab === 'last' && s.tabTxtOn]}>Last</Text></Pressable>
-              </View>
-
-              {tab === 'plan' && <PlanView route={route} />}
-              {tab === 'last' && <LastView route={route} />}
-            </>
-          )}
-          {route && (route as any).error && <Text style={s.err}>Optimeringsfel: {(route as any).error}</Text>}
+          {tab === 'plan' && route && !(route as any).error && <PlanView route={route} />}
+          {tab === 'last' && route && !(route as any).error && <LastView route={route} />}
+          {tab === 'chat' && <ChatView msgs={msgs} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} />}
+          {tab !== 'chat' && route && (route as any).error && <Text style={s.err}>Optimeringsfel: {(route as any).error}</Text>}
         </View>
       )}
     </View>
@@ -224,6 +240,36 @@ function LastView({route}: {route: any}) {
   );
 }
 
+function ChatView({msgs, msgText, setMsgText, onSend}: any) {
+  const line = (m: any) => {
+    const t = m.created ? `${m.created.getFullYear()}-${String(m.created.getMonth() + 1).padStart(2, '0')}-${String(m.created.getDate()).padStart(2, '0')} ${hhmm(m.created)}` : '';
+    return m.received ? `Mottaget ${t}${m.from ? '  Från: ' + m.from : ''}` : `Skickat ${t}`;
+  };
+  return (
+    <View style={{flex: 1}}>
+      <FlatList
+        style={{flex: 1}}
+        contentContainerStyle={{padding: 14}}
+        data={msgs}
+        keyExtractor={(_, i) => String(i)}
+        renderItem={({item}) => (
+          <View style={[s.bubbleWrap, item.received ? s.bwL : s.bwR]}>
+            <Text style={s.bubbleHead}>{line(item)}</Text>
+            <View style={[s.bubble, item.received ? s.bubbleIn : s.bubbleOut]}>
+              <Text style={s.bubbleTxt}>{item.text}</Text>
+            </View>
+          </View>
+        )}
+        ListEmptyComponent={<Text style={s.empty}>Inga meddelanden.</Text>}
+      />
+      <View style={s.sendRow}>
+        <TextInput style={s.sendInput} value={msgText} onChangeText={setMsgText} placeholder="Skriv ett meddelande…" placeholderTextColor={C.dim} multiline />
+        <Pressable style={s.sendBtn} onPress={onSend}><Text style={s.sendBtnTxt}>Skicka</Text></Pressable>
+      </View>
+    </View>
+  );
+}
+
 function Stat({b, t}: {b: string; t: string}) {
   return <View style={s.stat}><Text style={s.statB}>{b}</Text><Text style={s.statT}>{t}</Text></View>;
 }
@@ -269,4 +315,16 @@ const s = StyleSheet.create({
   slotNo: {color: C.accent, fontWeight: '700', width: 26, textAlign: 'center'},
   slotName: {color: C.ink, fontSize: 15},
   slotWhere: {color: C.dim, fontSize: 12, marginTop: 1},
+  bubbleWrap: {marginBottom: 12, maxWidth: '88%'},
+  bwL: {alignSelf: 'flex-start'},
+  bwR: {alignSelf: 'flex-end'},
+  bubbleHead: {color: C.dim, fontSize: 11, marginBottom: 3},
+  bubble: {borderRadius: 12, paddingHorizontal: 13, paddingVertical: 10, borderWidth: 1},
+  bubbleIn: {backgroundColor: '#3a2f1e', borderColor: C.accent},
+  bubbleOut: {backgroundColor: C.panel2, borderColor: C.edge},
+  bubbleTxt: {color: C.ink, fontSize: 15, lineHeight: 20},
+  sendRow: {flexDirection: 'row', gap: 8, padding: 12, borderTopColor: C.edge, borderTopWidth: StyleSheet.hairlineWidth, alignItems: 'flex-end'},
+  sendInput: {flex: 1, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 10, color: C.ink, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, maxHeight: 120},
+  sendBtn: {backgroundColor: C.accent, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 11},
+  sendBtnTxt: {color: '#2a1d0c', fontSize: 15, fontWeight: '700'},
 });

@@ -70,6 +70,7 @@ export default class OpterClient {
   }
 
   async startWork(resId) {
+    this.resId = resId;
     const payload = P.encodeStartWork({
       offId: this.logon.acdOffId,
       resId,
@@ -79,6 +80,22 @@ export default class OpterClient {
     const decoded = P.decodeSync(res.payload);
     this.lastDecoded = decoded;
     return {rutt: P.toRutt(decoded), decoded};
+  }
+
+  // ---- chatt ----
+  messages() {
+    return this.lastDecoded ? P.messageList(this.lastDecoded) : [];
+  }
+  async markRead(keys) {
+    if (!keys || !keys.length) return;
+    const res = await this.send(P.MessageType.Synchronize, P.encodeMarkRead(keys));
+    this.lastDecoded = P.decodeSync(res.payload);
+  }
+  async sendMessage(text) {
+    const payload = P.encodeSendMessage({resId: this.resId, vhcId: this.logon.vhcId, text});
+    const res = await this.send(P.MessageType.Synchronize, payload);
+    this.lastDecoded = P.decodeSync(res.payload);
+    return this.messages();
   }
 
   async disconnect() {
