@@ -33,7 +33,16 @@ jobs:
         run: |
           cd android
           chmod +x ./gradlew
-          ./gradlew assembleRelease --no-daemon
+          set +e
+          ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee /tmp/gradle.log
+          CODE=${PIPESTATUS[0]}
+          if [ "$CODE" != "0" ]; then
+            echo "::group::gradle-fail-tail"
+            grep -nE "FAILURE|What went wrong|> Task|error:|Error:|Exception|> A problem|Could not|ReactNativeKeyboardController|keyboard|ndk|cmake|C/C\+\+|Execution failed" /tmp/gradle.log | tail -60 | while IFS= read -r L; do echo "::error::$L"; done
+            tail -40 /tmp/gradle.log | while IFS= read -r L; do echo "::error::TAIL $L"; done
+            echo "::endgroup::"
+          fi
+          exit $CODE
 
       - name: Ladda upp APK:n (artefakt)
         uses: actions/upload-artifact@v4
