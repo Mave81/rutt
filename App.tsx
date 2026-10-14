@@ -8,7 +8,7 @@ import {
   View, StatusBar, StyleSheet, Text, TextInput, Pressable,
   FlatList, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform,
 } from 'react-native';
-import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
+import {SafeAreaProvider, SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 // @ts-ignore
 import OpterClient from './src/opter/OpterClient';
 // @ts-ignore
@@ -120,7 +120,7 @@ function AppInner(): React.JSX.Element {
   const title = step === 'login' ? 'Logga in mot Opter' : step === 'pick' ? 'Välj ditt namn' : (orders.stops.length ? 'Din dag' : demo ? 'Demo' : 'Dina jobb');
 
   return (
-    <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
+    <SafeAreaView style={s.safe} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <View style={s.head}><Text style={s.brand}>RUTT</Text><Text style={s.tag}>{title}</Text></View>
 
@@ -257,8 +257,9 @@ function ChatView({msgs, msgText, setMsgText, onSend}: any) {
     return m.received ? `${m.from || ''}${m.from ? ' · ' : ''}${d}${t}` : `${d}${t}`;
   };
   const data = [...msgs].reverse(); // nyast sist visuellt (inverted)
+  const insets = useSafeAreaInsets();
   return (
-    <KeyboardAvoidingView style={{flex: 1}} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={{flex: 1}} behavior="padding" keyboardVerticalOffset={0}>
       {msgs.length === 0 ? (
         <View style={{flex: 1, padding: 18}}><Text style={s.empty}>Inga meddelanden.</Text></View>
       ) : (
@@ -278,7 +279,7 @@ function ChatView({msgs, msgText, setMsgText, onSend}: any) {
           )}
         />
       )}
-      <View style={s.sendRow}>
+      <View style={[s.sendRow, {paddingBottom: 12 + insets.bottom}]}>
         <TextInput style={s.sendInput} value={msgText} onChangeText={setMsgText} placeholder="Skriv ett meddelande…" placeholderTextColor={C.dim} multiline />
         <Pressable style={s.sendBtn} onPress={onSend}><Text style={s.sendBtnTxt}>Skicka</Text></Pressable>
       </View>
