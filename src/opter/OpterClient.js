@@ -82,6 +82,12 @@ export default class OpterClient {
     return {rutt: P.toRutt(decoded), decoded};
   }
 
+  // Hämta färsk data (jobb + chatt) – används vid server-push och periodiskt.
+  async poll() {
+    await this.syncRef();
+    return {rutt: P.toRutt(this.lastDecoded), msgs: this.messages()};
+  }
+
   // ---- chatt ----
   messages() {
     return this.lastDecoded ? P.messageList(this.lastDecoded) : [];

@@ -3,13 +3,12 @@
  * Logga in mot Opter → välj namn → jobb hämtas → optimerad plan + lastplan.
  * (Kör-läge och statusar tillbaka till Opter kommer härnäst.)
  */
-import React, {useMemo, useState} from 'react';
+import React, {useMemo, useState, useEffect} from 'react';
 import {
   View, StatusBar, StyleSheet, Text, TextInput, Pressable,
-  FlatList, ActivityIndicator, ScrollView,
+  FlatList, ActivityIndicator, ScrollView, Keyboard,
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
-import {KeyboardProvider, KeyboardAvoidingView} from 'react-native-keyboard-controller';
 // @ts-ignore
 import OpterClient from './src/opter/OpterClient';
 // @ts-ignore
@@ -42,11 +41,9 @@ const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.g
 
 export default function App(): React.JSX.Element {
   return (
-    <KeyboardProvider>
-      <SafeAreaProvider>
-        <AppInner />
-      </SafeAreaProvider>
-    </KeyboardProvider>
+    <SafeAreaProvider>
+      <AppInner />
+    </SafeAreaProvider>
   );
 }
 
@@ -119,6 +116,35 @@ function AppInner(): React.JSX.Element {
     setMsgText('');
     try { const m = await client.sendMessage(t); setMsgs(m); } catch (e: any) { setErr(String(e?.message || e)); }
   }
+
+  // Live-uppdatering: servern säger till (StartServerInitiatedSync) när nåt ändrats
+  // → hämta färska jobb + chatt direkt. Även en lugn backup-poll var 30:e sek.
+  useEffect(() => {
+    if (step !== 'route') return;
+    let alive = true;
+    async function refresh() {
+      try {
+        const {rutt, msgs: fresh} = await client.poll();
+        if (!alive) return;
+        if (rutt && rutt.stops && rutt.stops.length) setOrders(rutt);
+        setMsgs(fresh);
+      } catch (e) {}
+    }
+    client.onPush = refresh;
+    const iv = setInterval(refresh, 30000);
+    return () => { alive = false; client.onPush = null; clearInterval(iv); };
+  }, [step]);
+
+  // Läskvitton på automatik: så fort chatten är öppen och det finns olästa
+  // mottagna meddelanden markeras de som lästa mot Opter.
+  useEffect(() => {
+    if (tab !== 'chat' || step !== 'route') return;
+    const toRead = msgs.filter(m => m.received && !m.confirmed).map(m => m.key);
+    if (!toRead.length) return;
+    (async () => {
+      try { await client.markRead(toRead); setMsgs(client.messages()); } catch (e) {}
+    })();
+  }, [tab, msgs, step]);
 
   const title = step === 'login' ? 'Logga in mot Opter' : step === 'pick' ? 'Välj ditt namn' : (orders.stops.length ? 'Din dag' : demo ? 'Demo' : 'Dina jobb');
 
@@ -261,8 +287,19 @@ function ChatView({msgs, msgText, setMsgText, onSend}: any) {
   };
   const data = [...msgs].reverse(); // nyast sist visuellt (inverted)
   const insets = useSafeAreaInsets();
+  // Lyft hela chatten över tangentbordet via RN:s egna Keyboard-event
+  // (funkar med edge-to-edge utan native-beroende).
+  const [kb, setKb] = useState(0);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', e => setKb(e.endCoordinates?.height || 0));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKb(0));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
+  // endCoordinates.height mäts från skärmens botten till tangentbordets topp,
+  // så lyft med hela höjden (att dra av navbar riskerar att gömma rutan igen).
+  const lift = kb;
   return (
-    <KeyboardAvoidingView style={{flex: 1}} behavior="padding" keyboardVerticalOffset={0}>
+    <View style={{flex: 1, paddingBottom: lift}}>
       {msgs.length === 0 ? (
         <View style={{flex: 1, padding: 18}}><Text style={s.empty}>Inga meddelanden.</Text></View>
       ) : (
@@ -271,22 +308,26 @@ function ChatView({msgs, msgText, setMsgText, onSend}: any) {
           contentContainerStyle={{padding: 14, paddingTop: 18}}
           data={data}
           inverted
+          keyboardShouldPersistTaps="handled"
           keyExtractor={(_, i) => String(i)}
           renderItem={({item}) => (
             <View style={[s.bubbleWrap, item.received ? s.bwL : s.bwR]}>
               <View style={[s.bubble, item.received ? s.bubbleIn : s.bubbleOut]}>
                 <Text style={s.bubbleTxt}>{item.text}</Text>
               </View>
-              <Text style={[s.bubbleStamp, item.received ? s.stampL : s.stampR]}>{stamp(item)}</Text>
+              <Text style={[s.bubbleStamp, item.received ? s.stampL : s.stampR]}>
+                {stamp(item)}
+                {!item.received ? (item.confirmed ? '  ✓✓ Läst' : '  ✓ Skickat') : ''}
+              </Text>
             </View>
           )}
         />
       )}
-      <View style={[s.sendRow, {paddingBottom: 12 + insets.bottom}]}>
+      <View style={[s.sendRow, {paddingBottom: 12 + (kb > 0 ? 0 : insets.bottom)}]}>
         <TextInput style={s.sendInput} value={msgText} onChangeText={setMsgText} placeholder="Skriv ett meddelande…" placeholderTextColor={C.dim} multiline />
         <Pressable style={s.sendBtn} onPress={onSend}><Text style={s.sendBtnTxt}>Skicka</Text></Pressable>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
