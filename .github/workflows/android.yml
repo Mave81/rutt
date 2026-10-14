@@ -45,12 +45,20 @@ jobs:
       # Publicera APK:n till grenen "apk" så den kan hämtas via github.com
       - name: Publicera APK till apk-grenen
         run: |
+          set +e
           cp android/app/build/outputs/apk/debug/app-debug.apk /tmp/RUTT-debug.apk
+          ls -la /tmp/RUTT-debug.apk
           git config user.email "actions@github.com"
           git config user.name "github-actions"
-          git checkout --orphan apk
-          git rm -rf --cached . >/dev/null 2>&1 || true
-          cp /tmp/RUTT-debug.apk RUTT-debug.apk
-          git add -f RUTT-debug.apk
-          git commit -q -m "RUTT debug APK (bygge ${{ github.run_number }}) [skip ci]"
-          git push -f origin apk
+          OUT=$( {
+            echo "--- checkout orphan ---"; git checkout --orphan apk 2>&1
+            echo "--- rm cached ---";       git rm -rf --cached . 2>&1 | tail -1
+            cp /tmp/RUTT-debug.apk RUTT-debug.apk
+            echo "--- add ---";             git add -f RUTT-debug.apk 2>&1
+            echo "--- commit ---";          git commit -m "RUTT APK ${{ github.run_number }} [skip ci]" 2>&1 | tail -2
+            echo "--- push ---";            git push -f origin apk 2>&1
+          } )
+          CODE=$?
+          echo "$OUT"
+          echo "$OUT" | while IFS= read -r l; do [ -n "$l" ] && echo "::error::$l"; done
+          exit $CODE
