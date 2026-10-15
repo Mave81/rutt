@@ -95,7 +95,8 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   const [sms, setSms] = useState<any>(null);
   const [more, setMore] = useState<{st: any; cid: string} | null>(null);
   const [fullInfo, setFullInfo] = useState<Record<string, boolean>>({});
-  const [peek, setPeek] = useState(false); // visa planen fast bilen rullar
+  const [peek, setPeek] = useState(false);
+  const [planned, setPlanned] = useState<any>(null); // order för senare dag, visas som kort i ett blad // visa planen fast bilen rullar
   const now = Date.now();
   const bottom = useSafeAreaInsets().bottom + 24;
 
@@ -171,7 +172,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   }
 
   // ---- Stoppkortet ----
-  const heroCard = (item: Row) => {
+  const heroCard = (item: Row, planned?: boolean) => {
     const {st, kind, cid, plan} = item;
     const c = cargo[cid] || {};
     const pickup = kind === 'pickup';
@@ -196,12 +197,12 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
             <Bi n={pickup ? 'box-seam-fill' : 'check-circle-fill'} size={12} color={pickup ? C.accentInk : C.accent2} />
             <Text style={[o.verbTxt, {color: pickup ? C.accentInk : C.accent2}]}>{pickup ? 'HÄMTA' : 'LOSSA'}</Text>
           </View>
-          <Text style={o.num}>{focus ? 'Valt stopp' : `Nästa · ${rows.length} kvar`}</Text>
+          <Text style={o.num}>{planned ? ['Planerad', whenText(st.tEarliest || st.tLatest)].filter(Boolean).join(' · ') : focus ? 'Valt stopp' : `Nästa · ${rows.length} kvar`}</Text>
           {!!late && <View style={o.lateTag}><Text style={o.lateTxt}>{late} min sen</Text></View>}
           <View style={{flex: 1}} />
-          <Pressable hitSlop={10} style={o.moreBtn} onPress={() => setMore({st, cid})}>
+          {!planned && <Pressable hitSlop={10} style={o.moreBtn} onPress={() => setMore({st, cid})}>
             <Bi n="three-dots" size={16} color={C.dim} />{extrasN ? <Text style={o.moreN}>{extrasN}</Text> : null}
-          </Pressable>
+          </Pressable>}
         </View>
 
         <Text style={o.who} numberOfLines={2}>{st.who || '—'}</Text>
@@ -292,8 +293,8 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
           <Bi n="cursor-fill" size={16} color={C.ink} />
           <Text style={o.navTxt}>Navigera{plan && plan.leg && plan.leg.km ? `  ·  ${plan.leg.km.toFixed(1)} km` : ''}</Text>
         </Pressable>
-        <Slider key={kind + cid} label={pickup ? 'Dra för Lastad' : 'Dra för Lossad'} tone={pickup ? 'go' : 'ok'} onDone={() => { setFocus(null); if (pickup) onLoaded(st); else onUnload(st); }} />
-        {focus ? (
+        {!planned && <Slider key={kind + cid} label={pickup ? 'Dra för Lastad' : 'Dra för Lossad'} tone={pickup ? 'go' : 'ok'} onDone={() => { setFocus(null); if (pickup) onLoaded(st); else onUnload(st); }} />}
+        {focus && !planned ? (
           <Pressable hitSlop={10} onPress={() => setFocus(null)} style={{alignSelf: 'center', marginTop: 12}}>
             <Text style={o.link}>Tillbaka till nästa i ordningen</Text>
           </Pressable>
@@ -355,14 +356,15 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
             <View style={{marginTop: 18}}>
               <View style={o.restHead}><Text style={o.restTitle}>Senare dagar</Text><Text style={o.restSum}>{later.length}</Text></View>
               {later.map((st: any, i: number) => (
-                <View key={i} style={[o.row, {opacity: 0.8}]}>
+                <Pressable key={i} style={o.row} onPress={() => setPlanned(st)}>
                   <View style={[o.rowIco, {backgroundColor: C.panel2}]}><Bi n="calendar-event" size={14} color={C.dim} /></View>
                   <View style={{flex: 1, minWidth: 0}}>
                     <Text style={o.rowWho} numberOfLines={1}>{st.who || '—'}</Text>
                     <Text style={o.rowMeta} numberOfLines={1}>{st.pickup ? 'Hämta' : 'Lämna'} · {[st.adr, st.area].filter(Boolean).join(', ')}</Text>
                   </View>
                   <Text style={o.rowEta}>{whenText(st.tEarliest || st.tLatest)}</Text>
-                </View>
+                  <Bi n="chevron-right" size={14} color={C.faint} />
+                </Pressable>
               ))}
             </View>
           ) : undefined
@@ -378,6 +380,10 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
       />
       <CallSheet st={callStop} onClose={() => setCallStop(null)} />
       <SmsSheet to={sms} onClose={() => setSms(null)} />
+      <Sheet open={!!planned} onClose={() => setPlanned(null)} scroll>
+        {planned ? heroCard({kind: planned.pickup ? 'pickup' : 'drop', st: planned, cid: planned.pickup || planned.drop, plan: null}, true) : null}
+        {planned ? <Text style={o.plannedNote}>Syns i planen {whenText(planned.tEarliest || planned.tLatest) || 'den dagen'}. Ring, SMS och Navigera fungerar redan nu.</Text> : null}
+      </Sheet>
     </View>
   );
 }
@@ -448,6 +454,7 @@ const o = themed(() => StyleSheet.create({
   rowEta: {color: C.dim, fontSize: 14, fontWeight: '800'},
   allDoneBox: {alignItems: 'center', gap: 10, marginTop: 40},
   allDone: {color: C.dim, fontSize: 15, textAlign: 'center'},
+  plannedNote: {color: C.faint, fontSize: 12, textAlign: 'center', marginTop: 4, marginBottom: 6, lineHeight: 17},
   backDrive: {flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'center', paddingVertical: 8, marginBottom: 4},
   backDriveTxt: {color: C.dim, fontSize: 13, fontWeight: '700'},
   // SMS
