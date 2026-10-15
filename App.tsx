@@ -6,8 +6,9 @@
 import React, {useMemo, useState, useEffect} from 'react';
 import {
   View, StatusBar, StyleSheet, Text, TextInput, Pressable,
-  FlatList, ActivityIndicator, ScrollView, Keyboard, Modal, PanResponder,
+  FlatList, ActivityIndicator, ScrollView, Keyboard, Modal, PanResponder, Image,
 } from 'react-native';
+import {launchCamera, launchImageLibrary} from 'react-native-image-picker';
 import {SafeAreaProvider, SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 // @ts-ignore
 import OpterClient from './src/opter/OpterClient';
@@ -21,7 +22,7 @@ const C = {
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '14 okt · status + POD';
+const BUILD = '15 okt · lastad/lossad + foto';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 // Avvikelseorsaker för "extra tid / tidsavvikelse" vid leverans.
@@ -149,7 +150,7 @@ function AppInner(): React.JSX.Element {
   function savePod(st: any, data: any) {
     const cid = st.drop || st.pickup || '';
     setPod(p => ({...p, [cid]: data}));
-    setStat(s => ({...s, [stopKey(st)]: 'Levererad'}));
+    setStat(s => ({...s, [stopKey(st)]: 'Lossad'}));
     setStopIx(null);
   }
 
@@ -242,7 +243,7 @@ function AppInner(): React.JSX.Element {
             </Pressable>
           )}
 
-          {tab !== 'chat' && !orders.stops.length && (
+          {tab !== 'chat' && !orders.stops.length && !demo && (
             <View style={s.emptyBox}>
               <Text style={s.empty}>Inga aktiva jobb just nu.</Text>
               {!demo && <Pressable style={s.ghost} onPress={() => setDemo(true)}><Text style={s.ghostTxt}>Visa demo så du ser planen</Text></Pressable>}
@@ -410,32 +411,55 @@ function Segments({stroke}: {stroke: Pt[]}) {
     const len = Math.hypot(dx, dy) || 1;
     const ang = (Math.atan2(dy, dx) * 180) / Math.PI;
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-    out.push(<View key={i} style={{position: 'absolute', left: mx - len / 2, top: my - 1.4, width: len, height: 2.8, borderRadius: 2, backgroundColor: C.ink, transform: [{rotate: `${ang}deg`}]}} />);
+    out.push(<View key={i} pointerEvents="none" style={{position: 'absolute', left: mx - len / 2 - 0.5, top: my - 1.5, width: len + 1, height: 3, borderRadius: 1.5, backgroundColor: C.ink, transform: [{rotate: `${ang}deg`}]}} />);
   }
   return <>{out}</>;
 }
-function SignaturePad({onChange}: {onChange: (has: boolean) => void}) {
+// Positionen räknas från sidkoordinater minus rutans egen position, så den blir
+// rätt även när fingret råkar hamna över ett redan ritat streck.
+function SignaturePad({onChange, onDrawing}: {onChange: (has: boolean) => void; onDrawing?: (d: boolean) => void}) {
   const [committed, setCommitted] = useState<Pt[][]>([]);
   const [curr, setCurr] = useState<Pt[]>([]);
   const ref = React.useRef<Pt[]>([]);
+  const origin = React.useRef({x: 0, y: 0});
+  const cb = React.useRef({onChange, onDrawing});
+  cb.current = {onChange, onDrawing};
+  const pt = (e: any) => ({x: e.nativeEvent.pageX - origin.current.x, y: e.nativeEvent.pageY - origin.current.y});
   const pan = React.useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: e => { const p = [{x: e.nativeEvent.locationX, y: e.nativeEvent.locationY}]; ref.current = p; setCurr(p); },
-      onPanResponderMove: e => {
-        const x = e.nativeEvent.locationX, y = e.nativeEvent.locationY;
-        const last = ref.current[ref.current.length - 1];
-        if (!last || Math.hypot(x - last.x, y - last.y) > 1.8) { const p = [...ref.current, {x, y}]; ref.current = p; setCurr(p); }
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true,
+      onPanResponderGrant: e => {
+        cb.current.onDrawing && cb.current.onDrawing(true);
+        // Exakt ursprung: sidposition minus position i rutan (barnen tar inga touchar).
+        const n = e.nativeEvent;
+        origin.current = {x: n.pageX - n.locationX, y: n.pageY - n.locationY};
+        const p = [{x: n.locationX, y: n.locationY}];
+        ref.current = p; setCurr(p);
       },
-      onPanResponderRelease: () => { if (ref.current.length > 1) { setCommitted(c => [...c, ref.current]); onChange(true); } ref.current = []; setCurr([]); },
+      onPanResponderMove: e => {
+        const q = pt(e);
+        const last = ref.current[ref.current.length - 1];
+        if (!last || Math.hypot(q.x - last.x, q.y - last.y) > 1.5) { const p = [...ref.current, q]; ref.current = p; setCurr(p); }
+      },
+      onPanResponderRelease: () => {
+        if (ref.current.length > 1) { const st = ref.current; setCommitted(c => [...c, st]); cb.current.onChange(true); }
+        ref.current = []; setCurr([]);
+        cb.current.onDrawing && cb.current.onDrawing(false);
+      },
+      onPanResponderTerminate: () => { ref.current = []; setCurr([]); cb.current.onDrawing && cb.current.onDrawing(false); },
     }),
   ).current;
   function clear() { setCommitted([]); setCurr([]); ref.current = []; onChange(false); }
   return (
     <View>
-      <View style={s.sigPad} {...pan.panHandlers}>
-        {committed.length === 0 && curr.length === 0 && <Text style={s.sigHint}>Skriv under här</Text>}
+      <View
+        collapsable={false}
+        style={s.sigPad}
+        {...pan.panHandlers}>
+        {committed.length === 0 && curr.length === 0 && <Text pointerEvents="none" style={s.sigHint}>Skriv under här</Text>}
         {committed.map((st, i) => <Segments key={i} stroke={st} />)}
         <Segments stroke={curr} />
       </View>
@@ -466,28 +490,56 @@ function WorkSheet({open, work, live, onClose, onPick}: any) {
   );
 }
 
-// ---- Stopp: status + POD ----
+// ---- Stopp: Lastad / Lossad + POD ----
+async function pickPhoto(fromCamera: boolean) {
+  const opts: any = {mediaType: 'photo', quality: 0.6, maxWidth: 1600, maxHeight: 1600, includeBase64: true, saveToPhotos: false};
+  const res: any = fromCamera ? await launchCamera(opts) : await launchImageLibrary({...opts, selectionLimit: 5});
+  if (!res || res.didCancel || res.errorCode) return [];
+  return (res.assets || []).filter((a: any) => a.uri).map((a: any) => ({uri: a.uri, b64: a.base64 || null, w: a.width, h: a.height}));
+}
+const MAX_PHOTOS = 6;
+
 function StopSheet({stop, live, onClose, onStatus, onPod}: any) {
   const [mode, setMode] = useState<'status' | 'pod'>('status');
   const [name, setName] = useState('');
   const [comment, setComment] = useState('');
   const [hasSig, setHasSig] = useState(false);
+  const [drawing, setDrawing] = useState(false);
   const [dev, setDev] = useState<string | null>(null);
   const [devMin, setDevMin] = useState<number | null>(null);
-  React.useEffect(() => { setMode('status'); setName(''); setComment(''); setHasSig(false); setDev(null); setDevMin(null); }, [stop]);
+  const [photos, setPhotos] = useState<any[]>([]);
+  React.useEffect(() => { setMode('status'); setName(''); setComment(''); setHasSig(false); setDev(null); setDevMin(null); setPhotos([]); }, [stop]);
   if (!stop) return null;
   const pickup = stop.verb === 'Hämta';
   const title = `${stop.verb} · ${stop.who || '—'}`;
   const sub = [stop.adr, stop.area].filter(Boolean).join(', ');
 
+  async function addPhoto(cam: boolean) {
+    try { const got = await pickPhoto(cam); if (got.length) setPhotos(p => [...p, ...got].slice(0, MAX_PHOTOS)); } catch (e) {}
+  }
+
   if (mode === 'pod') {
-    const canSave = hasSig || name.trim().length > 0;
     return (
-      <Sheet open onClose={onClose} title="Leverans – POD" sub={sub} scroll>
+      <Sheet open onClose={onClose} title="Lossad – kvittens" sub={sub} scroll scrollEnabled={!drawing}>
         <Text style={s.podLabel}>Namnteckning</Text>
-        <SignaturePad onChange={setHasSig} />
+        <SignaturePad onChange={setHasSig} onDrawing={setDrawing} />
         <Text style={s.podLabel}>Namnförtydligande</Text>
-        <TextInput style={s.input} value={name} onChangeText={setName} placeholder="Vem tog emot?" placeholderTextColor={C.dim} />
+        <TextInput style={s.input} value={name} onChangeText={setName} placeholder="Vem tog emot?" placeholderTextColor={C.dim} autoCapitalize="words" />
+
+        <Text style={s.podLabel}>Foto {photos.length ? `(${photos.length}/${MAX_PHOTOS})` : ''}</Text>
+        <View style={s.photoRow}>
+          {photos.map((p, i) => (
+            <Pressable key={i} onLongPress={() => setPhotos(ph => ph.filter((_, j) => j !== i))} style={s.photoBox}>
+              <Image source={{uri: p.uri}} style={s.photoImg} />
+              <Pressable style={s.photoX} onPress={() => setPhotos(ph => ph.filter((_, j) => j !== i))}><Text style={s.photoXTxt}>×</Text></Pressable>
+            </Pressable>
+          ))}
+          {photos.length < MAX_PHOTOS && (<>
+            <Pressable style={s.photoAdd} onPress={() => addPhoto(true)}><Text style={s.photoAddIco}>＋</Text><Text style={s.photoAddTxt}>Kamera</Text></Pressable>
+            <Pressable style={s.photoAdd} onPress={() => addPhoto(false)}><Text style={s.photoAddIco}>▦</Text><Text style={s.photoAddTxt}>Galleri</Text></Pressable>
+          </>)}
+        </View>
+
         <Text style={s.podLabel}>Avvikelse / extra tid (om något drog ut)</Text>
         <View style={s.chipsWrap}>
           {DEV_REASONS.map(r => (
@@ -497,8 +549,8 @@ function StopSheet({stop, live, onClose, onStatus, onPod}: any) {
           ))}
         </View>
         {dev && (
-          <View style={s.chipsWrap}>
-            {[15, 30, 45, 60].map(m => (
+          <View style={[s.chipsWrap, {marginTop: 8}]}>
+            {[15, 30, 45, 60, 90].map(m => (
               <Pressable key={m} style={[s.rChip, devMin === m && s.rChipOn]} onPress={() => setDevMin(devMin === m ? null : m)}>
                 <Text style={[s.rChipTxt, devMin === m && s.rChipTxtOn]}>+{m} min</Text>
               </Pressable>
@@ -508,10 +560,10 @@ function StopSheet({stop, live, onClose, onStatus, onPod}: any) {
         <Text style={s.podLabel}>Kommentar</Text>
         <TextInput style={[s.input, {minHeight: 60}]} value={comment} onChangeText={setComment} placeholder="Valfritt" placeholderTextColor={C.dim} multiline />
         {!live && <Text style={s.sheetNote}>Sparas i appen nu. Sändning till Opter slås på efter test mot ett riktigt jobb.</Text>}
-        <View style={{flexDirection: 'row', gap: 10, marginTop: 14}}>
-          <Pressable style={[s.sheetBtn, {flex: 1}]} onPress={() => setMode('status')}><Text style={s.sheetBtnTxt}>Tillbaka</Text></Pressable>
-          <Pressable style={[s.primaryBtn, {flex: 1.4, opacity: canSave ? 1 : 0.4}]} disabled={!canSave} onPress={() => onPod(stop, {name, comment, dev, devMin, hasSig, at: new Date()})}>
-            <Text style={s.primaryBtnTxt}>Spara leverans</Text>
+        <View style={{flexDirection: 'row', gap: 10, marginTop: 14, marginBottom: 6}}>
+          <Pressable style={[s.sheetBtn, {flex: 1, marginTop: 0, alignItems: 'center'}]} onPress={() => setMode('status')}><Text style={s.sheetBtnTxt}>Tillbaka</Text></Pressable>
+          <Pressable style={[s.primaryBtn, {flex: 1.6, marginTop: 0}]} onPress={() => onPod(stop, {name, comment, dev, devMin, hasSig, photos, at: new Date()})}>
+            <Text style={s.primaryBtnTxt}>Klar – Lossad ✓</Text>
           </Pressable>
         </View>
       </Sheet>
@@ -520,33 +572,34 @@ function StopSheet({stop, live, onClose, onStatus, onPod}: any) {
 
   return (
     <Sheet open onClose={onClose} title={title} sub={sub}>
-      {pickup ? (<>
-        <Pressable style={s.sheetBtn} onPress={() => onStatus(stop, 'Lastar')}><Text style={s.sheetBtnTxt}>Lastning påbörjad</Text></Pressable>
-        <Pressable style={s.sheetBtn} onPress={() => onStatus(stop, 'Lastat')}><Text style={s.sheetBtnTxt}>Lastat / klar här</Text></Pressable>
-      </>) : (<>
-        <Pressable style={s.sheetBtn} onPress={() => onStatus(stop, 'Framme')}><Text style={s.sheetBtnTxt}>Framme hos mottagare</Text></Pressable>
-        <Pressable style={s.sheetBtn} onPress={() => onStatus(stop, 'Lossar')}><Text style={s.sheetBtnTxt}>Lossning påbörjad</Text></Pressable>
-        <Pressable style={s.primaryBtn} onPress={() => setMode('pod')}><Text style={s.primaryBtnTxt}>Signera leverans (POD) ›</Text></Pressable>
-      </>)}
-      <View style={s.sheetDiv} />
-      <Pressable style={s.sheetBtn} onPress={() => onStatus(stop, 'Ankom terminal')}><Text style={s.sheetBtnTxt}>Ankom terminal</Text></Pressable>
-      <Pressable style={s.sheetBtn} onPress={() => onStatus(stop, 'Avgick terminal')}><Text style={s.sheetBtnTxt}>Avgick terminal</Text></Pressable>
-      {!live && <Text style={s.sheetNote}>Status sparas i appen nu. Sändning till Opter slås på efter test mot ett riktigt jobb.</Text>}
+      {pickup
+        ? <Pressable style={s.bigBtn} onPress={() => onStatus(stop, 'Lastad')}><Text style={s.bigBtnTxt}>Lastad</Text><Text style={s.bigBtnSub}>Godset är på bilen</Text></Pressable>
+        : <Pressable style={s.bigBtn} onPress={() => setMode('pod')}><Text style={s.bigBtnTxt}>Lossad</Text><Text style={s.bigBtnSub}>Signatur, namn, foto, avvikelse</Text></Pressable>}
+      {!live && <Text style={s.sheetNote}>Sparas i appen nu. Sändning till Opter slås på efter test mot ett riktigt jobb.</Text>}
     </Sheet>
   );
 }
 
-// Generisk bottensheet
-function Sheet({open, onClose, title, sub, scroll, children}: any) {
+// Generisk bottensheet – lyfts över tangentbordet (samma metod som chatten)
+function Sheet({open, onClose, title, sub, scroll, scrollEnabled = true, children}: any) {
   const insets = useSafeAreaInsets();
+  const [kb, setKb] = useState(0);
+  useEffect(() => {
+    const a = Keyboard.addListener('keyboardDidShow', e => setKb(e.endCoordinates?.height || 0));
+    const b = Keyboard.addListener('keyboardDidHide', () => setKb(0));
+    return () => { a.remove(); b.remove(); };
+  }, []);
+  const lift = kb > 0 ? kb + 64 : 0;
   return (
     <Modal visible={!!open} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <Pressable style={s.overlay} onPress={onClose} />
-      <View style={[s.sheet, {paddingBottom: 16 + insets.bottom}]}>
+      <View style={[s.sheet, {paddingBottom: (kb > 0 ? 12 : 16 + insets.bottom), bottom: lift, maxHeight: kb > 0 ? undefined : '88%'}]}>
         <View style={s.sheetHandle} />
         <Text style={s.sheetTitle}>{title}</Text>
         {sub ? <Text style={s.sheetSub}>{sub}</Text> : null}
-        {scroll ? <ScrollView style={{maxHeight: 460}} keyboardShouldPersistTaps="handled">{children}</ScrollView> : <View style={{marginTop: 6}}>{children}</View>}
+        {scroll
+          ? <ScrollView style={{flexShrink: 1}} scrollEnabled={scrollEnabled} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>{children}</ScrollView>
+          : <View style={{marginTop: 6}}>{children}</View>}
       </View>
     </Modal>
   );
@@ -644,4 +697,19 @@ const s = StyleSheet.create({
   rChipOn: {backgroundColor: C.accent, borderColor: C.accent},
   rChipTxt: {color: C.dim, fontSize: 13, fontWeight: '600'},
   rChipTxtOn: {color: '#2a1d0c'},
+
+  // Stor statusknapp (Lastad / Lossad)
+  bigBtn: {backgroundColor: C.accent, borderRadius: 16, paddingVertical: 20, paddingHorizontal: 20, marginTop: 14},
+  bigBtnTxt: {color: '#2a1d0c', fontSize: 22, fontWeight: '800'},
+  bigBtnSub: {color: '#4a3517', fontSize: 13, marginTop: 3, fontWeight: '600'},
+
+  // Foto
+  photoRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 10},
+  photoBox: {width: 84, height: 84, borderRadius: 12, overflow: 'hidden', backgroundColor: C.panel2},
+  photoImg: {width: '100%', height: '100%'},
+  photoX: {position: 'absolute', top: 4, right: 4, width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(20,18,16,0.8)', alignItems: 'center', justifyContent: 'center'},
+  photoXTxt: {color: C.ink, fontSize: 16, lineHeight: 18, fontWeight: '700'},
+  photoAdd: {width: 84, height: 84, borderRadius: 12, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, alignItems: 'center', justifyContent: 'center'},
+  photoAddIco: {color: C.accent, fontSize: 22, fontWeight: '700'},
+  photoAddTxt: {color: C.dim, fontSize: 12, marginTop: 2, fontWeight: '600'},
 });
