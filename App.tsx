@@ -12,7 +12,7 @@ import {SafeAreaProvider, SafeAreaView, useSafeAreaInsets} from 'react-native-sa
 import {C, themed, hhmm, isFutureDay, applyTheme} from './src/ui/theme';
 import {Bi} from './src/ui/Bi';
 import {Sheet} from './src/ui/parts';
-import OrdersView, {DoneView} from './src/ui/OrdersView';
+import OrdersView, {DoneView, setNavApp, NavApp} from './src/ui/OrdersView';
 import SignScreen from './src/ui/SignScreen';
 import NewOrdersView from './src/ui/NewOrdersView';
 import LoadView from './src/ui/LoadView';
@@ -29,7 +29,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '15 okt · lastplan 3×6';
+const BUILD = '15 okt · lasta tidigare + navigera';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -136,6 +136,9 @@ function AppInner(): React.JSX.Element {
   if (C.mode !== mode) applyTheme(mode);
   useEffect(() => { loadJSON('rutt.theme', 'auto').then((v: any) => { if (v === 'dark' || v === 'light' || v === 'auto') setThemePref(v); }); }, []);
   function pickTheme(v: 'auto' | 'dark' | 'light') { setThemePref(v); saveJSON('rutt.theme', v); }
+  const [navApp, setNavAppState] = useState<NavApp>('google');
+  useEffect(() => { loadJSON('rutt.nav', 'google').then((v: any) => { if (v === 'waze' || v === 'google') setNavAppState(v); }); }, []);
+  function pickNav(v: NavApp) { setNavAppState(v); setNavApp(v); }
   // Statusraden: inloggad mot Opter? GPS-tjänsten (med fast notis) igång? Hastighet för kör-läget.
   const [online, setOnline] = useState<'ja' | 'nej' | 'åter'>('nej');
   const [gpsStat, setGpsStat] = useState<{running: boolean; notif: boolean; locOn: boolean} | null>(null);
@@ -702,6 +705,15 @@ function AppInner(): React.JSX.Element {
             <Pressable key={k} style={[s.segBtn, themePref === k && s.segOn]} onPress={() => pickTheme(k)}>
               <Bi n={icon} size={15} color={themePref === k ? C.onAccent : C.dim} />
               <Text style={[s.segTxt, themePref === k && {color: C.onAccent}]}>{label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <Text style={s.podLabel}>Navigera med</Text>
+        <View style={s.seg}>
+          {([['google', 'Google Maps', 'signpost-2-fill'], ['waze', 'Waze', 'cursor-fill']] as const).map(([k, label, icon]) => (
+            <Pressable key={k} style={[s.segBtn, navApp === k && s.segOn]} onPress={() => pickNav(k)}>
+              <Bi n={icon} size={15} color={navApp === k ? C.onAccent : C.dim} />
+              <Text style={[s.segTxt, navApp === k && {color: C.onAccent}]}>{label}</Text>
             </Pressable>
           ))}
         </View>

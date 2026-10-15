@@ -14,16 +14,65 @@ import {Sheet} from './parts';
 import {MoreSheet} from './OrderExtras';
 import {Bi} from './Bi';
 import Slider from './Slider';
+import {loadJSON, saveJSON} from '../store';
 
 type Row = {kind: 'pickup' | 'drop'; st: any; cid: string; plan: any; dropLater?: {eta: Date | null; area: string} | null};
 
-export function navigate(st: any) {
-  const q = st.lat != null && st.lng != null ? `${st.lat},${st.lng}` : encodeURIComponent([st.adr, st.zip, st.area].filter(Boolean).join(', '));
-  Linking.openURL(`google.navigation:q=${q}`).catch(() => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${q}`).catch(() => {}));
+// ---- Navigering: Google Maps eller Waze (val under Inställningar), eller bara visa platsen på kartan ----
+export type NavApp = 'google' | 'waze';
+let NAV: NavApp = 'google';
+loadJSON('rutt.nav', 'google').then((v: any) => { if (v === 'waze' || v === 'google') NAV = v; });
+export function setNavApp(v: NavApp) { NAV = v; saveJSON('rutt.nav', v); }
+export const navAppName = (v: NavApp = NAV) => (v === 'waze' ? 'Waze' : 'Google Maps');
+export function navigate(st: any, app: NavApp | 'map' = NAV) {
+  const geo = st.lat != null && st.lng != null;
+  const ll = geo ? `${st.lat},${st.lng}` : '';
+  const q = encodeURIComponent([st.adr, st.zip, st.area].filter(Boolean).join(', '));
+  const web = `https://www.google.com/maps/dir/?api=1&destination=${geo ? ll : q}`;
+  if (app === 'waze') { Linking.openURL(geo ? `https://waze.com/ul?ll=${ll}&navigate=yes` : `https://waze.com/ul?q=${q}&navigate=yes`).catch(() => Linking.openURL(web).catch(() => {})); return; }
+  if (app === 'map') { Linking.openURL(geo ? `geo:${ll}?q=${ll}(${encodeURIComponent(st.who || 'Stopp')})` : `geo:0,0?q=${q}`).catch(() => Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${geo ? ll : q}`).catch(() => {})); return; }
+  Linking.openURL(`google.navigation:q=${geo ? ll : q}`).catch(() => Linking.openURL(web).catch(() => {}));
 }
 export const dial = (num: string) => Linking.openURL(`tel:${num}`).catch(() => {});
 // Bara mobilnummer kan ta emot SMS (07x / +467x / 00467x).
 export const isMobile = (num: string) => /^(07|\+467|00467|467)\d{7,8}$/.test(String(num || '').replace(/[^0-9+]/g, ''));
+// Navigera-knappen: hela knappen startar din navigeringsapp, pilen till höger ger fler val.
+function NavButton({st, leg, onMore, small}: {st: any; leg?: any; onMore: () => void; small?: boolean}) {
+  const sub = [leg && leg.km ? `${leg.km.toFixed(1)} km` : '', leg && leg.min ? `ca ${Math.round(leg.min)} min` : '', navAppName()].filter(Boolean).join(' · ');
+  return (
+    <View style={[o.nav, small && {marginTop: 10}]}>
+      <Pressable style={o.navMain} onPress={() => navigate(st)} android_ripple={{color: C.edge}}>
+        <View style={[o.navIco, small && {width: 32, height: 32, borderRadius: 16}]}><Bi n="cursor-fill" size={small ? 14 : 17} color={C.onAccent} /></View>
+        <View style={{flex: 1, minWidth: 0}}>
+          <Text style={[o.navTxt, small && {fontSize: 14}]}>Navigera</Text>
+          <Text style={o.navSub} numberOfLines={1}>{sub}</Text>
+        </View>
+      </Pressable>
+      <Pressable style={o.navMore} onPress={onMore} hitSlop={6} android_ripple={{color: C.edge}}>
+        <Bi n="chevron-down" size={16} color={C.dim} />
+      </Pressable>
+    </View>
+  );
+}
+function NavSheet({st, onClose}: {st: any; onClose: () => void}) {
+  const go = (a: NavApp | 'map') => { onClose(); if (st) navigate(st, a); };
+  const Row = ({a, icon, t, sub}: {a: NavApp | 'map'; icon: any; t: string; sub: string}) => (
+    <Pressable style={o.callRow} onPress={() => go(a)}>
+      <View style={[o.navIco, {backgroundColor: C.panel}]}><Bi n={icon} size={16} color={C.ink} /></View>
+      <View style={{flex: 1}}><Text style={o.callNum}>{t}</Text><Text style={o.callLabel}>{sub}</Text></View>
+      <Bi n="chevron-right" size={14} color={C.faint} />
+    </Pressable>
+  );
+  return (
+    <Sheet open={!!st} onClose={onClose} title="Navigera" sub={st ? [st.who, [st.adr, st.area].filter(Boolean).join(', ')].filter(Boolean).join(' · ') : ''}>
+      <Row a="google" icon="signpost-2-fill" t="Google Maps" sub="Vägbeskrivning med röst" />
+      <Row a="waze" icon="cursor-fill" t="Waze" sub="Vägbeskrivning med trafik och kameror" />
+      <Row a="map" icon="geo-alt-fill" t="Visa på kartan" sub="Bara platsen, ingen vägbeskrivning" />
+      <Text style={o.plannedNote}>Vilken app knappen startar direkt väljer du under Inställningar.</Text>
+    </Sheet>
+  );
+}
+
 const GENERIC = /^(nummer|kund|referens|avsändare|mottagare|växel|kontor)/i;
 function Face({label}: {label: string}) {
   return <View style={o.avatar}>{GENERIC.test(String(label || '')) ? <Bi n="building" size={15} color={C.people} /> : <Text style={o.avatarTxt}>{initials(label)}</Text>}</View>;
@@ -103,6 +152,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   const [more, setMore] = useState<{st: any; cid: string} | null>(null);
   const [fullInfo, setFullInfo] = useState<Record<string, boolean>>({});
   const [peek, setPeek] = useState(false);
+  const [navFor, setNavFor] = useState<any>(null);
   const [planned, setPlanned] = useState<any>(null); // order för senare dag, visas som kort i ett blad // visa planen fast bilen rullar
   const now = Date.now();
   const bottom = useSafeAreaInsets().bottom + 24;
@@ -223,6 +273,10 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     const goods = [c.pal ? `${c.pal} pall` : '', c.kg ? `${c.kg} kg` : '', /^order\b/i.test(gName) ? '' : gName].filter(Boolean).join(' · ');
     const orderLine = [any.orderNo && `Order ${any.orderNo}`, any.freightBill && any.freightBill !== any.orderNo && `Fraktsedel ${any.freightBill}`, any.service].filter(Boolean).join('  ·  ');
     const notes = uniqNotes([g.pick && g.pick.adrMsg, g.drop && g.drop.adrMsg, any.info], goods);
+    // Du bestämmer: går det att lasta tidigare än planerat drar du bara Lastad.
+    const os = ost[g.cid] || {};
+    const P = g.pick;
+    const loaded = !P || !!os.loadedAt || !!(P.live && ((P.live.loadSt && P.live.curId === P.live.loadSt.id) || P.live.serverDone));
     const leg = (st: any, pickup: boolean) => st && (
       <View style={o.leg}>
         <View style={o.headRow}>
@@ -231,13 +285,18 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
             <Text style={[o.verbTxt, {color: pickup ? C.accentInk : C.accent2}]}>{pickup ? 'HÄMTA' : 'LÄMNA'}</Text>
           </View>
           <Text style={o.legWhen}>{when(st)}</Text>
-          <View style={{flex: 1}} />
-          <Pressable hitSlop={8} style={o.legNav} onPress={() => navigate(st)}><Bi n="cursor-fill" size={15} color={C.ink} /></Pressable>
         </View>
         <Text style={o.legWho} numberOfLines={2}>{st.who || '—'}</Text>
         <View style={o.adrRow}><Bi n="geo-alt-fill" size={13} color={C.faint} /><Text style={o.adr} numberOfLines={2}>{[st.adr, st.area].filter(Boolean).join(', ')}</Text></View>
         {!!st.code && <View style={o.codeChip}><Bi n="key-fill" size={13} color={C.onAccent} /><Text style={o.codeTxt}>Portkod {st.code}</Text></View>}
         {peopleRows(st)}
+        <NavButton st={st} small onMore={() => { setPlanned(null); setNavFor(st); }} />
+        {pickup ? (loaded
+          ? <View style={o.syncRow}><Bi n="check-circle-fill" size={14} color={C.accent2} /><Text style={[o.sync, {color: C.accent2}]}>Lastad{os.loadedAt ? ` ${hhmm(new Date(os.loadedAt))}` : ''} – godset är ombord</Text></View>
+          : <Slider key={'p' + g.cid} label="Dra för Lastad" tone="go" onDone={() => { setPlanned(null); onLoaded(st); }} />)
+        : (loaded
+          ? <Slider key={'d' + g.cid} label="Dra för Lossad" tone="ok" onDone={() => { setPlanned(null); onUnload(st); }} />
+          : <Text style={o.meta}>Lossas när godset är lastat.</Text>)}
       </View>
     );
     return (
@@ -351,10 +410,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
 
         {peopleRows(st)}
 
-        <Pressable style={o.navBtn} onPress={() => navigate(st)}>
-          <Bi n="cursor-fill" size={16} color={C.ink} />
-          <Text style={o.navTxt}>Navigera{plan && plan.leg && plan.leg.km ? `  ·  ${plan.leg.km.toFixed(1)} km` : ''}</Text>
-        </Pressable>
+        <NavButton st={st} leg={plan && plan.leg} onMore={() => setNavFor(st)} />
         {!planned && <Slider key={kind + cid} label={pickup ? 'Dra för Lastad' : 'Dra för Lossad'} tone={pickup ? 'go' : 'ok'} onDone={() => { setFocus(null); if (pickup) onLoaded(st); else onUnload(st); }} />}
         {focus && !planned ? (
           <Pressable hitSlop={10} onPress={() => setFocus(null)} style={{alignSelf: 'center', marginTop: 12}}>
@@ -441,9 +497,10 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
       />
       <CallSheet st={callStop} onClose={() => setCallStop(null)} />
       <SmsSheet to={sms} onClose={() => setSms(null)} />
+      <NavSheet st={navFor} onClose={() => setNavFor(null)} />
       <Sheet open={!!planned} onClose={() => setPlanned(null)} scroll>
         {planned ? plannedCard(planned) : null}
-        {planned ? <Text style={o.plannedNote}>Syns i planen {when(planned.pick || planned.drop) || 'den dagen'}. Ring, SMS och Navigera fungerar redan nu.</Text> : null}
+        {planned ? <Text style={o.plannedNote}>Planerad {when(planned.pick || planned.drop) || 'senare'} – men det är du som bestämmer. Kan du lasta tidigare drar du bara Lastad.</Text> : null}
       </Sheet>
     </View>
   );
@@ -502,8 +559,12 @@ const o = themed(() => StyleSheet.create({
   pName: {color: C.ink, fontSize: 14.5, fontWeight: '700'},
   pNum: {color: C.faint, fontSize: 12, marginTop: 1},
   pBtn: {width: 42, height: 42, borderRadius: 21, backgroundColor: C.peopleSoft, alignItems: 'center', justifyContent: 'center'},
-  navBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 16, backgroundColor: C.panel2, borderRadius: 10, paddingVertical: 13},
-  navTxt: {color: C.ink, fontSize: 15, fontWeight: '700'},
+  nav: {flexDirection: 'row', alignItems: 'stretch', marginTop: 16, backgroundColor: C.panel2, borderRadius: 12, overflow: 'hidden'},
+  navMain: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 12},
+  navIco: {width: 38, height: 38, borderRadius: 19, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center'},
+  navTxt: {color: C.ink, fontSize: 16, fontWeight: '800'},
+  navSub: {color: C.faint, fontSize: 12, marginTop: 1},
+  navMore: {width: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: C.panel2},
   link: {color: C.accentInk, fontSize: 13.5, fontWeight: '700'},
   restHead: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingTop: 16, paddingBottom: 6, paddingHorizontal: 2},
   restTitle: {color: C.ink, fontSize: 15, fontWeight: '800'},
