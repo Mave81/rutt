@@ -34,11 +34,29 @@ function LinkedText({text, style, lines}: {text: string; style: any; lines?: num
   );
 }
 
-export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onExtra, onAvised}: {
+// Hur långt sändningen till Opter kommit.
+const SYNC_TXT: Record<string, string> = {
+  waiting: 'Skickas till Opter om några sekunder…', sending: 'Skickar till Opter…',
+  ok: '✓ Uppdaterad i Opter', 'ok-noimg': '✓ Uppdaterad i Opter (bilden kom inte med)',
+  unconfirmed: '⚠ Opter har inte bekräftat – tryck för att försöka igen', failed: '⚠ Kunde inte nå Opter – tryck för att försöka igen',
+};
+const syncColor = (s: string) => (s === 'ok' ? C.accent2 : s === 'ok-noimg' ? C.accent : s === 'unconfirmed' || s === 'failed' ? C.bad : C.faint);
+function SyncLine({state, label, onRetry}: {state?: string; label: string; onRetry: () => void}) {
+  if (!state) return null;
+  const bad = state === 'unconfirmed' || state === 'failed';
+  return (
+    <Pressable disabled={!bad} onPress={onRetry} hitSlop={6}>
+      <Text style={[o.sync, {color: syncColor(state)}]}>{label}: {SYNC_TXT[state] || state}</Text>
+    </Pressable>
+  );
+}
+
+export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onExtra, onAvised, onRetry, live}: {
   route: any; cargo: any; ost: Record<string, any>; allStops: any[];
   onLoaded: (st: any) => void; onUnload: (st: any) => void;
   onExtra: (cid: string, kind: 'extras' | 'damage' | 'kolli', data: any) => void;
   onAvised: (cid: string) => void;
+  onRetry: (cid: string) => void; live: boolean;
 }) {
   const [open, setOpen] = useState<string | null>(null); // utfälld rad (cid) utöver NÄSTA
   const [callStop, setCallStop] = useState<any>(null);
@@ -120,6 +138,8 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         <Text style={[o.who, !expanded && {fontSize: 17}]} numberOfLines={expanded ? 2 : 1}>{st.who || '—'}</Text>
         <Text style={o.adr} numberOfLines={expanded ? 2 : 1}>{[st.adr, st.area].filter(Boolean).join(', ') || 'Adress saknas'}</Text>
 
+        {!pickup && <SyncLine state={os.sync && os.sync.load} label="Lastad" onRetry={() => onRetry(cid)} />}
+        {!pickup && !(os.sync && os.sync.load) && st.live && st.live.cur && /lastad/i.test(st.live.cur) && <Text style={[o.sync, {color: C.accent2}]}>✓ Lastad i Opter</Text>}
         <Text style={o.meta}>
           {st.deadline ? `Senast ${st.deadline}` : 'Ingen sluttid'}
           {late ? `  ·  ${late} min sen` : ''}
@@ -200,10 +220,11 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
                 <View key={cid} style={o.doneRow}>
                   <Text style={o.doneCheck}>✓</Text>
                   <View style={{flex: 1}}>
-                    <Text style={o.doneWho} numberOfLines={1}>{st.who || cid}</Text>
+                    <Text style={o.doneWho} numberOfLines={1}>{st.who || os.who || cid}</Text>
                     <Text style={o.doneMeta} numberOfLines={1}>
-                      Lossad {hhmm(new Date(os.doneAt))}{os.pod && os.pod.name ? `  ·  ${os.pod.name}` : ''}{os.pod && os.pod.photos && os.pod.photos.length ? `  ·  ${os.pod.photos.length} foto` : ''}{os.pod && os.pod.dev ? `  ·  avvikelse` : ''}
+                      Lossad {hhmm(new Date(os.doneAt))}{os.pod && os.pod.name ? `  ·  ${os.pod.name}` : ''}{os.pod && os.pod.photos && os.pod.photos.length ? `  ·  ${os.pod.photos.length} foto` : ''}{os.damages && os.damages.length ? `  ·  avvikelse` : ''}
                     </Text>
+                    <SyncLine state={os.sync && os.sync.unload} label="Lossad" onRetry={() => onRetry(cid)} />
                   </View>
                 </View>
               ))}
@@ -277,6 +298,7 @@ const o = StyleSheet.create({
   doneWho: {color: C.ink, fontSize: 15, fontWeight: '700'},
   doneMeta: {color: C.faint, fontSize: 12, marginTop: 1},
 
+  sync: {fontSize: 12, fontWeight: '700', marginTop: 5},
   link: {color: C.accent, fontWeight: '800', textDecorationLine: 'underline'},
   moreBtn: {marginLeft: 10, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 9, paddingVertical: 4, paddingHorizontal: 10},
   moreTxt: {color: C.dim, fontSize: 12, fontWeight: '800'},

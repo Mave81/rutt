@@ -14,6 +14,10 @@ import {Sheet} from './src/ui/parts';
 import OrdersView from './src/ui/OrdersView';
 import SignScreen from './src/ui/SignScreen';
 import {loadJSON, saveJSON, ORDERS_KEY, NAMES_KEY, companyKey, rememberName} from './src/store';
+import {Buffer} from 'buffer';
+import {PixelRatio} from 'react-native';
+// @ts-ignore
+import P from './src/opter/protocol';
 // @ts-ignore
 import OpterClient from './src/opter/OpterClient';
 // @ts-ignore
@@ -22,7 +26,7 @@ import computeRoute, {slotWhere} from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '15 okt · order v2';
+const BUILD = '15 okt · skarp Lastad/Lossad';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -103,12 +107,14 @@ function AppInner(): React.JSX.Element {
   );
 
   const src: any = orders.stops.length ? orders : demo ? DEMO : null;
+  // Står ordern redan som Lastad i Opter (t.ex. satt i Opter Driver)?
+  const serverLoaded = (s: any) => !!(s.live && s.live.loadSt && s.live.curId === s.live.loadSt.id);
   const route = useMemo(() => {
     if (!src) return null;
     // Klara steg ut ur planeringen; lastat gods räknas som ombord.
     const stops = src.stops.map((s: any) => {
       const o = ost[s.pickup || s.drop] || {};
-      return {...s, done: s.pickup ? !!(o.loadedAt || o.doneAt) : !!o.doneAt};
+      return {...s, done: s.pickup ? !!(o.loadedAt || o.doneAt || serverLoaded(s)) : !!o.doneAt};
     });
     // Där du står nu = senast avklarade steg.
     let cur: any = null, last = 0;
@@ -144,11 +150,58 @@ function AppInner(): React.JSX.Element {
     toastTimer.current = setTimeout(() => setToast(null), 6000);
   }
   // Lastad: raden byter till LOSSA och sorteras in i körordningen.
+  // ---- Skicka status till Opter: väntar tills "Ångra" gått ut, sen exakt en gång + kontroll ----
+  const sendTimers = useRef<Record<string, any>>({});
+  const setSync = (cid: string, step: 'load' | 'unload', state: string) =>
+    setOst(o => ({...o, [cid]: {...(o[cid] || {}), sync: {...((o[cid] && o[cid].sync) || {}), [step]: state}}}));
+  function queueSend(cid: string, step: 'load' | 'unload', run: () => Promise<any>) {
+    if (sendTimers.current[cid + step]) clearTimeout(sendTimers.current[cid + step]);
+    setSync(cid, step, 'waiting');
+    sendTimers.current[cid + step] = setTimeout(async () => {
+      delete sendTimers.current[cid + step];
+      setSync(cid, step, 'sending');
+      try {
+        const r = await run();
+        setSync(cid, step, r.confirmed ? (r.imageDropped ? 'ok-noimg' : 'ok') : 'unconfirmed');
+        if (r.rutt && r.rutt.stops && r.rutt.stops.length) setOrders(r.rutt);
+      } catch (e) { setSync(cid, step, 'failed'); }
+    }, 6200);
+  }
+  const cancelSend = (cid: string, step: string) => { if (sendTimers.current[cid + step]) { clearTimeout(sendTimers.current[cid + step]); delete sendTimers.current[cid + step]; } };
+  function sendLoad(st: any) {
+    const L = st.live;
+    if (!live || !L || !L.loadSt) return;
+    queueSend(st.pickup, 'load', () => client.setStatus(L, L.loadSt.id, null));
+  }
+  function sendUnload(st: any, pod: any) {
+    const L = st.live;
+    if (!live || !L || !L.unloadSt) return;
+    const scale = PixelRatio.get();
+    const first = (pod.photos || [])[0];
+    const podData = L.podType ? {
+      sptId: L.podType && L.podType.kind === 'spt' ? L.podType.id : 0,
+      dptId: L.podType && L.podType.kind === 'dpt' ? L.podType.id : 0,
+      name: pod.name || '', remark: pod.comment || '',
+      signature: pod.sig ? P.signatureString(pod.sig.strokes, scale) : '',
+      packageCount: pod.kolli != null ? pod.kolli : null,
+      image: first && first.b64 ? Buffer.from(first.b64, 'base64') : null,
+    } : null;
+    queueSend(st.drop, 'unload', () => client.setStatus(L, L.unloadSt.id, podData));
+  }
+  function retrySync(cid: string) {
+    const o = ost[cid] || {};
+    const pick = src && src.stops.find((s: any) => s.pickup === cid);
+    const drop = src && src.stops.find((s: any) => s.drop === cid);
+    if (o.doneAt && drop) sendUnload(drop, o.pod || {});
+    else if (o.loadedAt && pick) sendLoad(pick);
+  }
+
   function onLoaded(st: any) {
     const cid = st.pickup;
     const prev = ost[cid];
     setOst(o => ({...o, [cid]: {...(o[cid] || {}), loadedAt: Date.now()}}));
-    flash(`Lastad · ${st.who || 'order'}`, () => setOst(o => { const n = {...o}; if (prev) n[cid] = prev; else delete n[cid]; return n; }));
+    sendLoad(st);
+    flash(`Lastad · ${st.who || 'order'}`, () => { cancelSend(cid, 'load'); setOst(o => { const n = {...o}; if (prev) n[cid] = prev; else delete n[cid]; return n; }); });
   }
   // Tillägg / avvikelse / ändrat kolliantal från "Mer".
   function onExtra(cid: string, kind: 'extras' | 'damage' | 'kolli', data: any) {
@@ -167,9 +220,10 @@ function AppInner(): React.JSX.Element {
     const cid = st.drop;
     const prev = ost[cid];
     setSignStop(null);
-    setOst(o => ({...o, [cid]: {...(o[cid] || {}), loadedAt: (o[cid] && o[cid].loadedAt) || Date.now(), doneAt: Date.now(), extras: pod.extras || (o[cid] && o[cid].extras), kolli: pod.kolli, pod: {...pod, photos: (pod.photos || []).map((x: any) => ({uri: x.uri}))}}}));
+    setOst(o => ({...o, [cid]: {...(o[cid] || {}), who: st.who, loadedAt: (o[cid] && o[cid].loadedAt) || Date.now(), doneAt: Date.now(), extras: pod.extras || (o[cid] && o[cid].extras), kolli: pod.kolli, pod: {...pod, photos: (pod.photos || []).map((x: any, i: number) => ({uri: x.uri, b64: i === 0 ? x.b64 : undefined}))}}}));
     if (pod.name) setNames(n => { const nn = rememberName(n, st.who, pod.name); saveJSON(NAMES_KEY, nn); return nn; });
-    flash(`Lossad · ${st.who || 'order'}`, () => setOst(o => { const n = {...o}; if (prev) n[cid] = prev; else delete n[cid]; return n; }));
+    sendUnload(st, pod);
+    flash(`Lossad · ${st.who || 'order'}`, () => { cancelSend(cid, 'unload'); setOst(o => { const n = {...o}; if (prev) n[cid] = prev; else delete n[cid]; return n; }); });
   }
 
   async function login() {
@@ -333,7 +387,7 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any) => setSignStop(st)} onExtra={onExtra} onAvised={onAvised} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any) => setSignStop(st)} onExtra={onExtra} onAvised={onAvised} onRetry={retrySync} live={live} />
           )}
           {tab === 'last' && route && !(route as any).error && <LastView route={route} cargo={src.cargo} />}
           {tab === 'chat' && <ChatView msgs={chatList} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} onRetry={deliver} />}

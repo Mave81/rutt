@@ -38,7 +38,7 @@ const DT = {
   DateTime: 6, Bool: 7, DecimalNull: 8, Int32Null: 9, BoolNull: 10,
   DateTimeNull: 11, DecimalInt16Decimals: 12, DecimalInt16NoDecimals: 13,
   DecimalInt32Decimals: 14, DecimalInt32NoDecimals: 15,
-  DecimalInt64Decimals: 16, DecimalInt64NoDecimals: 17, StringNull: 18,
+  DecimalInt64Decimals: 16, DecimalInt64NoDecimals: 17, StringNull: 18, ByteArray: 19,
 };
 
 const RST = { None: 0, StartWork: 1, EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6, ChangeSecondaryResource: 7 };
@@ -48,7 +48,7 @@ const F = {
   Address: { 2: 'line1', 3: 'line2', 4: 'line3', 5: 'company', 6: 'street', 7: 'streetNo', 8: 'zip', 9: 'city', 11: 'entreCode', 12: 'phone', 16: 'driverMessage', 17: 'info', 18: 'lng', 19: 'lat' },
   Resource: { 1: 'name', 2: 'shortName', 3: 'code', 4: 'defVehicle', 251: 'resId' },
   Shipment: {
-    2: 'adrFrom', 3: 'adrTo', 16: 'earliestPickup', 17: 'latestPickup',
+    2: 'adrFrom', 3: 'adrTo', 11: 'shsId', 16: 'earliestPickup', 17: 'latestPickup',
     18: 'earliestDelivery', 19: 'latestDelivery', 20: 'customer',
     24: 'serviceType', 43: 'weight', 51: 'packages', 53: 'message',
     55: 'driverMessage', 58: 'shipmentId', 59: 'orderId',
@@ -58,6 +58,11 @@ const F = {
     117: 'podPicReq', 119: 'customerRefPhone', 120: 'customerRefMobile', 121: 'podCommentReq', 123: 'customerPhone2',
   },
   ShipmentPodSuggestion: { 1: 'shiId', 2: 'name', 3: 'revoked' },
+  ShipmentStatus: { 1: 'shiId', 2: 'dstId', 3: 'arrived', 4: 'accepted', 5: 'rejected', 6: 'pickup', 7: 'delivery', 8: 'completed', 10: 'userOption', 11: 'msgRequired', 14: 'pod', 15: 'code', 16: 'name', 21: 'order' },
+  ShipmentStatusLog: { 1: 'shiId', 2: 'shsId', 3: 'deleted', 4: 'logTime' },
+  ShipmentPodType: { 1: 'shiId', 2: 'nameReq', 3: 'sigReq', 4: 'remarkReq', 5: 'name', 6: 'descr', 7: 'revoked', 9: 'isDefault', 14: 'commentReq', 16: 'picReq' },
+  DefaultPodType: { 1: 'nameReq', 2: 'sigReq', 3: 'remarkReq', 4: 'name', 5: 'descr', 7: 'isDefault', 8: 'active', 13: 'commentReq', 15: 'picReq', 16: 'allowBeforePickup', 17: 'allowAfterPickup' },
+  ShipmentPod: { 1: 'shiId', 2: 'sptId', 3: 'dptId', 4: 'date', 5: 'time', 6: 'name', 8: 'signature', 9: 'packageCount', 14: 'comment' },
   ShipmentPackage: { 1: 'shiId', 2: 'quantity', 3: 'weight', 14: 'text', 15: 'packageType' },
   FreeTextMessage: { 1: 'resId', 2: 'vhcId', 3: 'shiId', 4: 'outgoing', 5: 'confirmed', 6: 'text', 7: 'created', 8: 'externalId', 9: 'fromName' },
 };
@@ -112,6 +117,7 @@ function readValue(dt, b, pos) {
     case DT.DecimalInt32NoDecimals: { value = i32(b, pos.i); pos.i += 4; break; }
     case DT.DecimalInt64Decimals: { const s = b[pos.i++]; const v = i64(b, pos.i); pos.i += 8; value = Number(v) / 10 ** s; break; }
     case DT.DecimalInt64NoDecimals: { value = Number(i64(b, pos.i)); pos.i += 8; break; }
+    case DT.ByteArray: { const len = i32(b, pos.i); pos.i += 4; value = {bytes: len}; pos.i += len; break; }
     default: throw new Error('okänd datatyp ' + dt + ' @ ' + (pos.i - 1));
   }
   return [prop, value, raw];
@@ -120,7 +126,9 @@ function readTableHeader(b, pos) {
   const i = pos.i;
   const table = Table[b[i]] || ('Table' + b[i]);
   const headerLen = b[i + 1];
-  const row = { table, key: { identityId: i32(b, i + 2), offId: i32(b, i + 6), xxxId: i32(b, i + 10) }, columns: {}, raw: {} };
+  const row = { table, key: { identityId: i32(b, i + 2), offId: i32(b, i + 6), xxxId: i32(b, i + 10) }, columns: {}, raw: {},
+    // extra/bekräftad-byten i huvudet – skickas tillbaka oförändrade vid uppdatering
+    hdr: { extra: headerLen > 12 ? b[i + 14] : 0, conf: headerLen > 13 ? b[i + 15] : 0 }, parent: null };
   pos.i += headerLen + 2;
   return row;
 }
@@ -130,7 +138,7 @@ function decodeSync(payload) {
   function walk(parent) {
     while (pos.i < b.length) {
       const dt = b[pos.i++];
-      if (dt === DT.StartTable) { const row = readTableHeader(b, pos); rows.push(row); walk(row); }
+      if (dt === DT.StartTable) { const row = readTableHeader(b, pos); if (parent) row.parent = {table: parent.table, key: parent.key}; rows.push(row); walk(row); }
       else if (dt === DT.EndTable) { pos.i += 1; return; }
       else if (dt === DT.EndData) { const d = i64(b, pos.i); pos.i += 8; const f = i64(b, pos.i); pos.i += 8; syncTimes = { dynamic: ticksToDate(d), fixed: ticksToDate(f) }; return; }
       else { const [prop, value, raw] = readValue(dt, b, pos); if (parent) { const name = (F[parent.table] && F[parent.table][prop]) || ('p' + prop); parent.columns[name] = value; parent.raw[prop] = raw != null ? raw : value; } }
@@ -183,6 +191,54 @@ function encodeStartWork({ offId, resId, vhcId }) {
 function encodeWorkStatus({ offId, rstType, resId, vhcId }) {
   const w = W();
   wResourceStatus(w, { offId, resId, vhcId, rstType });
+  wEndData(w, null, null);
+  return w.build();
+}
+
+/* ---- Statusbyte (+ ev. leveransbevis) – exakt som Opter Driver ----
+ * Befintlig order: StartTable(Shipment, serverns nyckel) + SHI_SHS_Id (fält 11)
+ *   └ ny ShipmentStatusLog: SSL_SHI_Id, SSL_SHS_Id, SSL_LogTime
+ *   └ ny ShipmentPod (vid kvittens): typ, datum, tid, namn, anmärkning, kommentar, signatur, antal kollin, bild
+ * Signatur = "x,y,x,y,…" i pixlar, "-1,-1" före varje nytt streck (Opters FingerPaint-format).
+ */
+function wBytes(w, prop, buf) { if (!buf || !buf.length) return; wB(w, DT.ByteArray); wB(w, prop); wI32(w, buf.length); w.push(buf); }
+function signatureString(strokes, scale) {
+  const out = [];
+  for (const st of strokes || []) {
+    if (!st || st.length < 1) continue;
+    out.push(-1, -1);
+    for (const p of st) out.push(Math.round(p.x * scale), Math.round(p.y * scale));
+  }
+  return out.join(',');
+}
+function encodeShipmentStatus({ live, offId, statusId, pod }) {
+  const w = W();
+  const k = live.key;
+  wB(w, DT.StartTable); wB(w, TableOrd.Shipment); wB(w, 14);
+  wI32(w, k.identityId || 0); wI32(w, k.offId || 0); wI32(w, k.xxxId || 0);
+  wB(w, (live.hdr && live.hdr.extra) || 0); wB(w, (live.hdr && live.hdr.conf) || 0);
+  wInt(w, 11, statusId);                                  // SHI_SHS_Id
+  wNewRow(w, 'ShipmentStatusLog', offId || k.offId);
+  wInt(w, 1, live.shiId);                                 // SSL_SHI_Id
+  wInt(w, 2, statusId);                                   // SSL_SHS_Id
+  wDate(w, 4, new Date());                                // SSL_LogTime
+  wEndTable(w, 'ShipmentStatusLog');
+  if (pod) {
+    const now = new Date();
+    wNewRow(w, 'ShipmentPod', offId || k.offId);
+    wInt(w, 1, live.shiId);                               // SHP_SHI_Id
+    if (pod.sptId) wInt(w, 2, pod.sptId);                 // SHP_SPT_Id
+    if (pod.dptId) wInt(w, 3, pod.dptId);                 // SHP_DPT_Id
+    wDate(w, 4, now); wDate(w, 5, now);                   // SHP_Date, SHP_Time
+    if (pod.name) wStr(w, 6, pod.name);                   // SHP_Name
+    if (pod.remark) wStr(w, 7, pod.remark);               // SHP_Descr (anmärkning)
+    if (pod.signature) wStr(w, 8, pod.signature);         // SHP_Signature
+    if (pod.packageCount != null) wInt(w, 9, pod.packageCount); // SHP_PackageCount
+    if (pod.comment) wStr(w, 14, pod.comment);            // SHP_Comment
+    if (pod.image) wBytes(w, 15, pod.image);              // SHP_Image (jpeg)
+    wEndTable(w, 'ShipmentPod');
+  }
+  wEndTable(w, 'Shipment');
   wEndData(w, null, null);
   return w.build();
 }
@@ -339,6 +395,10 @@ function toRutt(decoded) {
   const sugBy = {};
   for (const r of decoded.rows) if (r.table === 'ShipmentPodSuggestion' && !r.columns.revoked && r.columns.name) { const k = r.columns.shiId; (sugBy[k] = sugBy[k] || []).push(String(r.columns.name).trim()); }
 
+  // Orderns egna statusar och kvittenstyper (ligger som underrader i orderns block).
+  const belongs = (r, shiId) => (r.columns.shiId === shiId) || (r.parent && r.parent.table === 'Shipment' && r.parent.key.xxxId === shiId);
+  const defPods = decoded.rows.filter(r => r.table === 'DefaultPodType' && r.columns.active !== false).map(r => ({id: r.key.xxxId, kind: 'dpt', ...r.columns}));
+
   const cargo = {}; const stops = []; let n = 0;
   const line = (a) => a ? [a.street, a.streetNo].filter(Boolean).join(' ') : '';
   // Alla nummer som går att ringa för stoppet: adressens + orderns (kund/referens), utan dubbletter.
@@ -361,14 +421,27 @@ function toRutt(decoded) {
     const pal = pkgs.reduce((s, p) => s + (Number(p.quantity) || 0), 0) || 1;
     const kg = Number(c.weight) || pkgs.reduce((s, p) => s + (Number(p.weight) || 0), 0) || 0;
     const shiId = r.key.xxxId;
+    const statuses = decoded.rows.filter(x => x.table === 'ShipmentStatus' && belongs(x, shiId))
+      .map(x => ({id: x.key.xxxId, ...x.columns})).sort((a, b) => (a.order || 0) - (b.order || 0));
+    const byName = (re) => statuses.find(s => re.test(String(s.name || '')));
+    const loadSt = byName(/^lastad$/i) || statuses.find(s => s.pickup && !s.delivery) || null;
+    const unloadSt = byName(/^lossad$/i) || statuses.find(s => s.delivery || s.completed) || null;
+    const curSt = statuses.find(s => s.id === c.shsId) || null;
+    const spts = decoded.rows.filter(x => x.table === 'ShipmentPodType' && belongs(x, shiId) && !x.columns.revoked).map(x => ({id: x.key.xxxId, kind: 'spt', ...x.columns}));
+    const podList = spts.length ? spts : defPods;
+    const podType = podList.find(pt => /lossad/i.test(String(pt.name || ''))) || podList.find(pt => pt.isDefault) || podList[0] || null;
+    const live = { key: r.key, hdr: r.hdr, shiId, offId: r.key.offId, statuses: statuses.map(s => ({id: s.id, name: s.name})), cur: curSt ? curSt.name : null, curId: c.shsId || 0,
+      loadSt: loadSt ? {id: loadSt.id, name: loadSt.name} : null, unloadSt: unloadSt ? {id: unloadSt.id, name: unloadSt.name, pod: !!unloadSt.pod} : null,
+      podType: podType ? {id: podType.id, kind: podType.kind, name: podType.name} : null };
     const pkgText = pkgs.map(p => [p.quantity ? p.quantity + ' st' : '', p.packageType, p.text].filter(Boolean).join(' ')).filter(Boolean).join(', ');
     cargo[cid] = { name: c.customer || c.serviceType || ('Order ' + cid), pal, kg, to: to && to.city ? to.city : '', goods: pkgText };
     const req = { name: !!c.podNameReq, sig: !!c.podSigReq, pic: !!c.podPicReq, comment: !!(c.podCommentReq || c.podRemarkReq) };
+    if (podType) { req.name = req.name || !!podType.nameReq; req.sig = req.sig || !!podType.sigReq; req.pic = req.pic || !!podType.picReq; req.comment = req.comment || !!(podType.commentReq || podType.remarkReq); }
     // All fritext för ordern, i den ordning Opter visar den, utan dubbletter.
     const info = [...new Set([c.extMessage, c.message, c.senderInstr, c.driverMessage].map(x => String(x || '').trim()).filter(Boolean))].join('\n\n');
     const textTel = extractPhones(info);
     const kolli = Number(c.packages) || pkgs.reduce((s, p) => s + (Number(p.quantity) || 0), 0) || 0;
-    const common = { shiId, orderNo: c.orderId || null, freightBill: c.freightBill || c.shipmentId || null, customer: c.customer || '', service: c.serviceType || '', kg, pal, kolli, goods: pkgText, info, km: Number(c.distanceKm) || null, minutes: Number(c.timeMinutes) || null, msg: '', driverMsg: '' };
+    const common = { live, shiId, orderNo: c.orderId || null, freightBill: c.freightBill || c.shipmentId || null, customer: c.customer || '', service: c.serviceType || '', kg, pal, kolli, goods: pkgText, info, km: Number(c.distanceKm) || null, minutes: Number(c.timeMinutes) || null, msg: '', driverMsg: '' };
     const merge = (a, b) => { const seen = new Set(a.map(x => x.num)); return [...a, ...b.filter(x => !seen.has(x.num) && seen.add(x.num))]; };
     stops.push({ ...common, verb: 'Hämta', adr: line(from), area: from && from.city ? from.city : '', zip: from && from.zip || '', lat: from && from.lat != null ? Number(from.lat) : null, lng: from && from.lng != null ? Number(from.lng) : null, pickup: cid, deadline: hhmm(c.latestPickup), earliest: hhmm(c.earliestPickup), who: (from && from.company) || c.customer || '', contact: contact(from), tel: merge(phones(from, c, 'from'), textTel), code: from && from.entreCode || '', adrMsg: [from && from.driverMessage, from && from.info].filter(Boolean).join(' · '), ref: c.senderRef || '', note: [c.serviceType, kg ? kg + ' kg' : '', c.message].filter(Boolean).join(' · ') });
     stops.push({ ...common, verb: 'Lämna', adr: line(to), area: to && to.city ? to.city : '', zip: to && to.zip || '', lat: to && to.lat != null ? Number(to.lat) : null, lng: to && to.lng != null ? Number(to.lng) : null, drop: cid, deadline: hhmm(c.latestDelivery), earliest: hhmm(c.earliestDelivery), who: (to && to.company) || c.orderReceiver || c.customer || '', contact: contact(to), tel: merge(phones(to, c, 'to'), textTel), avise: avisering(info), code: to && to.entreCode || '', adrMsg: [to && to.driverMessage, to && to.info].filter(Boolean).join(' · '), ref: c.receiverRef || '', req, suggest: [...new Set(sugBy[shiId] || [])], note: [kg ? kg + ' kg' : '', c.driverMessage].filter(Boolean).join(' · ') });
@@ -379,5 +452,5 @@ function toRutt(decoded) {
 module.exports = {
   MessageType, Table, DT, RST, F, frame, unframe, decodeSync, ticksToDate,
   logonPayload, parseLogon, resourceList, encodeStartWork, encodeWorkStatus, toRutt,
-  messageList, encodeMarkRead, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering,
+  messageList, encodeMarkRead, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering, encodeShipmentStatus, signatureString,
 };

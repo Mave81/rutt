@@ -223,6 +223,55 @@ export default class OpterClient {
     return {msgs: this.messages(), stored};
   }
 
+  /*
+   * Sätt orderstatus (Lastad/Lossad) och ev. leveransbevis – exakt en gång.
+   * Efteråt full synk: bekräftat först när Opter själv visar den nya statusen.
+   * Returnerar {confirmed, imageDropped}.
+   */
+  _statusOf(shiId) {
+    const r = (this.lastDecoded && this.lastDecoded.rows || []).find(x => x.table === 'Shipment' && x.key.xxxId === shiId);
+    return r ? (r.columns.shsId || 0) : null; // null = ordern finns inte längre i listan (t.ex. klar)
+  }
+  async _fullSync() {
+    const res = await this.send(P.MessageType.Synchronize, P.encodeFullSync());
+    return this._take(P.decodeSync(res.payload));
+  }
+  async setStatus(live, statusId, pod) {
+    if (!this.logon) throw new Error('inte inloggad');
+    const offId = this.logon.acdOffId;
+    const attempt = async (podData) => {
+      const payload = P.encodeShipmentStatus({live, offId, statusId, pod: podData});
+      try {
+        const res = await this.send(P.MessageType.Synchronize, payload, {once: true});
+        if (res.type === P.MessageType.Corrupt) throw new Error('Opter kunde inte läsa uppdateringen');
+        this._take(P.decodeSync(res.payload));
+        return true;
+      } catch (e) {
+        try { await this.relogin(); } catch (e2) {}
+        return false; // kan ha kommit fram – kontrolleras nedan
+      }
+    };
+    let imageDropped = false;
+    let sent = await attempt(pod);
+    try { await this._fullSync(); } catch (e) {}
+    let cur = this._statusOf(live.shiId);
+    let confirmed = cur === statusId || cur === null;
+    if (!confirmed && !sent && pod && pod.image) {
+      // stor bild kan ha stoppat sändningen → skicka utan bild
+      imageDropped = true;
+      sent = await attempt({...pod, image: null});
+      try { await this._fullSync(); } catch (e) {}
+      cur = this._statusOf(live.shiId);
+      confirmed = cur === statusId || cur === null;
+    } else if (!confirmed && !sent) {
+      sent = await attempt(pod);
+      try { await this._fullSync(); } catch (e) {}
+      cur = this._statusOf(live.shiId);
+      confirmed = cur === statusId || cur === null;
+    }
+    return {confirmed, imageDropped, rutt: P.toRutt(this.lastDecoded)};
+  }
+
   // Felsökning: färsk full synk, allt utom förarlista/loggar, som JSON-vänligt objekt.
   async dump() {
     let d = this.lastDecoded || {rows: []}, note = 'senaste synk';

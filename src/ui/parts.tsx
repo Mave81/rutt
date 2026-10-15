@@ -123,7 +123,7 @@ export function SignaturePad({height, onChange, onDrawing, hint = 'Signera här'
 // ---- Foto ----
 export const MAX_PHOTOS = 6;
 export async function pickPhoto(fromCamera: boolean) {
-  const opts: any = {mediaType: 'photo', quality: 0.6, maxWidth: 1600, maxHeight: 1600, includeBase64: true, saveToPhotos: false};
+  const opts: any = {mediaType: 'photo', quality: 0.8, maxWidth: 1200, maxHeight: 1200, includeBase64: true, saveToPhotos: false}; // som Opter: max 1200 px
   const res: any = fromCamera ? await launchCamera(opts) : await launchImageLibrary({...opts, selectionLimit: 5});
   if (!res || res.didCancel || res.errorCode) return [];
   return (res.assets || []).filter((a: any) => a.uri).map((a: any) => ({uri: a.uri, b64: a.base64 || null, w: a.width, h: a.height}));
