@@ -58,6 +58,8 @@ const F = {
     117: 'podPicReq', 119: 'customerRefPhone', 120: 'customerRefMobile', 121: 'podCommentReq', 123: 'customerPhone2',
   },
   ShipmentPodSuggestion: { 1: 'shiId', 2: 'name', 3: 'revoked' },
+  Setting: { 1: 'name', 2: 'value', 3: 'descr', 5: 'active' },
+  Position: { 1: 'resId', 2: 'vhcId', 3: 'lng', 4: 'lat', 5: 'alt', 6: 'dir', 7: 'speed', 8: 'time' },
   ShipmentStatus: { 1: 'shiId', 2: 'dstId', 3: 'arrived', 4: 'accepted', 5: 'rejected', 6: 'pickup', 7: 'delivery', 8: 'completed', 10: 'userOption', 11: 'msgRequired', 14: 'pod', 15: 'code', 16: 'name', 21: 'order' },
   ShipmentStatusLog: { 1: 'shiId', 2: 'shsId', 3: 'deleted', 4: 'logTime' },
   ShipmentPodType: { 1: 'shiId', 2: 'nameReq', 3: 'sigReq', 4: 'remarkReq', 5: 'name', 6: 'descr', 7: 'revoked', 9: 'isDefault', 14: 'commentReq', 16: 'picReq' },
@@ -241,6 +243,50 @@ function encodeShipmentStatus({ live, offId, statusId, pod }) {
   wEndTable(w, 'Shipment');
   wEndData(w, null, null);
   return w.build();
+}
+
+/* Decimaltal som Opter: avrundat till 6 värdesiffror (BigDecimal.round(MathContext(6))),
+ * minsta heltalstyp som rymmer det oskalade värdet. 0 skrivs inte (standardvärde). */
+function wDec(w, prop, value) {
+  if (value == null || !isFinite(value) || value === 0) return;
+  let s = Number(value).toPrecision(6);
+  if (/e/i.test(s)) s = Number(s).toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+  const neg = s.startsWith('-'); if (neg) s = s.slice(1);
+  const dot = s.indexOf('.');
+  const scale = dot < 0 ? 0 : s.length - dot - 1;
+  let unscaled = parseInt(s.replace('.', ''), 10) * (neg ? -1 : 1);
+  if (!unscaled) return;
+  if (unscaled >= -32768 && unscaled <= 32767) {
+    if (scale > 0) { wB(w, DT.DecimalInt16Decimals); wB(w, prop); wB(w, scale); wI16(w, unscaled); }
+    else { wB(w, DT.DecimalInt16NoDecimals); wB(w, prop); wI16(w, unscaled); }
+  } else if (unscaled >= -2147483648 && unscaled <= 2147483647) {
+    if (scale > 0) { wB(w, DT.DecimalInt32Decimals); wB(w, prop); wB(w, scale); wI32(w, unscaled); }
+    else { wB(w, DT.DecimalInt32NoDecimals); wB(w, prop); wI32(w, unscaled); }
+  } else {
+    if (scale > 0) { wB(w, DT.DecimalInt64Decimals); wB(w, prop); wB(w, scale); wI64(w, unscaled); }
+    else { wB(w, DT.DecimalInt64NoDecimals); wB(w, prop); wI64(w, unscaled); }
+  }
+}
+/* GPS-position som Opter Driver (registerGpsPosition): lng, lat, höjd, riktning, fart km/h, tid. */
+function encodePosition({ lat, lng, alt, bearing, speedKmh, time }) {
+  const w = W();
+  wNewRow(w, 'Position', 0);
+  wDec(w, 3, lng);
+  wDec(w, 4, lat);
+  wDec(w, 5, alt);
+  wDec(w, 6, bearing);
+  wDec(w, 7, speedKmh);
+  wDate(w, 8, time ? new Date(time) : new Date());
+  wEndTable(w, 'Position');
+  wEndData(w, null, null);
+  return w.build();
+}
+/* Serverinställning (Setting-tabellen), t.ex. PositionUpdateInterval. */
+function setting(decoded, name, fallback) {
+  const r = (decoded && decoded.rows || []).find(x => x.table === 'Setting' && String(x.columns.name || '').toLowerCase() === name.toLowerCase());
+  if (!r) return fallback;
+  const v = r.columns.value;
+  return v == null || v === '' ? fallback : v;
 }
 
 /* Tom uppladdning som ber om full synk tillbaka (EndData 0,0). */
@@ -458,5 +504,5 @@ function toRutt(decoded) {
 module.exports = {
   MessageType, Table, DT, RST, F, frame, unframe, decodeSync, ticksToDate,
   logonPayload, parseLogon, resourceList, encodeStartWork, encodeWorkStatus, toRutt,
-  messageList, encodeMarkRead, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering, encodeShipmentStatus, signatureString,
+  messageList, encodeMarkRead, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering, encodeShipmentStatus, signatureString, encodePosition, setting,
 };

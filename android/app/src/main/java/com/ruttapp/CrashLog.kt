@@ -45,6 +45,6 @@ class CrashLogModule(private val rc: ReactApplicationContext) : ReactContextBase
 }
 
 class CrashLogPackage : ReactPackage {
-  override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> = listOf(CrashLogModule(reactContext))
+  override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> = listOf(CrashLogModule(reactContext), RuttLocationModule(reactContext))
   override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> = emptyList()
 }

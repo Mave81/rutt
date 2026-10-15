@@ -6,7 +6,7 @@
 import React, {useMemo, useState, useEffect, useRef} from 'react';
 import {
   View, StatusBar, StyleSheet, Text, TextInput, Pressable,
-  FlatList, ActivityIndicator, ScrollView, Keyboard, Share, Vibration, NativeModules,
+  FlatList, ActivityIndicator, ScrollView, Keyboard, Share, Vibration, NativeModules, PermissionsAndroid, Platform,
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, hhmm} from './src/ui/theme';
@@ -27,7 +27,7 @@ import computeRoute, {slotWhere} from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '15 okt · stabil v1';
+const BUILD = '15 okt · GPS';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -122,6 +122,10 @@ function AppInner(): React.JSX.Element {
   const [driverName, setDriverName] = useState('');
   const [crashes, setCrashes] = useState<any[]>([]);
   const podMem = useRef<Record<string, any>>({}); // bilddata hålls i minnet, inte i lagringen
+  // GPS (som Opter: skickas till kontoret med serverns intervall, även med släckt skärm)
+  const [gpsOn, setGpsOn] = useState(true);
+  const [gps, setGps] = useState<{state: 'av' | 'startar' | 'nekad' | 'söker' | 'ok' | 'fel'; sentAt?: number; acc?: number}>({state: 'av'});
+  const [gpsRoutePos, setGpsRoutePos] = useState<any>(null); // position som rutten räknas från (uppdateras vid > 1 km förflyttning)
   const [diagBusy, setDiagBusy] = useState(false);
   // Skicka rådata från Opter (via telefonens dela-meny → Gmail till dig själv) så Claude kan läsa den.
   async function sendDump() {
@@ -170,6 +174,7 @@ function AppInner(): React.JSX.Element {
     const hide = new Set(newOrders.map((o: any) => o.cid));
     return {cargo: fullSrc.cargo, stops: fullSrc.stops.filter((s: any) => { const c = s.pickup || s.drop; return !hide.has(c) && !rejected(c); })};
   }, [fullSrc, newOrders, ost]);
+  const live = !demo && orders.stops.length > 0; // skarpt läge = riktiga jobb inloggade
   // Står ordern redan som Lastad i Opter (t.ex. satt i Opter Driver)?
   const serverLoaded = (s: any) => !!(s.live && s.live.loadSt && s.live.curId === s.live.loadSt.id);
   const route = useMemo(() => {
@@ -187,6 +192,7 @@ function AppInner(): React.JSX.Element {
       const at = s.pickup ? o.loadedAt : o.doneAt;
       if (at && at > last && s.lat != null) { last = at; cur = {lat: s.lat, lng: s.lng}; }
     }
+    if (gpsRoutePos && Date.now() - gpsRoutePos.time < 10 * 60000) cur = {lat: gpsRoutePos.lat, lng: gpsRoutePos.lng};
     const anyDone = Object.keys(ost).length > 0;
     const now = src === DEMO && !anyDone ? new Date(new Date().setHours(6, 0, 0, 0)).getTime() : Date.now();
     try {
@@ -194,7 +200,7 @@ function AppInner(): React.JSX.Element {
     } catch (e: any) {
       return {error: String(e?.message || e)};
     }
-  }, [src, ost]);
+  }, [src, ost, gpsRoutePos]);
 
   // Ladda/spara orderstatus (per dag, demo separat) och sparade namn.
   const ostLoaded = useRef<string | null>(null);
@@ -375,8 +381,48 @@ function AppInner(): React.JSX.Element {
     setDiag(false);
     try { await client.disconnect(); } catch (e) {}
     savedLogin.current = null; saveJSON(LOGIN_KEY, null);
+    try { NativeModules.RuttLocation && NativeModules.RuttLocation.stop(); } catch (e) {}
     setPass(''); setDriverName(''); setOrders({cargo: {}, stops: []}); setMsgs([]); setDemo(false); setStep('login');
   }
+
+  // ---- GPS: be om behörighet, starta tjänsten, skicka senaste position med serverns intervall ----
+  useEffect(() => { loadJSON('rutt.gps.v1', true).then((v: any) => setGpsOn(v !== false)); }, []);
+  useEffect(() => {
+    const RL = NativeModules.RuttLocation;
+    if (!RL || Platform.OS !== 'android') return;
+    if (step !== 'route' || !live || !gpsOn) { RL.stop().catch(() => {}); setGps({state: 'av'}); return; }
+    let alive = true, timer: any = null, lastSent = 0;
+    const kmBetween = (a: any, b: any) => { const r = Math.PI / 180, x = (b.lng - a.lng) * r * Math.cos(((a.lat + b.lat) / 2) * r), y = (b.lat - a.lat) * r; return Math.sqrt(x * x + y * y) * 6371; };
+    (async () => {
+      setGps({state: 'startar'});
+      try {
+        const fine = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION, {
+          title: 'RUTT behöver din position', message: 'Kontoret ser var du är, precis som i Opter Driver. Positionen skickas bara när du är inloggad.', buttonPositive: 'OK',
+        });
+        if (Number(Platform.Version) >= 33) { try { await PermissionsAndroid.request('android.permission.POST_NOTIFICATIONS' as any); } catch (e) {} }
+        if (fine !== PermissionsAndroid.RESULTS.GRANTED) { if (alive) setGps({state: 'nekad'}); return; }
+        const sec = client.positionInterval();
+        await RL.start(sec);
+        if (alive) setGps({state: 'söker'});
+        const tick = async () => {
+          try {
+            const l = await RL.getLast();
+            if (l && l.time > lastSent) {
+              await client.sendPosition(l);
+              lastSent = l.time;
+              if (!alive) return;
+              setGps({state: 'ok', sentAt: Date.now(), acc: l.acc});
+              setGpsRoutePos((prev: any) => (!prev || kmBetween(prev, l) > 1 || Date.now() - prev.time > 9 * 60000 ? {lat: l.lat, lng: l.lng, time: Date.now()} : prev));
+            }
+          } catch (e) { if (alive) setGps(g => ({...g, state: 'fel'})); }
+        };
+        await tick();
+        timer = setInterval(tick, sec * 1000);
+      } catch (e) { if (alive) setGps({state: 'fel'}); }
+    })();
+    return () => { alive = false; if (timer) clearInterval(timer); };
+  }, [step, live, gpsOn]);
+  function toggleGps() { const v = !gpsOn; setGpsOn(v); saveJSON('rutt.gps.v1', v); }
 
   // Vibrera när en ny order kommer in.
   const lastNew = useRef(0);
@@ -420,7 +466,6 @@ function AppInner(): React.JSX.Element {
     return [...msgs, ...keep].sort((a, b) => (a.created ? a.created.getTime() : 0) - (b.created ? b.created.getTime() : 0));
   }, [msgs, pending]);
 
-  const live = !demo && orders.stops.length > 0; // skarpt läge = riktiga jobb inloggade
 
   // Arbetstid → Opter (live). RST-typ + nytt visningsläge.
   async function doWork(rst: number, newState: 'igång' | 'rast' | 'lunch' | 'slut') {
@@ -522,6 +567,16 @@ function AppInner(): React.JSX.Element {
               <Text style={s.workAction}>Rast / lunch ›</Text>
             </Pressable>
           )}
+          {tab !== 'chat' && tab !== 'nytt' && live && (
+            <Pressable style={s.gpsRow} onPress={() => setDiag(true)}>
+              <View style={[s.workDot, {width: 7, height: 7, backgroundColor: gps.state === 'ok' ? C.accent2 : gps.state === 'nekad' || gps.state === 'fel' ? C.bad : gps.state === 'av' ? C.faint : C.accent}]} />
+              <Text style={[s.gpsTxt, (gps.state === 'nekad' || gps.state === 'fel') && {color: C.bad}]}>
+                {gps.state === 'ok' ? `GPS · position skickad ${hhmm(new Date(gps.sentAt || Date.now()))}${gps.acc ? ` (±${Math.round(gps.acc)} m)` : ''}`
+                  : gps.state === 'söker' ? 'GPS · söker position…' : gps.state === 'startar' ? 'GPS · startar…'
+                  : gps.state === 'nekad' ? 'GPS · platsbehörighet saknas – tryck' : gps.state === 'fel' ? 'GPS · kunde inte skicka – försöker igen' : 'GPS · avstängd'}
+              </Text>
+            </Pressable>
+          )}
 
           {tab !== 'chat' && tab !== 'nytt' && !orders.stops.length && !demo && (
             <View style={s.emptyBox}>
@@ -550,6 +605,14 @@ function AppInner(): React.JSX.Element {
             {crashes.slice(0, 3).map((c: any, i: number) => <Text key={i} style={[s.sheetNote, {marginTop: 4, color: C.bad}]} numberOfLines={2}>{c.at.slice(11, 16)} · {c.msg}</Text>)}
           </View>
         )}
+        <Pressable style={[s.sheetBtn, {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16}]} onPress={toggleGps}>
+          <View style={{flex: 1}}>
+            <Text style={s.sheetBtnTxt}>Skicka GPS-position</Text>
+            <Text style={[s.sheetNote, {marginTop: 2}]}>Kontoret ser var du är (som Opter Driver). Var {client.positionInterval ? client.positionInterval() : 60}:e sekund.</Text>
+          </View>
+          <Text style={{color: gpsOn ? C.accent2 : C.faint, fontWeight: '900', fontSize: 15}}>{gpsOn ? 'PÅ' : 'AV'}</Text>
+        </Pressable>
+        {gps.state === 'nekad' && <Text style={[s.sheetNote, {color: C.bad}]}>Platsbehörighet saknas: öppna telefonens Inställningar → Appar → RUTT → Behörigheter → Plats → Tillåt.</Text>}
         {step === 'route' && (
           <Pressable style={[s.sheetBtn, {alignItems: 'center', marginTop: 16}]} onPress={logout}>
             <Text style={s.sheetBtnTxt}>Logga ut / byt förare</Text>
@@ -711,6 +774,8 @@ const s = StyleSheet.create({
   empty: {color: C.dim, fontSize: 14},
   tabs: {flexDirection: 'row', gap: 8, paddingHorizontal: 18, paddingTop: 4, paddingBottom: 10},
   tabBtn: {paddingVertical: 8, paddingHorizontal: 18, borderRadius: 20, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1},
+  gpsRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 22, marginTop: -4, marginBottom: 8},
+  gpsTxt: {color: C.faint, fontSize: 12, fontWeight: '600'},
   tabAlert: {backgroundColor: C.accent, borderColor: C.accent},
   tabOn: {backgroundColor: C.accent, borderColor: C.accent},
   tabTxt: {color: C.dim, fontSize: 14, fontWeight: '600'},

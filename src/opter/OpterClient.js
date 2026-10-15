@@ -272,6 +272,18 @@ export default class OpterClient {
     return {confirmed, imageDropped, rutt: P.toRutt(this.lastDecoded)};
   }
 
+  // GPS-position → Opter (som Opter Driver). Skickas utan full synk tillbaka (lätt anrop).
+  async sendPosition(loc) {
+    if (!this.logon) return false;
+    const res = await this.send(P.MessageType.Synchronize, P.encodePosition(loc), {once: true});
+    if (res && res.payload && res.payload.length) this._take(P.decodeSync(res.payload));
+    return true;
+  }
+  positionInterval() {
+    const v = parseInt(P.setting(this.lastDecoded, 'PositionUpdateInterval', 60), 10);
+    return isFinite(v) && v >= 5 ? v : 60;
+  }
+
   // Felsökning: färsk full synk, allt utom förarlista/loggar, som JSON-vänligt objekt.
   async dump() {
     let d = this.lastDecoded || {rows: []}, note = 'senaste synk';
