@@ -223,10 +223,12 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
               <Text style={[o.factV, late && {color: C.bad}]} numberOfLines={1}>{whenText(st.tLatest)}</Text>
             </View>
           ) : null}
-          <View style={o.fact}>
-            <Text style={o.factK}>{kolli ? 'Kollin' : 'Gods'}</Text>
-            <Text style={o.factV} numberOfLines={1}>{kolli || (c.pal ? `${c.pal} pl` : '—')}</Text>
-          </View>
+          {kolli || c.pal ? (
+            <View style={o.fact}>
+              <Text style={o.factK}>{kolli ? 'Kollin' : 'Pallplatser'}</Text>
+              <Text style={o.factV} numberOfLines={1}>{kolli || c.pal}</Text>
+            </View>
+          ) : null}
           {plan && plan.eta ? (
             <View style={o.fact}>
               <Text style={o.factK}>Framme</Text>
@@ -270,8 +272,8 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
               <View key={t.num} style={o.person}>
                 <Face label={t.label} />
                 <View style={{flex: 1, minWidth: 0}}>
-                  <Text style={o.pName} numberOfLines={1}>{t.label}</Text>
-                  <Text style={o.pNum}>{prettyPhone(t.num)}</Text>
+                  <Text style={o.pName} numberOfLines={1}>{String(t.label).replace(/\s*\(mobil\)/i, '')}</Text>
+                  <Text style={o.pNum}>{/\(mobil\)/i.test(t.label) ? 'Mobil · ' : ''}{prettyPhone(t.num)}</Text>
                 </View>
                 {isMobile(t.num) && (
                   <Pressable hitSlop={6} style={o.pBtn} onPress={() => setSms({name: String(t.label).replace(/\s*\(mobil\)/, ''), num: t.num, who: st.who})}>
