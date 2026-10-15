@@ -22,7 +22,14 @@ const Table = [
   'ShipmentAddServiceType', 'ShipmentArticle', 'ShipmentChange',
   'ShipmentChangeValue', 'ShipmentDamage', 'ShipmentPackage',
   'ShipmentPackagePod', 'ShipmentPackageScan', 'ShipmentPod',
-  'ShipmentPodSuggestion',
+  'ShipmentPodSuggestion', 'ShipmentPodType', 'ShipmentPriceItem', 'ShipmentScan',
+  'ShipmentStatus', 'ShipmentStatusLog', 'UnknownPackageScan', 'UnknownShipmentScan',
+  'Vehicle', 'DataChange', 'Setting', 'ShipmentProject', 'ShipmentQuery', 'ShipmentAnswer',
+  'MaterialSite', 'Attachment', 'MaterialSitePriceCollectionCalculation', 'DamageEvent',
+  'DamageReason', 'DamageTypeEvent', 'DamageEventReason', 'ContainerItem', 'LooseItem',
+  'LooseItemType', 'TimeFailureReason', 'TimeFailureExplanation', 'ScanDamage', 'Lock',
+  'DamageAttachment', 'ShipmentDamagePackage', 'ShipmentCustomer', 'Query', 'ScanQueryAnswer',
+  'Office',
 ];
 const TableOrd = Object.fromEntries(Table.map((n, i) => [n, i]));
 
@@ -179,6 +186,9 @@ function encodeWorkStatus({ offId, rstType, resId, vhcId }) {
   return w.build();
 }
 
+/* Tom uppladdning som ber om full synk tillbaka (EndData 0,0). */
+function encodeFullSync() { const w = W(); wEndData(w, null, null); return w.build(); }
+
 /* ---- inloggning ---- */
 function logonPayload({ user, pass, major = 2, minor = 1, build = 12, sysInfo = 'rutt', deviceId }) {
   return Buffer.from([user, pass, major, minor, build, sysInfo, deviceId].join('\n'), CHARSET);
@@ -311,5 +321,5 @@ function toRutt(decoded) {
 module.exports = {
   MessageType, Table, DT, RST, F, frame, unframe, decodeSync, ticksToDate,
   logonPayload, parseLogon, resourceList, encodeStartWork, encodeWorkStatus, toRutt,
-  messageList, encodeMarkRead, encodeSendMessage, lastIdentity,
+  messageList, encodeMarkRead, encodeSendMessage, lastIdentity, encodeFullSync,
 };

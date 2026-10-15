@@ -223,6 +223,28 @@ export default class OpterClient {
     return {msgs: this.messages(), stored};
   }
 
+  // Felsökning: färsk full synk, allt utom förarlista/loggar, som JSON-vänligt objekt.
+  async dump() {
+    let d = this.lastDecoded || {rows: []}, note = 'senaste synk';
+    try {
+      const res = await this.send(P.MessageType.Synchronize, P.encodeFullSync());
+      d = P.decodeSync(res.payload); note = 'färsk full synk (svarstyp ' + res.type + ')';
+    } catch (e) { note = 'full synk misslyckades: ' + String(e && e.message || e); }
+    const SKIP = new Set(['Resource', 'LogData', 'Position', 'DataChange']);
+    const counts = {}, rows = [];
+    for (const r of d.rows || []) {
+      counts[r.table] = (counts[r.table] || 0) + 1;
+      if (SKIP.has(r.table)) continue;
+      rows.push({t: r.table, k: [r.key.identityId, r.key.offId, r.key.xxxId], c: r.columns});
+    }
+    return {
+      app: 'RUTT', at: new Date().toISOString(), note,
+      logon: this.logon ? {acdOffId: this.logon.acdOffId, resId: this.resId, vhcId: this.logon.vhcId, name: this.logon.name} : null,
+      decoded: (d.decodedBytes || 0) + '/' + (d.totalBytes || 0), error: d.error || null,
+      syncTimes: d.syncTimes || null, counts, rows,
+    };
+  }
+
   async disconnect() {
     try {
       await this.send(P.MessageType.Disconnect, Buffer.alloc(0), {retry: false});

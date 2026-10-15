@@ -6,7 +6,7 @@
 import React, {useMemo, useState, useEffect, useRef} from 'react';
 import {
   View, StatusBar, StyleSheet, Text, TextInput, Pressable,
-  FlatList, ActivityIndicator, ScrollView, Keyboard,
+  FlatList, ActivityIndicator, ScrollView, Keyboard, Share,
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, hhmm} from './src/ui/theme';
@@ -22,7 +22,7 @@ import computeRoute, {slotWhere} from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '15 okt · orderlista + chatt v3';
+const BUILD = '15 okt · felsök-export';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -70,6 +70,19 @@ function AppInner(): React.JSX.Element {
   const [signStop, setSignStop] = useState<any>(null); // stopp som signeras just nu
   const [toast, setToast] = useState<{text: string; undo: () => void} | null>(null);
   const toastTimer = useRef<any>(null);
+  const [diag, setDiag] = useState(false);
+  const [diagBusy, setDiagBusy] = useState(false);
+  // Skicka rådata från Opter (via telefonens dela-meny → Gmail till dig själv) så Claude kan läsa den.
+  async function sendDump() {
+    if (!client.logon) { setErr('Logga in mot Opter först.'); setDiag(false); return; }
+    setDiagBusy(true);
+    try {
+      const d = await client.dump();
+      const json = JSON.stringify(d);
+      await Share.share({title: 'RUTT orderdata ' + new Date().toLocaleString('sv-SE'), message: 'RUTT-DATA v1\n' + json});
+    } catch (e: any) { setErr('Kunde inte ta fram data: ' + String(e?.message || e)); }
+    finally { setDiagBusy(false); setDiag(false); }
+  }
 
   const [server, setServer] = useState('foriase.opter.cloud');
   const [port, setPort] = useState('443');
@@ -245,7 +258,7 @@ function AppInner(): React.JSX.Element {
       <View style={s.head}>
         <View style={{flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between'}}>
           <Text style={s.brand}>RUTT</Text>
-          <Text style={s.build}>{BUILD}</Text>
+          <Pressable hitSlop={10} onPress={() => setDiag(true)}><Text style={s.build}>{BUILD}  ⓘ</Text></Pressable>
         </View>
         <Text style={s.tag}>{title}</Text>
       </View>
@@ -312,6 +325,13 @@ function AppInner(): React.JSX.Element {
           {tab !== 'chat' && route && (route as any).error && <Text style={s.err}>Optimeringsfel: {(route as any).error}</Text>}
         </View>
       )}
+
+      <Sheet open={diag} onClose={() => setDiag(false)} title="Felsök" sub={`Bygge: ${BUILD}`}>
+        <Text style={s.sheetNote}>Skickar Opters rådata för dina jobb (order, adresser, kolli, statustyper, kvittenstyper) så Claude kan läsa den. Välj Gmail och skicka till dig själv.</Text>
+        <Pressable style={[s.primaryBtn, diagBusy && {opacity: 0.5}]} disabled={diagBusy} onPress={sendDump}>
+          <Text style={s.primaryBtnTxt}>{diagBusy ? 'Hämtar från Opter…' : 'Skicka orderdata till Claude'}</Text>
+        </Pressable>
+      </Sheet>
 
       <WorkSheet open={workSheet} work={work} live={live} onClose={() => setWorkSheet(false)} onPick={doWork} />
       {signStop && (
