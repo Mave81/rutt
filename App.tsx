@@ -6,13 +6,14 @@
 import React, {useMemo, useState, useEffect, useRef} from 'react';
 import {
   View, StatusBar, StyleSheet, Text, TextInput, Pressable,
-  FlatList, ActivityIndicator, ScrollView, Keyboard, Share,
+  FlatList, ActivityIndicator, ScrollView, Keyboard, Share, Vibration,
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, hhmm} from './src/ui/theme';
 import {Sheet} from './src/ui/parts';
 import OrdersView from './src/ui/OrdersView';
 import SignScreen from './src/ui/SignScreen';
+import NewOrdersView from './src/ui/NewOrdersView';
 import {loadJSON, saveJSON, ORDERS_KEY, NAMES_KEY, companyKey, rememberName} from './src/store';
 import {Buffer} from 'buffer';
 import {PixelRatio} from 'react-native';
@@ -26,7 +27,7 @@ import computeRoute, {slotWhere} from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '15 okt · skarp Lastad/Lossad';
+const BUILD = '15 okt · nytt + autologin';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -50,17 +51,56 @@ const DEMO = {
 };
 
 
+// ---- Skyddsnät: fel får aldrig stänga appen. Felet loggas (syns under Felsök) och appen fortsätter. ----
+const CRASH_KEY = 'rutt.crashes.v1';
+async function logCrash(e: any, where: string) {
+  try {
+    const list: any[] = await loadJSON(CRASH_KEY, []);
+    list.unshift({at: new Date().toISOString(), where, msg: String((e && e.message) || e), stack: String((e && e.stack) || '').slice(0, 700), build: BUILD});
+    await saveJSON(CRASH_KEY, list.slice(0, 12));
+  } catch (x) {}
+}
+const g: any = globalThis as any;
+if (g.ErrorUtils && !g.__ruttGuard) {
+  g.__ruttGuard = true;
+  const prev = g.ErrorUtils.getGlobalHandler && g.ErrorUtils.getGlobalHandler();
+  g.ErrorUtils.setGlobalHandler((e: any, isFatal?: boolean) => {
+    logCrash(e, isFatal ? 'fatal' : 'fel');
+    if (!isFatal && prev) prev(e, isFatal); // icke-fatala: som vanligt. Fatala: svälj så appen lever vidare.
+  });
+}
+class Guard extends React.Component<{children: any}, {err: any}> {
+  state = {err: null as any};
+  static getDerivedStateFromError(err: any) { return {err}; }
+  componentDidCatch(err: any) { logCrash(err, 'vy'); }
+  render() {
+    if (!this.state.err) return this.props.children;
+    return (
+      <View style={{flex: 1, backgroundColor: C.bg, justifyContent: 'center', padding: 28}}>
+        <Text style={{color: C.ink, fontSize: 22, fontWeight: '800'}}>Något gick snett</Text>
+        <Text style={{color: C.dim, fontSize: 14, marginTop: 8, lineHeight: 20}}>Felet är sparat så det kan rättas. Inget av ditt arbete har försvunnit.</Text>
+        <Text style={{color: C.faint, fontSize: 12, marginTop: 12}} numberOfLines={4}>{String(this.state.err && this.state.err.message || this.state.err)}</Text>
+        <Pressable onPress={() => this.setState({err: null})} style={{backgroundColor: C.accent, borderRadius: 12, paddingVertical: 15, alignItems: 'center', marginTop: 22}}>
+          <Text style={{color: C.onAccent, fontSize: 16, fontWeight: '800'}}>Fortsätt</Text>
+        </Pressable>
+      </View>
+    );
+  }
+}
+
 export default function App(): React.JSX.Element {
   return (
     <SafeAreaProvider>
-      <AppInner />
+      <Guard>
+        <AppInner />
+      </Guard>
     </SafeAreaProvider>
   );
 }
 
 function AppInner(): React.JSX.Element {
   const [step, setStep] = useState<'login' | 'pick' | 'route'>('login');
-  const [tab, setTab] = useState<'plan' | 'last' | 'chat'>('plan');
+  const [tab, setTab] = useState<'nytt' | 'plan' | 'last' | 'chat'>('plan');
   const [msgs, setMsgs] = useState<any[]>([]);
   const [msgText, setMsgText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -73,18 +113,23 @@ function AppInner(): React.JSX.Element {
   const [workSheet, setWorkSheet] = useState(false);
   // Orderstatus per order (cid): {loadedAt, doneAt, pod}. Sparas lokalt per dag.
   const [ost, setOst] = useState<Record<string, any>>({});
+  const [newState, setNewState] = useState<Record<string, 'sending' | 'failed'>>({});
   const [names, setNames] = useState<Record<string, string[]>>({}); // sparade mottagarnamn per företag
   const [signStop, setSignStop] = useState<any>(null); // stopp som signeras just nu
   const [toast, setToast] = useState<{text: string; undo: (() => void) | null} | null>(null);
   const toastTimer = useRef<any>(null);
   const [diag, setDiag] = useState(false);
+  const [driverName, setDriverName] = useState('');
+  const [crashes, setCrashes] = useState<any[]>([]);
+  const podMem = useRef<Record<string, any>>({}); // bilddata hålls i minnet, inte i lagringen
   const [diagBusy, setDiagBusy] = useState(false);
   // Skicka rådata från Opter (via telefonens dela-meny → Gmail till dig själv) så Claude kan läsa den.
   async function sendDump() {
     if (!client.logon) { setErr('Logga in mot Opter först.'); setDiag(false); return; }
     setDiagBusy(true);
     try {
-      const d = await client.dump();
+      const d: any = await client.dump();
+      d.crashes = await loadJSON(CRASH_KEY, []);
       const json = JSON.stringify(d);
       await Share.share({title: 'RUTT orderdata ' + new Date().toLocaleString('sv-SE'), message: 'RUTT-DATA v1\n' + json});
     } catch (e: any) { setErr('Kunde inte ta fram data: ' + String(e?.message || e)); }
@@ -106,7 +151,25 @@ function AppInner(): React.JSX.Element {
     [resources, query],
   );
 
-  const src: any = orders.stops.length ? orders : demo ? DEMO : null;
+  const fullSrc: any = orders.stops.length ? orders : demo ? DEMO : null;
+  // Nya ordrar (ej accepterade i Opter) ligger i "Nytt" och räknas inte in i rutten.
+  const isNewCid = (cid: string) => {
+    if (!fullSrc) return false;
+    const o = ost[cid] || {};
+    if (o.acceptedAt || o.rejectedAt) return false;
+    return fullSrc.stops.some((s: any) => (s.pickup === cid || s.drop === cid) && s.live && s.live.isNew);
+  };
+  const rejected = (cid: string) => !!(ost[cid] && ost[cid].rejectedAt);
+  const newOrders = useMemo(() => {
+    if (!fullSrc) return [];
+    const cids = [...new Set(fullSrc.stops.map((s: any) => s.pickup || s.drop))] as string[];
+    return cids.filter(isNewCid).map(cid => ({cid, pick: fullSrc.stops.find((s: any) => s.pickup === cid), drop: fullSrc.stops.find((s: any) => s.drop === cid), state: newState[cid]}));
+  }, [fullSrc, ost, newState]);
+  const src: any = useMemo(() => {
+    if (!fullSrc) return null;
+    const hide = new Set(newOrders.map((o: any) => o.cid));
+    return {cargo: fullSrc.cargo, stops: fullSrc.stops.filter((s: any) => { const c = s.pickup || s.drop; return !hide.has(c) && !rejected(c); })};
+  }, [fullSrc, newOrders, ost]);
   // Står ordern redan som Lastad i Opter (t.ex. satt i Opter Driver)?
   const serverLoaded = (s: any) => !!(s.live && s.live.loadSt && s.live.curId === s.live.loadSt.id);
   const route = useMemo(() => {
@@ -114,7 +177,8 @@ function AppInner(): React.JSX.Element {
     // Klara steg ut ur planeringen; lastat gods räknas som ombord.
     const stops = src.stops.map((s: any) => {
       const o = ost[s.pickup || s.drop] || {};
-      return {...s, done: s.pickup ? !!(o.loadedAt || o.doneAt || serverLoaded(s)) : !!o.doneAt};
+      const sDone = !!(s.live && s.live.serverDone);
+      return {...s, done: s.pickup ? !!(o.loadedAt || o.doneAt || serverLoaded(s) || sDone) : !!(o.doneAt || sDone)};
     });
     // Där du står nu = senast avklarade steg.
     let cur: any = null, last = 0;
@@ -192,8 +256,26 @@ function AppInner(): React.JSX.Element {
     const o = ost[cid] || {};
     const pick = src && src.stops.find((s: any) => s.pickup === cid);
     const drop = src && src.stops.find((s: any) => s.drop === cid);
-    if (o.doneAt && drop) sendUnload(drop, o.pod || {});
+    if (o.doneAt && drop) sendUnload(drop, podMem.current[cid] || o.pod || {});
     else if (o.loadedAt && pick) sendLoad(pick);
+  }
+
+  async function setOrderStatus(o: any, which: 'accept' | 'reject') {
+    const L = (o.pick && o.pick.live) || (o.drop && o.drop.live);
+    const target = L && (which === 'accept' ? L.acceptSt : L.rejectSt);
+    const mark = () => setOst(x => ({...x, [o.cid]: {...(x[o.cid] || {}), [which === 'accept' ? 'acceptedAt' : 'rejectedAt']: Date.now()}}));
+    if (!live || !target) { mark(); flash(which === 'accept' ? 'Accepterad' : 'Nekad', null); return; }
+    setNewState(s => ({...s, [o.cid]: 'sending'}));
+    try {
+      const r = await client.setStatus(L, target.id, null);
+      if (r.confirmed) {
+        mark();
+        setNewState(s => { const n = {...s}; delete n[o.cid]; return n; });
+        if (r.rutt && r.rutt.stops) setOrders(r.rutt);
+        flash(which === 'accept' ? `Accepterad · ${(o.pick && o.pick.who) || ''}` : 'Nekad', null);
+        if (which === 'accept') setTab('plan');
+      } else setNewState(s => ({...s, [o.cid]: 'failed'}));
+    } catch (e) { setNewState(s => ({...s, [o.cid]: 'failed'})); }
   }
 
   function onLoaded(st: any) {
@@ -220,31 +302,74 @@ function AppInner(): React.JSX.Element {
     const cid = st.drop;
     const prev = ost[cid];
     setSignStop(null);
-    setOst(o => ({...o, [cid]: {...(o[cid] || {}), who: st.who, loadedAt: (o[cid] && o[cid].loadedAt) || Date.now(), doneAt: Date.now(), extras: pod.extras || (o[cid] && o[cid].extras), kolli: pod.kolli, pod: {...pod, photos: (pod.photos || []).map((x: any, i: number) => ({uri: x.uri, b64: i === 0 ? x.b64 : undefined}))}}}));
+    setOst(o => ({...o, [cid]: {...(o[cid] || {}), who: st.who, loadedAt: (o[cid] && o[cid].loadedAt) || Date.now(), doneAt: Date.now(), extras: pod.extras || (o[cid] && o[cid].extras), kolli: pod.kolli, pod: {...pod, photos: (pod.photos || []).map((x: any) => ({uri: x.uri}))}}}));
+    podMem.current[cid] = pod;
     if (pod.name) setNames(n => { const nn = rememberName(n, st.who, pod.name); saveJSON(NAMES_KEY, nn); return nn; });
     sendUnload(st, pod);
     flash(`Lossad · ${st.who || 'order'}`, () => { cancelSend(cid, 'unload'); setOst(o => { const n = {...o}; if (prev) n[cid] = prev; else delete n[cid]; return n; }); });
   }
 
-  async function login() {
-    setErr(''); setBusy(true); setStatus('Ansluter och loggar in…');
+  // Inloggningen sparas på telefonen efter första gången: server, användare, lösenord och ditt namn.
+  const LOGIN_KEY = 'rutt.login.v1';
+  const savedLogin = useRef<any>(null);
+  useEffect(() => {
+    loadJSON(LOGIN_KEY, null).then((v: any) => {
+      if (!v || !v.user || !v.pass) return;
+      savedLogin.current = v;
+      setServer(v.server || server); setPort(v.port || port); setPath(v.path || path); setUser(v.user); setPass(v.pass);
+      if (v.name) setDriverName(v.name);
+      login(v);
+    });
+    loadJSON(CRASH_KEY, []).then((c: any) => setCrashes(c || []));
+  }, []);
+
+  async function login(v?: any) {
+    const cfg = v || {server, port, path, user, pass};
+    setErr(''); setBusy(true);
+    setStatus(v && v.name ? `Välkommen tillbaka ${v.name} – loggar in…` : 'Ansluter och loggar in…');
     try {
-      await client.connect({server: server.trim(), port: port.trim(), app: path.trim(), https: true});
-      const info = await client.doLogon({user: user.trim(), pass});
+      await client.connect({server: String(cfg.server).trim(), port: String(cfg.port).trim(), app: String(cfg.path).trim(), https: true});
+      const info = await client.doLogon({user: String(cfg.user).trim(), pass: cfg.pass});
       if (!info.ok) throw new Error('Inloggning nekad – kolla användarnamn/lösenord');
+      savedLogin.current = {...(savedLogin.current || {}), server: cfg.server, port: cfg.port, path: cfg.path, user: String(cfg.user).trim(), pass: cfg.pass};
       setStatus('Hämtar förarlista…');
       await client.syncRef();
-      if (info.needChoose) { setResources(client.resources()); setStep('pick'); }
-      else await pull(info.resId);
+      if (info.needChoose) {
+        const list = client.resources();
+        setResources(list);
+        const prevRes = savedLogin.current && savedLogin.current.resId;
+        const hit = prevRes && list.find((r: any) => r.resId === prevRes);
+        if (hit) await pull(hit.resId, hit.name); else setStep('pick');
+      } else await pull(info.resId, info.name);
     } catch (e: any) { setErr(String(e?.message || e)); }
     finally { setBusy(false); }
   }
-  async function pull(resId: number) {
-    setBusy(true); setStatus('Hämtar dina jobb…');
-    try { const {rutt} = await client.startWork(resId); setOrders(rutt); setMsgs(client.messages()); setStep('route'); }
+  async function pull(resId: number, name?: string) {
+    setBusy(true); setStatus(name ? `Hej ${name.split(' ')[0]} – hämtar dina jobb…` : 'Hämtar dina jobb…');
+    try {
+      const {rutt} = await client.startWork(resId);
+      setOrders(rutt); setMsgs(client.messages()); setStep('route');
+      const nm = name || (savedLogin.current && savedLogin.current.name) || '';
+      setDriverName(nm);
+      savedLogin.current = {...(savedLogin.current || {}), resId, name: nm};
+      saveJSON(LOGIN_KEY, savedLogin.current);
+    }
     catch (e: any) { setErr(String(e?.message || e)); }
     finally { setBusy(false); }
   }
+  async function logout() {
+    setDiag(false);
+    try { await client.disconnect(); } catch (e) {}
+    savedLogin.current = null; saveJSON(LOGIN_KEY, null);
+    setPass(''); setDriverName(''); setOrders({cargo: {}, stops: []}); setMsgs([]); setDemo(false); setStep('login');
+  }
+
+  // Vibrera när en ny order kommer in.
+  const lastNew = useRef(0);
+  useEffect(() => {
+    if (step === 'route' && newOrders.length > lastNew.current) { try { Vibration.vibrate([0, 350, 180, 350]); } catch (e) {} }
+    lastNew.current = newOrders.length;
+  }, [newOrders.length, step]);
 
   const unread = msgs.filter(m => m.received && !m.confirmed).length;
 
@@ -319,7 +444,7 @@ function AppInner(): React.JSX.Element {
     })();
   }, [tab, msgs, step]);
 
-  const title = step === 'login' ? 'Logga in mot Opter' : step === 'pick' ? 'Välj ditt namn' : (orders.stops.length ? 'Din dag' : demo ? 'Demo' : 'Dina jobb');
+  const title = step === 'login' ? (driverName ? `Välkommen ${driverName}` : 'Logga in mot Opter') : step === 'pick' ? 'Välj ditt namn' : (driverName ? `Välkommen ${driverName}` : demo ? 'Demo' : 'Dina jobb');
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -348,7 +473,7 @@ function AppInner(): React.JSX.Element {
             <TextInput style={s.input} value={user} onChangeText={setUser} autoCapitalize="none" autoCorrect={false} />
             <Text style={s.label}>Lösenord</Text>
             <TextInput style={s.input} value={pass} onChangeText={setPass} secureTextEntry />
-            <Pressable style={s.btn} onPress={login}><Text style={s.btnTxt}>Logga in &amp; hämta</Text></Pressable>
+            <Pressable style={s.btn} onPress={() => login()}><Text style={s.btnTxt}>Logga in &amp; hämta</Text></Pressable>
           </View>
         </ScrollView>
       )}
@@ -357,13 +482,16 @@ function AppInner(): React.JSX.Element {
         <View style={s.wrap}>
           <TextInput style={s.input} value={query} onChangeText={setQuery} placeholder="Sök ditt namn…" placeholderTextColor={C.dim} autoCapitalize="none" />
           <FlatList style={{marginTop: 10}} data={filtered} keyExtractor={r => String(r.resId)}
-            renderItem={({item}) => <Pressable style={s.nameRow} onPress={() => pull(item.resId)}><Text style={s.nameTxt}>{item.name}</Text></Pressable>} />
+            renderItem={({item}) => <Pressable style={s.nameRow} onPress={() => pull(item.resId, item.name)}><Text style={s.nameTxt}>{item.name}</Text></Pressable>} />
         </View>
       )}
 
       {step === 'route' && !busy && (
         <View style={{flex: 1}}>
           <View style={s.tabs}>
+            <Pressable onPress={() => setTab('nytt')} style={[s.tabBtn, tab === 'nytt' && s.tabOn, newOrders.length > 0 && tab !== 'nytt' && s.tabAlert]}>
+              <Text style={[s.tabTxt, tab === 'nytt' && s.tabTxtOn, newOrders.length > 0 && tab !== 'nytt' && {color: C.onAccent}]}>Nytt{newOrders.length ? `  ${newOrders.length}` : ''}</Text>
+            </Pressable>
             <Pressable onPress={() => setTab('plan')} style={[s.tabBtn, tab === 'plan' && s.tabOn]}><Text style={[s.tabTxt, tab === 'plan' && s.tabTxtOn]}>Plan</Text></Pressable>
             <Pressable onPress={() => setTab('last')} style={[s.tabBtn, tab === 'last' && s.tabOn]}><Text style={[s.tabTxt, tab === 'last' && s.tabTxtOn]}>Last</Text></Pressable>
             <Pressable onPress={openChat} style={[s.tabBtn, tab === 'chat' && s.tabOn]}>
@@ -371,7 +499,9 @@ function AppInner(): React.JSX.Element {
             </Pressable>
           </View>
 
-          {tab !== 'chat' && (
+          {tab === 'nytt' && <NewOrdersView orders={newOrders} onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={(o: any) => setOrderStatus(o, 'reject')} />}
+
+          {tab !== 'chat' && tab !== 'nytt' && (
             <Pressable style={s.workBar} onPress={() => setWorkSheet(true)}>
               <View style={[s.workDot, work === 'igång' ? {backgroundColor: C.accent2} : work === 'slut' ? {backgroundColor: C.dim} : {backgroundColor: C.accent}]} />
               <Text style={s.workTxt}>{work === 'igång' ? 'Arbetspass igång' : work === 'rast' ? 'På rast' : work === 'lunch' ? 'På lunch' : 'Pass avslutat'}</Text>
@@ -379,7 +509,7 @@ function AppInner(): React.JSX.Element {
             </Pressable>
           )}
 
-          {tab !== 'chat' && !orders.stops.length && !demo && (
+          {tab !== 'chat' && tab !== 'nytt' && !orders.stops.length && !demo && (
             <View style={s.emptyBox}>
               <Text style={s.empty}>Inga aktiva jobb just nu.</Text>
               {!demo && <Pressable style={s.ghost} onPress={() => setDemo(true)}><Text style={s.ghostTxt}>Visa demo så du ser planen</Text></Pressable>}
@@ -391,7 +521,7 @@ function AppInner(): React.JSX.Element {
           )}
           {tab === 'last' && route && !(route as any).error && <LastView route={route} cargo={src.cargo} />}
           {tab === 'chat' && <ChatView msgs={chatList} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} onRetry={deliver} />}
-          {tab !== 'chat' && route && (route as any).error && <Text style={s.err}>Optimeringsfel: {(route as any).error}</Text>}
+          {tab !== 'chat' && tab !== 'nytt' && route && (route as any).error && <Text style={s.err}>Optimeringsfel: {(route as any).error}</Text>}
         </View>
       )}
 
@@ -400,6 +530,17 @@ function AppInner(): React.JSX.Element {
         <Pressable style={[s.primaryBtn, diagBusy && {opacity: 0.5}]} disabled={diagBusy} onPress={sendDump}>
           <Text style={s.primaryBtnTxt}>{diagBusy ? 'Hämtar från Opter…' : 'Skicka orderdata till Claude'}</Text>
         </Pressable>
+        {crashes.length > 0 && (
+          <View style={{marginTop: 14}}>
+            <Text style={s.sheetNote}>Senaste fel ({crashes.length}) – skickas med i orderdatan:</Text>
+            {crashes.slice(0, 3).map((c: any, i: number) => <Text key={i} style={[s.sheetNote, {marginTop: 4, color: C.bad}]} numberOfLines={2}>{c.at.slice(11, 16)} · {c.msg}</Text>)}
+          </View>
+        )}
+        {step === 'route' && (
+          <Pressable style={[s.sheetBtn, {alignItems: 'center', marginTop: 16}]} onPress={logout}>
+            <Text style={s.sheetBtnTxt}>Logga ut / byt förare</Text>
+          </Pressable>
+        )}
       </Sheet>
 
       <WorkSheet open={workSheet} work={work} live={live} onClose={() => setWorkSheet(false)} onPick={doWork} />
@@ -556,6 +697,7 @@ const s = StyleSheet.create({
   empty: {color: C.dim, fontSize: 14},
   tabs: {flexDirection: 'row', gap: 8, paddingHorizontal: 18, paddingTop: 4, paddingBottom: 10},
   tabBtn: {paddingVertical: 8, paddingHorizontal: 18, borderRadius: 20, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1},
+  tabAlert: {backgroundColor: C.accent, borderColor: C.accent},
   tabOn: {backgroundColor: C.accent, borderColor: C.accent},
   tabTxt: {color: C.dim, fontSize: 14, fontWeight: '600'},
   tabTxtOn: {color: '#2a1d0c'},

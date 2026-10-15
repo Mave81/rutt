@@ -46,7 +46,7 @@ const RST = { None: 0, StartWork: 1, EndWork: 2, StartLunch: 3, EndLunch: 4, Sta
 /* Fältnummer (ordinal i varje entitets PropertyNumber-enum) */
 const F = {
   Address: { 2: 'line1', 3: 'line2', 4: 'line3', 5: 'company', 6: 'street', 7: 'streetNo', 8: 'zip', 9: 'city', 11: 'entreCode', 12: 'phone', 16: 'driverMessage', 17: 'info', 18: 'lng', 19: 'lat' },
-  Resource: { 1: 'name', 2: 'shortName', 3: 'code', 4: 'defVehicle', 251: 'resId' },
+  Resource: { 1: 'name', 2: 'shortId', 3: 'externalId' },
   Shipment: {
     2: 'adrFrom', 3: 'adrTo', 11: 'shsId', 16: 'earliestPickup', 17: 'latestPickup',
     18: 'earliestDelivery', 19: 'latestDelivery', 20: 'customer',
@@ -324,8 +324,8 @@ function resourceList(decoded) {
   const out = [];
   for (const r of decoded.rows) {
     if (r.table !== 'Resource') continue;
-    const resId = r.columns.resId != null ? r.columns.resId : r.key.xxxId;
-    const name = r.columns.name || r.columns.shortName || ('Resurs ' + resId);
+    const resId = r.key.xxxId;
+    const name = r.columns.name || r.columns.shortId || ('Resurs ' + resId);
     if (resId) out.push({ resId, name });
   }
   out.sort((a, b) => a.name.localeCompare(b.name, 'sv'));
@@ -427,10 +427,16 @@ function toRutt(decoded) {
     const loadSt = byName(/^lastad$/i) || statuses.find(s => s.pickup && !s.delivery) || null;
     const unloadSt = byName(/^lossad$/i) || statuses.find(s => s.delivery || s.completed) || null;
     const curSt = statuses.find(s => s.id === c.shsId) || null;
+    // Som Opter: ny tills aktuell status har accepterad/hämtning/leverans/klar/nekad.
+    const isNew = !curSt || !(curSt.accepted || curSt.pickup || curSt.delivery || curSt.completed || curSt.rejected);
+    const acceptSt = statuses.find(s => s.accepted && !s.rejected) || byName(/bekräftad|accepterad/i) || null;
+    const rejectSt = statuses.find(s => s.rejected) || byName(/nekad/i) || null;
+    const serverDone = !!(curSt && (curSt.completed || (curSt.delivery && !curSt.pickup)));
     const spts = decoded.rows.filter(x => x.table === 'ShipmentPodType' && belongs(x, shiId) && !x.columns.revoked).map(x => ({id: x.key.xxxId, kind: 'spt', ...x.columns}));
     const podList = spts.length ? spts : defPods;
     const podType = podList.find(pt => /lossad/i.test(String(pt.name || ''))) || podList.find(pt => pt.isDefault) || podList[0] || null;
     const live = { key: r.key, hdr: r.hdr, shiId, offId: r.key.offId, statuses: statuses.map(s => ({id: s.id, name: s.name})), cur: curSt ? curSt.name : null, curId: c.shsId || 0,
+      isNew, serverDone, acceptSt: acceptSt ? {id: acceptSt.id, name: acceptSt.name} : null, rejectSt: rejectSt ? {id: rejectSt.id, name: rejectSt.name} : null,
       loadSt: loadSt ? {id: loadSt.id, name: loadSt.name} : null, unloadSt: unloadSt ? {id: unloadSt.id, name: unloadSt.name, pod: !!unloadSt.pod} : null,
       podType: podType ? {id: podType.id, kind: podType.kind, name: podType.name} : null };
     const pkgText = pkgs.map(p => [p.quantity ? p.quantity + ' st' : '', p.packageType, p.text].filter(Boolean).join(' ')).filter(Boolean).join(', ');
