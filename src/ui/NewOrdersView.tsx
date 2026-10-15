@@ -4,6 +4,7 @@
  */
 import React, {useState} from 'react';
 import {FlatList, Linking, Pressable, StyleSheet, Text, View} from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, prettyPhone, whenText} from './theme';
 import {Sheet} from './parts';
 
@@ -15,12 +16,14 @@ export type NewOrder = {cid: string; pick: any; drop: any; state?: 'sending' | '
 export default function NewOrdersView({orders, onAccept, onReject}: {orders: NewOrder[]; onAccept: (o: NewOrder) => void; onReject: (o: NewOrder) => void}) {
   const [full, setFull] = useState<Record<string, boolean>>({});
   const [confirmReject, setConfirmReject] = useState<NewOrder | null>(null);
+  const bottom = useSafeAreaInsets().bottom + 40;
   return (
     <View style={{flex: 1}}>
       <FlatList
         data={orders}
+        style={{flex: 1}}
         keyExtractor={o => o.cid}
-        contentContainerStyle={{paddingHorizontal: 14, paddingBottom: 30}}
+        contentContainerStyle={{paddingHorizontal: 14, paddingBottom: bottom}}
         ListEmptyComponent={<Text style={n.empty}>Inga nya ordrar. Nya uppdrag dyker upp här först.</Text>}
         renderItem={({item}) => {
           const p = item.pick || {}, d = item.drop || {};

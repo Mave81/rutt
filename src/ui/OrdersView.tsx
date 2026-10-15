@@ -8,6 +8,7 @@
  */
 import React, {useMemo, useState} from 'react';
 import {FlatList, Linking, Pressable, StyleSheet, Text, View} from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, hhmm, prettyPhone, whenText} from './theme';
 import {Sheet} from './parts';
 import {MoreSheet} from './OrderExtras';
@@ -50,6 +51,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   const [more, setMore] = useState<{st: any; cid: string} | null>(null);
   const [fullInfo, setFullInfo] = useState<Record<string, boolean>>({});
   const now = Date.now();
+  const bottom = useSafeAreaInsets().bottom + 40;
 
   // Bygg raderna ur körordningen: hämtningar alltid; lämningar bara när godset är lastat.
   const rows: Row[] = useMemo(() => {
@@ -96,9 +98,10 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     const orderLine = [st.orderNo && `Order ${st.orderNo}`, st.freightBill && st.freightBill !== st.orderNo && `Fraktsedel ${st.freightBill}`, (os.kolli || st.kolli) ? `${os.kolli || st.kolli} kollin` : '', st.service].filter(Boolean).join('  ·  ');
     const extrasN = Object.keys(os.extras || {}).length + ((os.damages && os.damages.length) || 0);
 
+    const Card: any = isNext ? View : Pressable;
     return (
-      <Pressable
-        onPress={() => !isNext && setOpen(open === cid ? null : cid)}
+      <Card
+        {...(isNext ? {} : {onPress: () => setOpen(open === cid ? null : cid)})}
         style={[o.card, isNext && o.cardNext, !expanded && o.cardCompact]}>
         {isNext && <Text style={[o.nextTag, {color: tone}]}>NÄSTA</Text>}
 
@@ -174,7 +177,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
             </View>
           </>
         )}
-      </Pressable>
+      </Card>
     );
   };
 
@@ -189,7 +192,8 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         data={rows}
         keyExtractor={r => r.kind + r.cid}
         renderItem={renderRow}
-        contentContainerStyle={{paddingHorizontal: 14, paddingBottom: 30}}
+        style={{flex: 1}}
+        contentContainerStyle={{paddingHorizontal: 14, paddingBottom: bottom}}
         ListEmptyComponent={<Text style={o.allDone}>Allt är klart för idag. Snyggt jobbat!</Text>}
         ListFooterComponent={
           later.length ? (
@@ -302,11 +306,13 @@ const o = StyleSheet.create({
 
 /* ---- Klart: allt som är lossat (i RUTT eller i Opter) ---- */
 export function DoneView({done, onRetry}: {done: any[]; onRetry: (cid: string) => void}) {
+  const bottom = useSafeAreaInsets().bottom + 40;
   return (
     <FlatList
       data={done}
+      style={{flex: 1}}
       keyExtractor={d => String(d.cid)}
-      contentContainerStyle={{paddingHorizontal: 14, paddingBottom: 30}}
+      contentContainerStyle={{paddingHorizontal: 14, paddingBottom: bottom}}
       ListEmptyComponent={<Text style={o.allDone}>Inget klart än idag.</Text>}
       renderItem={({item: d}) => (
         <View style={o.doneCard}>

@@ -27,7 +27,7 @@ import computeRoute, {slotWhere} from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '15 okt · flikar som Opter';
+const BUILD = '15 okt · scroll + Klart';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -562,7 +562,7 @@ function AppInner(): React.JSX.Element {
 
       {step === 'route' && !busy && (
         <View style={{flex: 1}}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{flexGrow: 0}} contentContainerStyle={s.tabs}>
+          <View style={s.tabs}>
             <Pressable onPress={() => setTab('nytt')} style={[s.tabBtn, tab === 'nytt' && s.tabOn, newOrders.length > 0 && tab !== 'nytt' && s.tabAlert]}>
               <Text style={[s.tabTxt, tab === 'nytt' && s.tabTxtOn, newOrders.length > 0 && tab !== 'nytt' && {color: C.onAccent}]}>Nytt{newOrders.length ? `  ${newOrders.length}` : ''}</Text>
             </Pressable>
@@ -574,7 +574,7 @@ function AppInner(): React.JSX.Element {
             <Pressable onPress={openChat} style={[s.tabBtn, tab === 'chat' && s.tabOn]}>
               <Text style={[s.tabTxt, tab === 'chat' && s.tabTxtOn]}>Chatt{unread ? `  ${unread}` : ''}</Text>
             </Pressable>
-          </ScrollView>
+          </View>
 
           {tab === 'klart' && <DoneView done={doneOrders} onRetry={retrySync} />}
           {tab === 'nytt' && <NewOrdersView orders={newOrders} onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={(o: any) => setOrderStatus(o, 'reject')} />}
@@ -791,13 +791,13 @@ const s = StyleSheet.create({
   nameTxt: {color: C.ink, fontSize: 16},
   emptyBox: {paddingHorizontal: 22, paddingTop: 6},
   empty: {color: C.dim, fontSize: 14},
-  tabs: {flexDirection: 'row', gap: 8, paddingHorizontal: 18, paddingTop: 4, paddingBottom: 10},
-  tabBtn: {paddingVertical: 8, paddingHorizontal: 18, borderRadius: 20, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1},
+  tabs: {flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingTop: 4, paddingBottom: 10},
+  tabBtn: {flex: 1, alignItems: 'center', paddingVertical: 9, paddingHorizontal: 2, borderRadius: 20, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1},
   gpsRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 22, marginTop: -4, marginBottom: 8},
   gpsTxt: {color: C.faint, fontSize: 12, fontWeight: '600'},
   tabAlert: {backgroundColor: C.accent, borderColor: C.accent},
   tabOn: {backgroundColor: C.accent, borderColor: C.accent},
-  tabTxt: {color: C.dim, fontSize: 14, fontWeight: '600'},
+  tabTxt: {color: C.dim, fontSize: 13.5, fontWeight: '700'},
   tabTxtOn: {color: '#2a1d0c'},
   statRow: {flexDirection: 'row', gap: 10, paddingHorizontal: 18, marginBottom: 8},
   stat: {flex: 1, backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, borderRadius: 12, paddingVertical: 11, alignItems: 'center'},
