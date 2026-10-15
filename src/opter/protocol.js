@@ -52,6 +52,7 @@ const F = {
     18: 'earliestDelivery', 19: 'latestDelivery', 20: 'customer',
     24: 'serviceType', 43: 'weight', 51: 'packages', 53: 'message',
     55: 'driverMessage', 58: 'shipmentId', 59: 'orderId',
+    30: 'freightBill', 33: 'goodsType', 37: 'distanceKm', 52: 'extMessage', 54: 'senderInstr',
     21: 'customerId', 23: 'customerRef', 34: 'senderRef', 35: 'receiverRef', 36: 'timeMinutes',
     61: 'podNameReq', 62: 'podSigReq', 63: 'podRemarkReq', 71: 'orderReceiver', 73: 'customerPhone1',
     117: 'podPicReq', 119: 'customerRefPhone', 120: 'customerRefMobile', 121: 'podCommentReq', 123: 'customerPhone2',
@@ -275,6 +276,58 @@ function resourceList(decoded) {
   return out;
 }
 
+/* ---- Smart läsning av fritext ----
+ * Telefonnummer i texten ("Ring Katta på stena 010 445 72 71", "Johannes 08 518 332 62")
+ * plockas ut med namnet framför och ev. företag efter "på".
+ */
+const STOP = new Set(['ring', 'ringa', 'på', 'till', 'och', 'tel', 'telefon', 'nr', 'nummer', 'mobil', 'kontakt', 'kontakta', 'meddela', 'avisera', 'kund', 'eller', 'vid', 'om', 'via', 'se', 'samt']);
+function extractPhones(text) {
+  const out = [];
+  if (!text) return out;
+  const re = /(?:\+46[\s-]?|\b0)\d{1,3}(?:[\s-]?\d){5,9}\b/g;
+  let m;
+  while ((m = re.exec(text))) {
+    const num = m[0].replace(/[^0-9+]/g, '').replace(/^\+46/, '0');
+    if (num.length < 8 || num.length > 11) continue;
+    const before = text.slice(Math.max(0, m.index - 48), m.index).replace(/\s+/g, ' ');
+    const words = before.split(/[\s,:;()\/]+/).filter(Boolean);
+    let name = '', firm = '';
+    for (let i = words.length - 1; i >= 0; i--) {
+      const w = words[i], lw = w.toLowerCase().replace(/[^a-zåäöé]/g, '');
+      if (!lw) continue;
+      if (/^\d/.test(w)) break;
+      if (STOP.has(lw)) { continue; }
+      if (/^[A-ZÅÄÖ]/.test(w)) { name = w.replace(/[^A-Za-zÅÄÖåäöé-]/g, ''); 
+        const pi = words.slice(i + 1).findIndex(x => x.toLowerCase() === 'på');
+        if (pi >= 0 && words[i + 2 + pi]) firm = words[i + 2 + pi].replace(/[^A-Za-zÅÄÖåäöé-]/g, '');
+        break; }
+      if (i < words.length - 3) break;
+    }
+    const label = name ? (firm ? `${name} (${firm.charAt(0).toUpperCase() + firm.slice(1)})` : name) : 'Nummer i ordern';
+    if (!out.some(x => x.num === num)) out.push({label, num, at: m.index});
+  }
+  return out;
+}
+/* "Avisera ... 1 timma innan ankomst" / "ring 30 min innan" → minuter före ankomst */
+function avisering(text) {
+  if (!text) return null;
+  const t = text.toLowerCase();
+  const re = /(avisera|ring|meddela)[^.\n]{0,60}?(\d+|en|ett|halv)\s*(timm?a?r?|tim|h|min(?:uter)?)\s*(innan|före)/g;
+  const hits = [];
+  let m;
+  while ((m = re.exec(t))) {
+    const n = m[2] === 'en' || m[2] === 'ett' ? 1 : m[2] === 'halv' ? 0.5 : Number(m[2]);
+    hits.push({min: /^min/.test(m[3]) ? n : Math.round(n * 60), at: m.index});
+  }
+  if (!hits.length) { const i = t.indexOf('avisera'); if (i < 0) return null; hits.push({min: 60, at: i}); }
+  // Vem ska aviseras: numret som står närmast den sista "avisera"-raden.
+  const h = hits[hits.length - 1];
+  const phones = extractPhones(text);
+  let who = null, best = Infinity;
+  for (const p of phones) { const d = Math.abs(p.at - h.at); if (d < best) { best = d; who = p; } }
+  return {min: h.min, who: who ? {label: who.label, num: who.num} : null};
+}
+
 /* ---- Opter-rader → rutt {cargo, stops} ---- */
 const hhmm = (d) => d ? new Intl.DateTimeFormat('sv-SE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Stockholm' }).format(d) : null;
 function toRutt(decoded) {
@@ -311,9 +364,14 @@ function toRutt(decoded) {
     const pkgText = pkgs.map(p => [p.quantity ? p.quantity + ' st' : '', p.packageType, p.text].filter(Boolean).join(' ')).filter(Boolean).join(', ');
     cargo[cid] = { name: c.customer || c.serviceType || ('Order ' + cid), pal, kg, to: to && to.city ? to.city : '', goods: pkgText };
     const req = { name: !!c.podNameReq, sig: !!c.podSigReq, pic: !!c.podPicReq, comment: !!(c.podCommentReq || c.podRemarkReq) };
-    const common = { shiId, orderNo: c.orderId || c.shipmentId || null, customer: c.customer || '', service: c.serviceType || '', kg, pal, goods: pkgText, msg: c.message || '', driverMsg: c.driverMessage || '' };
-    stops.push({ ...common, verb: 'Hämta', adr: line(from), area: from && from.city ? from.city : '', zip: from && from.zip || '', lat: from && from.lat != null ? Number(from.lat) : null, lng: from && from.lng != null ? Number(from.lng) : null, pickup: cid, deadline: hhmm(c.latestPickup), earliest: hhmm(c.earliestPickup), who: (from && from.company) || c.customer || '', contact: contact(from), tel: phones(from, c, 'from'), code: from && from.entreCode || '', adrMsg: [from && from.driverMessage, from && from.info].filter(Boolean).join(' · '), ref: c.senderRef || '', note: [c.serviceType, kg ? kg + ' kg' : '', c.message].filter(Boolean).join(' · ') });
-    stops.push({ ...common, verb: 'Lämna', adr: line(to), area: to && to.city ? to.city : '', zip: to && to.zip || '', lat: to && to.lat != null ? Number(to.lat) : null, lng: to && to.lng != null ? Number(to.lng) : null, drop: cid, deadline: hhmm(c.latestDelivery), earliest: hhmm(c.earliestDelivery), who: (to && to.company) || c.orderReceiver || c.customer || '', contact: contact(to), tel: phones(to, c, 'to'), code: to && to.entreCode || '', adrMsg: [to && to.driverMessage, to && to.info].filter(Boolean).join(' · '), ref: c.receiverRef || '', req, suggest: [...new Set(sugBy[shiId] || [])], note: [kg ? kg + ' kg' : '', c.driverMessage].filter(Boolean).join(' · ') });
+    // All fritext för ordern, i den ordning Opter visar den, utan dubbletter.
+    const info = [...new Set([c.extMessage, c.message, c.senderInstr, c.driverMessage].map(x => String(x || '').trim()).filter(Boolean))].join('\n\n');
+    const textTel = extractPhones(info);
+    const kolli = Number(c.packages) || pkgs.reduce((s, p) => s + (Number(p.quantity) || 0), 0) || 0;
+    const common = { shiId, orderNo: c.orderId || null, freightBill: c.freightBill || c.shipmentId || null, customer: c.customer || '', service: c.serviceType || '', kg, pal, kolli, goods: pkgText, info, km: Number(c.distanceKm) || null, minutes: Number(c.timeMinutes) || null, msg: '', driverMsg: '' };
+    const merge = (a, b) => { const seen = new Set(a.map(x => x.num)); return [...a, ...b.filter(x => !seen.has(x.num) && seen.add(x.num))]; };
+    stops.push({ ...common, verb: 'Hämta', adr: line(from), area: from && from.city ? from.city : '', zip: from && from.zip || '', lat: from && from.lat != null ? Number(from.lat) : null, lng: from && from.lng != null ? Number(from.lng) : null, pickup: cid, deadline: hhmm(c.latestPickup), earliest: hhmm(c.earliestPickup), who: (from && from.company) || c.customer || '', contact: contact(from), tel: merge(phones(from, c, 'from'), textTel), code: from && from.entreCode || '', adrMsg: [from && from.driverMessage, from && from.info].filter(Boolean).join(' · '), ref: c.senderRef || '', note: [c.serviceType, kg ? kg + ' kg' : '', c.message].filter(Boolean).join(' · ') });
+    stops.push({ ...common, verb: 'Lämna', adr: line(to), area: to && to.city ? to.city : '', zip: to && to.zip || '', lat: to && to.lat != null ? Number(to.lat) : null, lng: to && to.lng != null ? Number(to.lng) : null, drop: cid, deadline: hhmm(c.latestDelivery), earliest: hhmm(c.earliestDelivery), who: (to && to.company) || c.orderReceiver || c.customer || '', contact: contact(to), tel: merge(phones(to, c, 'to'), textTel), avise: avisering(info), code: to && to.entreCode || '', adrMsg: [to && to.driverMessage, to && to.info].filter(Boolean).join(' · '), ref: c.receiverRef || '', req, suggest: [...new Set(sugBy[shiId] || [])], note: [kg ? kg + ' kg' : '', c.driverMessage].filter(Boolean).join(' · ') });
   }
   return { cargo, stops };
 }
@@ -321,5 +379,5 @@ function toRutt(decoded) {
 module.exports = {
   MessageType, Table, DT, RST, F, frame, unframe, decodeSync, ticksToDate,
   logonPayload, parseLogon, resourceList, encodeStartWork, encodeWorkStatus, toRutt,
-  messageList, encodeMarkRead, encodeSendMessage, lastIdentity, encodeFullSync,
+  messageList, encodeMarkRead, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering,
 };

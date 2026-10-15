@@ -10,6 +10,7 @@ import React, {useMemo, useState} from 'react';
 import {FlatList, Linking, Pressable, StyleSheet, Text, View} from 'react-native';
 import {C, hhmm} from './theme';
 import {Sheet} from './parts';
+import {MoreSheet} from './OrderExtras';
 
 type Row = {kind: 'pickup' | 'drop'; st: any; cid: string; plan: any; dropLater?: {eta: Date | null; area: string} | null};
 
@@ -18,14 +19,33 @@ function navigate(st: any) {
   Linking.openURL(`google.navigation:q=${q}`).catch(() => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${q}`).catch(() => {}));
 }
 const dial = (num: string) => Linking.openURL(`tel:${num}`).catch(() => {});
+const prettyNum = (n: string) => n.replace(/^(0[1-9]0|08|0[1-9]\d)(\d{2,3})(\d{2})(\d{2})$/, '$1-$2 $3 $4');
 
-export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload}: {
+// Fritext där telefonnummer blir tryckbara.
+const PHONE_RE = /((?:\+46[\s-]?|\b0)\d{1,3}(?:[\s-]?\d){5,9}\b)/g;
+function LinkedText({text, style, lines}: {text: string; style: any; lines?: number}) {
+  const parts = text.split(PHONE_RE);
+  return (
+    <Text style={style} numberOfLines={lines}>
+      {parts.map((p, i) => (i % 2 === 1 && p.replace(/\D/g, '').length >= 8
+        ? <Text key={i} style={o.link} onPress={() => dial(p.replace(/[^0-9+]/g, ''))}>{p}</Text>
+        : <Text key={i}>{p}</Text>))}
+    </Text>
+  );
+}
+
+export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onExtra, onAvised}: {
   route: any; cargo: any; ost: Record<string, any>; allStops: any[];
   onLoaded: (st: any) => void; onUnload: (st: any) => void;
+  onExtra: (cid: string, kind: 'extras' | 'damage' | 'kolli', data: any) => void;
+  onAvised: (cid: string) => void;
 }) {
   const [open, setOpen] = useState<string | null>(null); // utfälld rad (cid) utöver NÄSTA
   const [callStop, setCallStop] = useState<any>(null);
   const [showDone, setShowDone] = useState(false);
+  const [more, setMore] = useState<{st: any; cid: string} | null>(null);
+  const [fullInfo, setFullInfo] = useState<Record<string, boolean>>({});
+  const now = Date.now();
 
   // Bygg raderna ur körordningen: hämtningar alltid; lämningar bara när godset är lastat.
   const rows: Row[] = useMemo(() => {
@@ -65,8 +85,17 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     const tone = pickup ? C.accent : C.accent2;
     const late = plan && plan.late;
     const goods = [c.pal ? `${c.pal} pall` : '', c.kg ? `${c.kg} kg` : '', c.goods || c.name].filter(Boolean).join(' · ');
-    const notes = [st.adrMsg, pickup ? st.msg : st.driverMsg].filter(Boolean);
+    const notes = [st.adrMsg].filter(Boolean);
     const hasTel = (st.tel || []).length > 0;
+    const os = ost[cid] || {};
+    // Avisering: räknas från beräknad ankomst till lossningen.
+    const dropStop = pickup ? allStops.find((s: any) => s.drop === cid) : st;
+    const av = dropStop && dropStop.avise;
+    const dropEta = pickup ? item.dropLater && item.dropLater.eta : plan && plan.eta;
+    const aviseAt = av && dropEta ? new Date(new Date(dropEta).getTime() - av.min * 60000) : null;
+    const aviseDue = aviseAt && !os.avisedAt && now >= aviseAt.getTime();
+    const orderLine = [st.orderNo && `Order ${st.orderNo}`, st.freightBill && st.freightBill !== st.orderNo && `Fraktsedel ${st.freightBill}`, (os.kolli || st.kolli) ? `${os.kolli || st.kolli} kollin` : '', st.service].filter(Boolean).join('  ·  ');
+    const extrasN = Object.keys(os.extras || {}).length + ((os.damages && os.damages.length) || 0);
 
     return (
       <Pressable
@@ -81,6 +110,11 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
           <Text style={o.num}>#{index + 1}</Text>
           <View style={{flex: 1}} />
           <Text style={[o.eta, late && {color: C.bad}]}>{plan ? `ca ${hhmm(plan.eta)}` : ''}</Text>
+          {expanded && (
+            <Pressable hitSlop={10} style={o.moreBtn} onPress={() => setMore({st, cid})}>
+              <Text style={o.moreTxt}>Mer{extrasN ? ` · ${extrasN}` : ''}</Text>
+            </Pressable>
+          )}
         </View>
 
         <Text style={[o.who, !expanded && {fontSize: 17}]} numberOfLines={expanded ? 2 : 1}>{st.who || '—'}</Text>
@@ -95,7 +129,24 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
 
         {expanded && (
           <>
+            {!!orderLine && <Text style={o.orderLine}>{orderLine}</Text>}
             {!!goods && <Text style={o.goods}>{goods}</Text>}
+            {aviseAt && !os.avisedAt && (
+              <Pressable style={[o.avise, aviseDue && o.aviseDue]} onPress={() => { if (av.who) dial(av.who.num); onAvised(cid); }}>
+                <View style={{flex: 1}}>
+                  <Text style={[o.aviseT, aviseDue && {color: C.onAccent}]}>{aviseDue ? 'Dags att avisera nu' : `Avisera kl ${hhmm(aviseAt)}`}</Text>
+                  <Text style={[o.aviseS, aviseDue && {color: '#4a3517'}]}>{av.who ? `${av.who.label} · ${prettyNum(av.who.num)}` : 'Kunden'} · {av.min >= 60 ? `${av.min / 60} h` : `${av.min} min`} före ankomst</Text>
+                </View>
+                <Text style={[o.aviseCall, aviseDue && {color: C.onAccent}]}>{av.who ? 'Ring' : 'Klar'}</Text>
+              </Pressable>
+            )}
+            {os.avisedAt && av ? <Text style={o.avisedOk}>✓ Aviserad {hhmm(new Date(os.avisedAt))}</Text> : null}
+            {!!st.info && (
+              <Pressable onPress={() => setFullInfo(f => ({...f, [cid]: !f[cid]}))} style={o.info}>
+                <LinkedText text={st.info} style={o.infoTxt} lines={fullInfo[cid] ? undefined : 4} />
+                <Text style={o.infoMore}>{fullInfo[cid] ? 'Visa mindre' : 'Visa hela'}</Text>
+              </Pressable>
+            )}
             {(st.contact || st.code || st.ref) ? (
               <View style={o.facts}>
                 {!!st.contact && <Text style={o.fact}>Kontakt: <Text style={o.factB}>{st.contact}</Text></Text>}
@@ -161,11 +212,19 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         }
       />
 
+      <MoreSheet
+        stop={more && more.st}
+        cargo={cargo}
+        saved={more ? ost[more.cid] : null}
+        onClose={() => setMore(null)}
+        onSave={(kind, data) => { if (more) onExtra(more.cid, kind, data); setMore(null); }}
+      />
+
       <Sheet open={!!callStop} onClose={() => setCallStop(null)} title="Ring" sub={callStop ? callStop.who : ''}>
         {callStop && (callStop.tel || []).map((t: any) => (
           <Pressable key={t.num} style={o.callRow} onPress={() => { setCallStop(null); dial(t.num); }}>
             <Text style={o.callLabel}>{t.label}</Text>
-            <Text style={o.callNum}>{t.num}</Text>
+            <Text style={o.callNum}>{prettyNum(t.num)}</Text>
           </Pressable>
         ))}
       </Sheet>
@@ -218,6 +277,19 @@ const o = StyleSheet.create({
   doneWho: {color: C.ink, fontSize: 15, fontWeight: '700'},
   doneMeta: {color: C.faint, fontSize: 12, marginTop: 1},
 
+  link: {color: C.accent, fontWeight: '800', textDecorationLine: 'underline'},
+  moreBtn: {marginLeft: 10, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 9, paddingVertical: 4, paddingHorizontal: 10},
+  moreTxt: {color: C.dim, fontSize: 12, fontWeight: '800'},
+  orderLine: {color: C.faint, fontSize: 12, marginTop: 8, fontWeight: '600'},
+  avise: {flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10, backgroundColor: C.panel2, borderColor: C.accent, borderWidth: 1, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12},
+  aviseDue: {backgroundColor: C.accent},
+  aviseT: {color: C.accent, fontSize: 15, fontWeight: '800'},
+  aviseS: {color: C.dim, fontSize: 12, marginTop: 2},
+  aviseCall: {color: C.accent, fontSize: 15, fontWeight: '900'},
+  avisedOk: {color: C.accent2, fontSize: 12, fontWeight: '700', marginTop: 8},
+  info: {backgroundColor: C.noteBg, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 11, marginTop: 10},
+  infoTxt: {color: C.noteInk, fontSize: 13.5, lineHeight: 19},
+  infoMore: {color: C.accent, fontSize: 12, fontWeight: '700', marginTop: 5},
   callRow: {backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 14, marginTop: 10},
   callLabel: {color: C.dim, fontSize: 12, fontWeight: '600'},
   callNum: {color: C.ink, fontSize: 18, fontWeight: '800', marginTop: 2},

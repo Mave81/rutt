@@ -22,7 +22,7 @@ import computeRoute, {slotWhere} from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '15 okt · felsök-export';
+const BUILD = '15 okt · order v2';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -31,11 +31,14 @@ const DEMO = {
     A: {name: 'Nordsjö-pall + list', pal: 1, kg: 330, to: 'Klara Södra', goods: '1 st EUR-pall, 4 list'},
     B: {name: 'Golvpall', pal: 1, kg: 1160, to: 'Älta', goods: '1 st helpall golv'},
     C: {name: 'Sprutmaskin', pal: 0, kg: 60, to: 'Sundbyberg', goods: 'Sprutmaskin i kartong'},
+    D: {name: 'Byte 17x 660L kärl', pal: 4, kg: 0, to: 'Haninge', goods: '17 st 660L kärl'},
   },
   stops: [
     {verb: 'Hämta', adr: 'Västberga Allé 40', area: 'Hägersten', lat: 59.2939, lng: 18.0129, pickup: 'A', deadline: '14:15', who: 'Nordsjö Idé & Design', contact: 'Lagret, Peter', code: '', tel: [{label: 'Peter (lager)', num: '0701234567'}, {label: 'Kund', num: '086001122'}], adrMsg: 'Ring på vid port 3, lastkaj B.', orderNo: '481203'},
     {verb: 'Hämta', adr: 'Lerkrogsvägen 9', area: 'Hägersten', lat: 59.2918, lng: 18.0045, pickup: 'B', deadline: '15:30', who: 'Golvgrossisten', contact: '', tel: [{label: 'Golvgrossisten', num: '087778899'}], orderNo: '481207'},
     {verb: 'Hämta', adr: 'Hjärtervägen 17', area: 'Trångsund', lat: 59.2377, lng: 18.1280, pickup: 'C', deadline: null, who: 'Olle Persson', contact: '', tel: [{label: 'Olle (mobil)', num: '0739876543'}], msg: 'Står i garaget om ingen är hemma.', orderNo: '481210'},
+    {verb: 'Hämta', adr: 'Metallvägen 60', area: 'Rosersberg', lat: 59.5838, lng: 17.8846, pickup: 'D', deadline: '16:00', earliest: '08:00', who: 'Stena Återvinning Rosersberg', tel: [{label: 'Katta (Stena)', num: '0104457271'}, {label: 'Johannes', num: '0851833262'}], orderNo: '226815', freightBill: '41805637', kolli: 17, service: 'Bud', info: "41805637\nKärl hämtas och lämnar på Stena i Rosersberg,  kör ingenting över våg. Åk förbi vågen och till baksidan av huset, vid lastkaj på höger sida har \"Bygg\" sina kärl. Ring Katta på stena 010 445 72 71 och meddela vilka fraktioner/ antal kärlen innehåller\n\nUnder dagen, Avisera 1 timma innan ankomst\nRudsjöterassen, Handen\nJohannes 08 518 332 62 Avisera kund Ca 1 timma innan ankomst\n\n• Byte 17x 660L kärl (Lämna lika många kärl som vi hämtar fulla, ibland har dom inte fyllt alla\nOBS Kärlen vägs inte in i Rosersberg. Meddela antal kärl/ fraktioner till Katta 010 445 72 71"},
+    {verb: 'Lämna', adr: 'Rudsjöterassen', area: 'Haninge', lat: 59.1730, lng: 18.1440, drop: 'D', deadline: null, who: 'Distribution', contact: 'Johannes', tel: [{label: 'Johannes', num: '0851833262'}, {label: 'Katta (Stena)', num: '0104457271'}], orderNo: '226815', freightBill: '41805637', kolli: 17, service: 'Bud', req: {sig: true}, avise: {min: 60, who: {label: 'Johannes', num: '0851833262'}}, info: "41805637\nKärl hämtas och lämnar på Stena i Rosersberg,  kör ingenting över våg. Åk förbi vågen och till baksidan av huset, vid lastkaj på höger sida har \"Bygg\" sina kärl. Ring Katta på stena 010 445 72 71 och meddela vilka fraktioner/ antal kärlen innehåller\n\nUnder dagen, Avisera 1 timma innan ankomst\nRudsjöterassen, Handen\nJohannes 08 518 332 62 Avisera kund Ca 1 timma innan ankomst\n\n• Byte 17x 660L kärl (Lämna lika många kärl som vi hämtar fulla, ibland har dom inte fyllt alla\nOBS Kärlen vägs inte in i Rosersberg. Meddela antal kärl/ fraktioner till Katta 010 445 72 71"},
     {verb: 'Lämna', adr: 'Klara Södra Kyrkogata 1', area: 'Stockholm', lat: 59.3302, lng: 18.0618, drop: 'A', deadline: null, who: 'NP Måleri', contact: 'Niklas', code: '1947', tel: [{label: 'Niklas (mobil)', num: '0761112233'}], suggest: ['Niklas Persson'], req: {sig: true, name: true}, orderNo: '481203'},
     {verb: 'Lämna', adr: 'Järnvägsgatan 11', area: 'Sundbyberg', lat: 59.3662, lng: 17.9522, drop: 'C', deadline: null, who: 'Verkstaden', contact: '', code: '', tel: [], suggest: [], req: {sig: true}, driverMsg: 'Lämna i verkstaden, inte i butiken.', orderNo: '481210'},
     {verb: 'Lämna', adr: 'Torvmossevägen 15', area: 'Älta', lat: 59.2660, lng: 18.1780, drop: 'B', deadline: null, who: 'Vasa Golv', contact: 'Arbetsledare Sara', code: '', tel: [{label: 'Sara', num: '0704445566'}, {label: 'Kund', num: '087778899'}], suggest: ['Sara Lind', 'Johan Ek'], req: {sig: true, name: true, pic: true}, orderNo: '481207'},
@@ -68,7 +71,7 @@ function AppInner(): React.JSX.Element {
   const [ost, setOst] = useState<Record<string, any>>({});
   const [names, setNames] = useState<Record<string, string[]>>({}); // sparade mottagarnamn per företag
   const [signStop, setSignStop] = useState<any>(null); // stopp som signeras just nu
-  const [toast, setToast] = useState<{text: string; undo: () => void} | null>(null);
+  const [toast, setToast] = useState<{text: string; undo: (() => void) | null} | null>(null);
   const toastTimer = useRef<any>(null);
   const [diag, setDiag] = useState(false);
   const [diagBusy, setDiagBusy] = useState(false);
@@ -135,7 +138,7 @@ function AppInner(): React.JSX.Element {
   }, [src]);
   useEffect(() => { if (ostLoaded.current) saveJSON(ostLoaded.current, ost); }, [ost]);
 
-  function flash(text: string, undo: () => void) {
+  function flash(text: string, undo: (() => void) | null) {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast({text, undo});
     toastTimer.current = setTimeout(() => setToast(null), 6000);
@@ -147,12 +150,24 @@ function AppInner(): React.JSX.Element {
     setOst(o => ({...o, [cid]: {...(o[cid] || {}), loadedAt: Date.now()}}));
     flash(`Lastad · ${st.who || 'order'}`, () => setOst(o => { const n = {...o}; if (prev) n[cid] = prev; else delete n[cid]; return n; }));
   }
+  // Tillägg / avvikelse / ändrat kolliantal från "Mer".
+  function onExtra(cid: string, kind: 'extras' | 'damage' | 'kolli', data: any) {
+    setOst(o => {
+      const cur = o[cid] || {};
+      if (kind === 'extras') return {...o, [cid]: {...cur, extras: data}};
+      if (kind === 'damage') return {...o, [cid]: {...cur, damages: [...(cur.damages || []), data]}};
+      return {...o, [cid]: {...cur, kolli: data.kolli, kg: data.kg}};
+    });
+    flash(kind === 'extras' ? 'Tillägg sparat' : kind === 'damage' ? 'Avvikelse sparad' : 'Kollin sparat', null);
+  }
+  function onAvised(cid: string) { setOst(o => ({...o, [cid]: {...(o[cid] || {}), avisedAt: Date.now()}})); }
+
   // Lossad: kvittensen sparas, ordern flyttar till Klart, namnet minns till nästa gång.
   function onSigned(st: any, pod: any) {
     const cid = st.drop;
     const prev = ost[cid];
     setSignStop(null);
-    setOst(o => ({...o, [cid]: {...(o[cid] || {}), loadedAt: (o[cid] && o[cid].loadedAt) || Date.now(), doneAt: Date.now(), pod: {...pod, photos: (pod.photos || []).map((x: any) => ({uri: x.uri}))}}}));
+    setOst(o => ({...o, [cid]: {...(o[cid] || {}), loadedAt: (o[cid] && o[cid].loadedAt) || Date.now(), doneAt: Date.now(), extras: pod.extras || (o[cid] && o[cid].extras), kolli: pod.kolli, pod: {...pod, photos: (pod.photos || []).map((x: any) => ({uri: x.uri}))}}}));
     if (pod.name) setNames(n => { const nn = rememberName(n, st.who, pod.name); saveJSON(NAMES_KEY, nn); return nn; });
     flash(`Lossad · ${st.who || 'order'}`, () => setOst(o => { const n = {...o}; if (prev) n[cid] = prev; else delete n[cid]; return n; }));
   }
@@ -318,7 +333,7 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any) => setSignStop(st)} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any) => setSignStop(st)} onExtra={onExtra} onAvised={onAvised} />
           )}
           {tab === 'last' && route && !(route as any).error && <LastView route={route} cargo={src.cargo} />}
           {tab === 'chat' && <ChatView msgs={chatList} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} onRetry={deliver} />}
@@ -338,6 +353,7 @@ function AppInner(): React.JSX.Element {
         <SignScreen
           stop={signStop}
           savedNames={names[companyKey(signStop.who)] || []}
+          saved={ost[signStop.drop]}
           onCancel={() => setSignStop(null)}
           onDone={(pod: any) => onSigned(signStop, pod)}
         />
@@ -346,7 +362,7 @@ function AppInner(): React.JSX.Element {
       {toast && (
         <View style={s.toast} pointerEvents="box-none">
           <Text style={s.toastTxt} numberOfLines={1}>{toast.text}</Text>
-          <Pressable hitSlop={12} onPress={() => { toast.undo(); setToast(null); }}><Text style={s.toastUndo}>Ångra</Text></Pressable>
+          {toast.undo && <Pressable hitSlop={12} onPress={() => { toast.undo && toast.undo(); setToast(null); }}><Text style={s.toastUndo}>Ångra</Text></Pressable>}
         </View>
       )}
     </SafeAreaView>

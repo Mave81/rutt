@@ -9,22 +9,26 @@ import {Dimensions, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextI
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C} from './theme';
 import {MAX_PHOTOS, SigData, SignaturePad, pickPhoto, useKeyboardLift} from './parts';
+import {ExtrasEditor} from './OrderExtras';
 
-export const DEV_REASONS = ['Fick vänta på mottagare', 'Kund ej anträffbar', 'Väntan vid lastning', 'Trafik/kö', 'Fel/saknad adress', 'Omlastning', 'Annat'];
 
-export default function SignScreen({stop, savedNames, onCancel, onDone}: {stop: any; savedNames: string[]; onCancel: () => void; onDone: (pod: any) => void}) {
+export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: {stop: any; savedNames: string[]; saved?: any; onCancel: () => void; onDone: (pod: any) => void}) {
   const insets = useSafeAreaInsets();
   const {kb, lift} = useKeyboardLift();
   const [sig, setSig] = useState<SigData | null>(null);
   const [drawing, setDrawing] = useState(false);
   const [name, setName] = useState('');
   const [photos, setPhotos] = useState<any[]>([]);
-  const [devOpen, setDevOpen] = useState(false);
-  const [dev, setDev] = useState<string | null>(null);
-  const [devMin, setDevMin] = useState<number | null>(null);
+  const [extOpen, setExtOpen] = useState(false);
+  const [extras, setExtras] = useState<Record<string, number>>({});
+  const [kolli, setKolli] = useState(0);
   const [comment, setComment] = useState('');
 
-  useEffect(() => { setSig(null); setName(''); setPhotos([]); setDevOpen(false); setDev(null); setDevMin(null); setComment(''); }, [stop]);
+  useEffect(() => {
+    setSig(null); setName(''); setPhotos([]); setComment('');
+    setExtras((saved && saved.extras) || {}); setExtOpen(!!(saved && saved.extras && Object.keys(saved.extras).length));
+    setKolli((saved && saved.kolli) || (stop && stop.kolli) || 0);
+  }, [stop, saved]);
 
   const padH = Math.max(230, Math.min(400, Math.round(Dimensions.get('window').height * 0.36)));
   const req = (stop && stop.req) || {};
@@ -45,7 +49,6 @@ export default function SignScreen({stop, savedNames, onCancel, onDone}: {stop: 
   if (req.name && name.trim().length < 2) missing.push('namnförtydligande');
   if (req.pic && photos.length === 0) missing.push('foto');
   if (req.comment && comment.trim().length === 0) missing.push('kommentar');
-  if (dev && !devMin) missing.push('hur mycket extra tid');
   const ok = missing.length === 0;
 
   async function addPhoto(cam: boolean) {
@@ -53,7 +56,7 @@ export default function SignScreen({stop, savedNames, onCancel, onDone}: {stop: 
   }
   function done() {
     if (!ok) return;
-    onDone({name: name.trim(), sig, photos, dev, devMin, comment: comment.trim(), at: Date.now()});
+    onDone({name: name.trim(), sig, photos, extras, kolli, comment: comment.trim(), at: Date.now()});
   }
 
   return (
@@ -121,35 +124,27 @@ export default function SignScreen({stop, savedNames, onCancel, onDone}: {stop: 
             )}
           </View>
 
-          {!devOpen && !dev ? (
-            <Pressable style={st.devToggle} onPress={() => setDevOpen(true)}>
-              <Text style={st.devToggleTxt}>Drog något ut? Lägg till avvikelse / extra tid</Text>
+          <View style={st.secHead}><Text style={st.sec}>Antal kollin</Text>{stop.kolli ? <Text style={st.hint}>Ordern: {stop.kolli}</Text> : null}</View>
+          <View style={st.kolliRow}>
+            <Pressable style={st.kBtn} onPress={() => setKolli(k => Math.max(0, k - 1))}><Text style={st.kBtnTxt}>−</Text></Pressable>
+            <Text style={[st.kVal, stop.kolli && kolli !== stop.kolli ? {color: C.accent} : null]}>{kolli}</Text>
+            <Pressable style={st.kBtn} onPress={() => setKolli(k => k + 1)}><Text style={st.kBtnTxt}>+</Text></Pressable>
+          </View>
+
+          {!extOpen ? (
+            <Pressable style={st.devToggle} onPress={() => setExtOpen(true)}>
+              <Text style={st.devToggleTxt}>Drog något ut? Lägg till lossningstid, inbärning…</Text>
               <Text style={st.devPlus}>＋</Text>
             </Pressable>
           ) : (
             <>
-              <View style={st.secHead}><Text style={st.sec}>Avvikelse / extra tid</Text></View>
-              <View style={st.chips}>
-                {DEV_REASONS.map(r => (
-                  <Pressable key={r} style={[st.chip, dev === r && st.chipOn]} onPress={() => setDev(dev === r ? null : r)}>
-                    <Text style={[st.chipTxt, dev === r && st.chipTxtOn]}>{r}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              {dev && (
-                <View style={[st.chips, {marginTop: 10}]}>
-                  {[10, 15, 20, 30, 45, 60, 90].map(m => (
-                    <Pressable key={m} style={[st.chip, devMin === m && st.chipOn]} onPress={() => setDevMin(devMin === m ? null : m)}>
-                      <Text style={[st.chipTxt, devMin === m && st.chipTxtOn]}>+{m} min</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
+              <View style={st.secHead}><Text style={st.sec}>Tillägg</Text></View>
+              <ExtrasEditor value={extras} onChange={setExtras} only={['Lossningstid', 'Inbärning', 'Bomkörning', 'Lastningstid']} />
             </>
           )}
 
           <View style={st.secHead}>
-            <Text style={st.sec}>Kommentar</Text>
+            <Text style={st.sec}>Anmärkning</Text>
             {req.comment ? <Text style={st.reqTag}>KRÄVS</Text> : null}
           </View>
           <TextInput style={st.comment} value={comment} onChangeText={setComment} placeholder="T.ex. ställt vid porten, skadad kartong…" placeholderTextColor={C.faint} multiline />
@@ -194,6 +189,11 @@ const st = StyleSheet.create({
   devToggle: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 20, backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 14},
   devToggleTxt: {color: C.ink, fontSize: 14, fontWeight: '600', flex: 1},
   devPlus: {color: C.accent, fontSize: 18, fontWeight: '800', marginLeft: 8},
+  hint: {color: C.faint, fontSize: 12},
+  kolliRow: {flexDirection: 'row', alignItems: 'center', gap: 18},
+  kBtn: {width: 52, height: 52, borderRadius: 14, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, alignItems: 'center', justifyContent: 'center'},
+  kBtnTxt: {color: C.accent, fontSize: 26, fontWeight: '800', lineHeight: 28},
+  kVal: {color: C.ink, fontSize: 30, fontWeight: '900', minWidth: 54, textAlign: 'center'},
   comment: {backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 12, color: C.ink, paddingHorizontal: 14, paddingVertical: 11, fontSize: 15, minHeight: 70, textAlignVertical: 'top'},
   bottom: {paddingHorizontal: 16, paddingTop: 10, backgroundColor: C.bg, borderTopColor: C.edge, borderTopWidth: StyleSheet.hairlineWidth},
   missing: {color: C.bad, fontSize: 13, fontWeight: '600', marginBottom: 8, textAlign: 'center'},
