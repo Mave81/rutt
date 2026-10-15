@@ -42,6 +42,9 @@ function servOf(s) {
   return SERVICE_MIN + Math.round(PAL_MIN * pal);
 }
 function planStart() {
+  // START.cur = där föraren står nu (senast avklarade stopp); annars startadressen.
+  const c = START.cur;
+  if (c && c.lat != null) return {pos: {lat: c.lat, lng: c.lng}, t0: new Date(NOW), src: 'senaste stopp'};
   const pos = (START.lat != null) ? {lat: START.lat, lng: START.lng} : {lat: 59.2437, lng: 18.2280};
   return {pos, t0: new Date(NOW), src: START.lat != null ? 'startadress' : 'gissad'};
 }

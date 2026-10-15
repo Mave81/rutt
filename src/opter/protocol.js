@@ -38,14 +38,18 @@ const RST = { None: 0, StartWork: 1, EndWork: 2, StartLunch: 3, EndLunch: 4, Sta
 
 /* Fältnummer (ordinal i varje entitets PropertyNumber-enum) */
 const F = {
-  Address: { 5: 'company', 6: 'street', 7: 'streetNo', 8: 'zip', 9: 'city', 12: 'phone', 17: 'info', 18: 'lng', 19: 'lat' },
+  Address: { 2: 'line1', 3: 'line2', 4: 'line3', 5: 'company', 6: 'street', 7: 'streetNo', 8: 'zip', 9: 'city', 11: 'entreCode', 12: 'phone', 16: 'driverMessage', 17: 'info', 18: 'lng', 19: 'lat' },
   Resource: { 1: 'name', 2: 'shortName', 3: 'code', 4: 'defVehicle', 251: 'resId' },
   Shipment: {
     2: 'adrFrom', 3: 'adrTo', 16: 'earliestPickup', 17: 'latestPickup',
     18: 'earliestDelivery', 19: 'latestDelivery', 20: 'customer',
     24: 'serviceType', 43: 'weight', 51: 'packages', 53: 'message',
     55: 'driverMessage', 58: 'shipmentId', 59: 'orderId',
+    21: 'customerId', 23: 'customerRef', 34: 'senderRef', 35: 'receiverRef', 36: 'timeMinutes',
+    61: 'podNameReq', 62: 'podSigReq', 63: 'podRemarkReq', 71: 'orderReceiver', 73: 'customerPhone1',
+    117: 'podPicReq', 119: 'customerRefPhone', 120: 'customerRefMobile', 121: 'podCommentReq', 123: 'customerPhone2',
   },
+  ShipmentPodSuggestion: { 1: 'shiId', 2: 'name', 3: 'revoked' },
   ShipmentPackage: { 1: 'shiId', 2: 'quantity', 3: 'weight', 14: 'text', 15: 'packageType' },
   FreeTextMessage: { 1: 'resId', 2: 'vhcId', 3: 'shiId', 4: 'outgoing', 5: 'confirmed', 6: 'text', 7: 'created', 8: 'externalId', 9: 'fromName' },
 };
@@ -267,9 +271,22 @@ function toRutt(decoded) {
   const pkgBy = {};
   for (const r of decoded.rows) if (r.table === 'ShipmentPackage') { const k = r.columns.shiId; (pkgBy[k] = pkgBy[k] || []).push(r.columns); }
 
+  const sugBy = {};
+  for (const r of decoded.rows) if (r.table === 'ShipmentPodSuggestion' && !r.columns.revoked && r.columns.name) { const k = r.columns.shiId; (sugBy[k] = sugBy[k] || []).push(String(r.columns.name).trim()); }
+
   const cargo = {}; const stops = []; let n = 0;
   const line = (a) => a ? [a.street, a.streetNo].filter(Boolean).join(' ') : '';
-  const phone = (a) => (a && a.phone) ? [[a.company || a.city || '', String(a.phone)]] : [];
+  // Alla nummer som går att ringa för stoppet: adressens + orderns (kund/referens), utan dubbletter.
+  const phones = (a, c, side) => {
+    const out = []; const seen = new Set();
+    const add = (label, num) => { const d = String(num || '').replace(/[^0-9+]/g, ''); if (d.length >= 5 && !seen.has(d)) { seen.add(d); out.push({label, num: d}); } };
+    if (a) add([a.line1, a.company].filter(Boolean)[0] || (side === 'from' ? 'Avsändare' : 'Mottagare'), a.phone);
+    if (c.customerRef) { add(c.customerRef + ' (mobil)', c.customerRefMobile); add(c.customerRef, c.customerRefPhone); }
+    else { add('Referens (mobil)', c.customerRefMobile); add('Referens', c.customerRefPhone); }
+    add('Kund', c.customerPhone1); add('Kund', c.customerPhone2);
+    return out;
+  };
+  const contact = (a) => a ? [a.line1, a.line2].filter(x => x && x !== a.company).join(', ') : '';
   for (const r of decoded.rows) {
     if (r.table !== 'Shipment') continue;
     const c = r.columns;
@@ -278,9 +295,13 @@ function toRutt(decoded) {
     const pkgs = pkgBy[r.key.xxxId] || pkgBy[c.shipmentId] || [];
     const pal = pkgs.reduce((s, p) => s + (Number(p.quantity) || 0), 0) || 1;
     const kg = Number(c.weight) || pkgs.reduce((s, p) => s + (Number(p.weight) || 0), 0) || 0;
-    cargo[cid] = { name: c.customer || c.serviceType || ('Order ' + cid), pal, kg, to: to && to.city ? to.city : '' };
-    stops.push({ verb: 'Hämta', adr: line(from), area: from && from.city ? from.city : '', lat: from && from.lat != null ? Number(from.lat) : null, lng: from && from.lng != null ? Number(from.lng) : null, pickup: cid, deadline: hhmm(c.latestPickup), earliest: hhmm(c.earliestPickup), who: c.customer || (from && from.company) || '', tel: phone(from), note: [c.serviceType, kg ? kg + ' kg' : '', c.message].filter(Boolean).join(' · ') });
-    stops.push({ verb: 'Lämna', adr: line(to), area: to && to.city ? to.city : '', lat: to && to.lat != null ? Number(to.lat) : null, lng: to && to.lng != null ? Number(to.lng) : null, drop: cid, deadline: hhmm(c.latestDelivery), earliest: hhmm(c.earliestDelivery), who: (to && to.company) || c.customer || '', tel: phone(to), note: [kg ? kg + ' kg' : '', c.driverMessage].filter(Boolean).join(' · ') });
+    const shiId = r.key.xxxId;
+    const pkgText = pkgs.map(p => [p.quantity ? p.quantity + ' st' : '', p.packageType, p.text].filter(Boolean).join(' ')).filter(Boolean).join(', ');
+    cargo[cid] = { name: c.customer || c.serviceType || ('Order ' + cid), pal, kg, to: to && to.city ? to.city : '', goods: pkgText };
+    const req = { name: !!c.podNameReq, sig: !!c.podSigReq, pic: !!c.podPicReq, comment: !!(c.podCommentReq || c.podRemarkReq) };
+    const common = { shiId, orderNo: c.orderId || c.shipmentId || null, customer: c.customer || '', service: c.serviceType || '', kg, pal, goods: pkgText, msg: c.message || '', driverMsg: c.driverMessage || '' };
+    stops.push({ ...common, verb: 'Hämta', adr: line(from), area: from && from.city ? from.city : '', zip: from && from.zip || '', lat: from && from.lat != null ? Number(from.lat) : null, lng: from && from.lng != null ? Number(from.lng) : null, pickup: cid, deadline: hhmm(c.latestPickup), earliest: hhmm(c.earliestPickup), who: (from && from.company) || c.customer || '', contact: contact(from), tel: phones(from, c, 'from'), code: from && from.entreCode || '', adrMsg: [from && from.driverMessage, from && from.info].filter(Boolean).join(' · '), ref: c.senderRef || '', note: [c.serviceType, kg ? kg + ' kg' : '', c.message].filter(Boolean).join(' · ') });
+    stops.push({ ...common, verb: 'Lämna', adr: line(to), area: to && to.city ? to.city : '', zip: to && to.zip || '', lat: to && to.lat != null ? Number(to.lat) : null, lng: to && to.lng != null ? Number(to.lng) : null, drop: cid, deadline: hhmm(c.latestDelivery), earliest: hhmm(c.earliestDelivery), who: (to && to.company) || c.orderReceiver || c.customer || '', contact: contact(to), tel: phones(to, c, 'to'), code: to && to.entreCode || '', adrMsg: [to && to.driverMessage, to && to.info].filter(Boolean).join(' · '), ref: c.receiverRef || '', req, suggest: [...new Set(sugBy[shiId] || [])], note: [kg ? kg + ' kg' : '', c.driverMessage].filter(Boolean).join(' · ') });
   }
   return { cargo, stops };
 }
