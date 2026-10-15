@@ -15,6 +15,7 @@ import {Sheet} from './src/ui/parts';
 import OrdersView, {DoneView} from './src/ui/OrdersView';
 import SignScreen from './src/ui/SignScreen';
 import NewOrdersView from './src/ui/NewOrdersView';
+import LoadView from './src/ui/LoadView';
 import {loadJSON, saveJSON, ORDERS_KEY, NAMES_KEY, companyKey, rememberName} from './src/store';
 import {Buffer} from 'buffer';
 import {PixelRatio} from 'react-native';
@@ -23,12 +24,12 @@ import P from './src/opter/protocol';
 // @ts-ignore
 import OpterClient from './src/opter/OpterClient';
 // @ts-ignore
-import computeRoute, {slotWhere} from './src/opter/optimizer';
+import computeRoute from './src/opter/optimizer';
 
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '15 okt · senare dagar per order';
+const BUILD = '15 okt · lastplan 3×6';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -234,6 +235,16 @@ function AppInner(): React.JSX.Element {
       return {error: String(e?.message || e)};
     }
   }, [src, ost, gpsRoutePos]);
+
+  // Lastplanen: allt som ska med i bilen – ombord, dagens hämtningar och kommande dagars order.
+  const loadOrders = useMemo(() => {
+    if (!fullSrc) return [] as any[];
+    return cidsAll.filter(c => cls[c] === 'todo').map(cid => {
+      const {pick, drop} = legs(cid); const o = ost[cid] || {};
+      const onboard = !pick || !!o.loadedAt || serverLoaded(pick) || !!(pick.live && pick.live.serverDone);
+      return {cid, pick, drop, onboard};
+    });
+  }, [fullSrc, cidsAll, cls, ost]);
 
   // Ladda/spara orderstatus (per dag, demo separat) och sparade namn.
   const ostLoaded = useRef<string | null>(null);
@@ -649,7 +660,7 @@ function AppInner(): React.JSX.Element {
           {tab === 'klart' && <DoneView done={doneOrders} onRetry={retrySync} />}
           {tab === 'nytt' && <NewOrdersView orders={newOrders} onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={(o: any) => setOrderStatus(o, 'reject')} />}
 
-          {(tab === 'plan' || tab === 'last') && !orders.stops.length && !demo && (
+          {tab === 'plan' && !orders.stops.length && !demo && (
             <View style={s.emptyBox}>
               <Bi n="inbox-fill" size={30} color={C.faint} />
               <Text style={s.empty}>Inga aktiva jobb just nu.</Text>
@@ -660,7 +671,7 @@ function AppInner(): React.JSX.Element {
           {tab === 'plan' && route && !(route as any).error && (
             <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any) => setSignStop(st)} onExtra={onExtra} onAvised={onAvised} onRetry={retrySync} live={live} later={later} speed={speed} />
           )}
-          {tab === 'last' && route && !(route as any).error && <LastView route={route} cargo={src.cargo} />}
+          {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} />}
           {tab === 'chat' && <ChatView msgs={chatList} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} onRetry={deliver} />}
           {(tab === 'plan' || tab === 'last') && route && (route as any).error && <Text style={s.errTxt}>Optimeringsfel: {(route as any).error}</Text>}
 
@@ -748,29 +759,6 @@ function AppInner(): React.JSX.Element {
         </View>
       )}
     </SafeAreaView>
-  );
-}
-
-function LastView({route, cargo}: {route: any; cargo: any}) {
-  const {slots} = route.load;
-  const filled = slots.map((sl: any, i: number) => ({sl, i})).filter((x: any) => x.sl);
-  return (
-    <ScrollView contentContainerStyle={{padding: 18}}>
-      <Text style={s.loadIntro}>
-        Lasta i omvänd lossningsordning: det som lossas sist läggs längst in mot hytten,
-        det som lossas först närmast dörrarna.
-      </Text>
-      {filled.length === 0 && <Text style={s.empty}>Inget att lasta.</Text>}
-      {filled.map(({sl, i}: any) => (
-        <View key={i} style={s.slot}>
-          <Text style={s.slotNo}>{i + 1}</Text>
-          <View style={{flex: 1}}>
-            <Text style={s.slotName}>{(cargo[sl.cid] && cargo[sl.cid].name) || sl.cid}{cargo[sl.cid] && cargo[sl.cid].to ? `  →  ${cargo[sl.cid].to}` : ''}</Text>
-            <Text style={s.slotWhere}>{slotWhere(i)}</Text>
-          </View>
-        </View>
-      ))}
-    </ScrollView>
   );
 }
 

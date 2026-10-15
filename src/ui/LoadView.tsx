@@ -1,0 +1,161 @@
+/**
+ * Last: bilen sedd ovanifrån. Hytten överst, bakgavellyften nederst, 3 platser i bredd × 6 på längden.
+ * Du lastar alltid mot hytten: det som lossas SIST står längst fram, det som lossas FÖRST står vid lyften.
+ * Siffran i rutan = i vilken ordning godset lossas (1 = först ut).
+ * Med kommer allt som ska med: det som redan är ombord, dagens hämtningar och kommande dagars order.
+ */
+import React, {useMemo} from 'react';
+import {ScrollView, StyleSheet, Text, View} from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {C, themed, hhmm, whenText, todayYmd} from './theme';
+import {Bi} from './Bi';
+
+const WIDE = 3, LONG = 6, TOTAL = WIDE * LONG;
+
+type LoadOrder = {cid: string; pick: any; drop: any; onboard: boolean};
+
+export default function LoadView({orders, cargo, route}: {orders: LoadOrder[]; cargo: any; route: any}) {
+  const bottom = useSafeAreaInsets().bottom + 24;
+
+  const plan = useMemo(() => {
+    // När lossas varje order? Dagens körordning först (med beräknad tid), sen datum + tid från Opter.
+    const order = (route && route.order) || [], rows = (route && route.plan && route.plan.rows) || [];
+    const idxDrop: Record<string, number> = {}, etaDrop: Record<string, any> = {}, etaPick: Record<string, any> = {};
+    order.forEach((s: any, i: number) => {
+      if (s.drop) { idxDrop[s.drop] = i; etaDrop[s.drop] = rows[i] && rows[i].eta; }
+      if (s.pickup) etaPick[s.pickup] = rows[i] && rows[i].eta;
+    });
+    const key = (o: LoadOrder) => {
+      if (idxDrop[o.cid] != null) return `0 ${String(idxDrop[o.cid]).padStart(4, '0')}`;
+      const t = o.drop && (o.drop.tLatest || o.drop.tEarliest);
+      return `1 ${(t && t.date) || todayYmd()} ${(t && t.hhmm) || '23:59'}`;
+    };
+    const list = orders.filter(o => o.drop).sort((a, b) => (key(a) < key(b) ? -1 : 1));
+    // Fyll från hytten: sist ut först in.
+    const slots: Array<{cid: string; loose?: boolean} | null> = Array(TOTAL).fill(null);
+    let at = 0, over = 0;
+    const rowsOf: Record<string, number[]> = {};
+    [...list].reverse().forEach(o => {
+      const pal = Math.max(0, Number((cargo[o.cid] || {}).pal) || 0);
+      const need = pal || 1;
+      for (let i = 0; i < need; i++) {
+        if (at < TOTAL) { slots[at] = {cid: o.cid, loose: !pal}; (rowsOf[o.cid] = rowsOf[o.cid] || []).push(Math.floor(at / WIDE) + 1); at++; } else over++;
+      }
+    });
+    const num: Record<string, number> = {};
+    list.forEach((o, i) => { num[o.cid] = i + 1; });
+    const pallets = list.reduce((n, o) => n + (Math.max(0, Number((cargo[o.cid] || {}).pal) || 0) || 1), 0);
+    return {list, slots, num, over, pallets, rowsOf, etaDrop, etaPick};
+  }, [orders, cargo, route]);
+
+  if (!plan.list.length) {
+    return (
+      <View style={l.empty}>
+        <Bi n="truck" size={34} color={C.faint} />
+        <Text style={l.emptyTxt}>Inget att lasta just nu.</Text>
+      </View>
+    );
+  }
+
+  const when = (eta: any, st: any) => (eta ? `ca ${hhmm(new Date(eta))}` : st ? whenText(st.tEarliest || st.tLatest) : '');
+  const rowsTxt = (r: number[] = []) => {
+    if (!r.length) return '';
+    const a = Math.min(...r), b = Math.max(...r);
+    const where = b <= 2 ? 'mot hytten' : a >= 5 ? 'vid lyften' : 'mitten';
+    return `${a === b ? `rad ${a}` : `rad ${a}–${b}`} · ${where}`;
+  };
+
+  return (
+    <ScrollView contentContainerStyle={{paddingHorizontal: 14, paddingBottom: bottom}}>
+      <View style={l.sumRow}>
+        <Text style={l.sum}><Text style={l.sumB}>{Math.min(plan.pallets, TOTAL)}</Text> av {TOTAL} pallplatser</Text>
+        <Text style={l.sumDim}>1 = lossas först</Text>
+      </View>
+      {plan.over > 0 && (
+        <View style={l.warn}><Bi n="exclamation-triangle-fill" size={15} color={C.bad} /><Text style={l.warnTxt}>{plan.over} pall får inte plats – prata med kontoret.</Text></View>
+      )}
+
+      <View style={l.truck}>
+        <View style={l.cab}><Bi n="truck" size={15} color={C.dim} /><Text style={l.cabTxt}>Hytt</Text></View>
+        <View style={l.grid}>
+          {Array.from({length: LONG}).map((_, r) => (
+            <View key={r} style={l.gridRow}>
+              <Text style={l.rowNo}>{r + 1}</Text>
+              {Array.from({length: WIDE}).map((__, c) => {
+                const sl = plan.slots[r * WIDE + c];
+                if (!sl) return <View key={c} style={[l.cell, l.cellEmpty]} />;
+                const n = plan.num[sl.cid];
+                const first = n === 1;
+                return (
+                  <View key={c} style={[l.cell, first ? {backgroundColor: C.accent} : {backgroundColor: C.accentSoft}]}>
+                    {sl.loose ? <Bi n="box-seam-fill" size={13} color={first ? C.onAccent : C.accentInk} /> : null}
+                    <Text style={[l.cellNo, {color: first ? C.onAccent : C.accentInk}]}>{n}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          ))}
+        </View>
+        <View style={l.lift}><Bi n="chevron-down" size={13} color={C.dim} /><Text style={l.cabTxt}>Bakgavellyft</Text></View>
+      </View>
+
+      <Text style={l.head}>Lossas i den här ordningen</Text>
+      {plan.list.map(o => {
+        const n = plan.num[o.cid];
+        const c = cargo[o.cid] || {};
+        const pal = Math.max(0, Number(c.pal) || 0);
+        return (
+          <View key={o.cid} style={l.item}>
+            <View style={[l.badge, n === 1 ? {backgroundColor: C.accent} : {backgroundColor: C.accentSoft}]}>
+              <Text style={[l.badgeTxt, {color: n === 1 ? C.onAccent : C.accentInk}]}>{n}</Text>
+            </View>
+            <View style={{flex: 1, minWidth: 0}}>
+              <Text style={l.who} numberOfLines={1}>{o.drop.who || '—'}</Text>
+              <Text style={l.meta} numberOfLines={1}>Lossas {when(plan.etaDrop[o.cid], o.drop)} · {[o.drop.area || o.drop.adr].filter(Boolean).join('')}</Text>
+              <View style={l.stRow}>
+                {o.onboard
+                  ? <><Bi n="check-circle-fill" size={12} color={C.accent2} /><Text style={[l.st, {color: C.accent2}]}>Ombord</Text></>
+                  : <><Bi n="box-seam" size={12} color={C.faint} /><Text style={l.st}>Hämtas {when(plan.etaPick[o.cid], o.pick)}{o.pick && o.pick.who ? ` hos ${o.pick.who}` : ''}</Text></>}
+              </View>
+            </View>
+            <View style={{alignItems: 'flex-end'}}>
+              <Text style={l.pal}>{pal ? `${pal} pl` : 'lös'}</Text>
+              <Text style={l.rows}>{rowsTxt(plan.rowsOf[o.cid])}</Text>
+            </View>
+          </View>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+const l = themed(() => StyleSheet.create({
+  empty: {flex: 1, alignItems: 'center', paddingTop: 60, gap: 10},
+  emptyTxt: {color: C.dim, fontSize: 15},
+  sumRow: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10, paddingHorizontal: 2},
+  sum: {color: C.dim, fontSize: 14},
+  sumB: {color: C.ink, fontSize: 18, fontWeight: '800'},
+  sumDim: {color: C.faint, fontSize: 12, fontWeight: '600'},
+  warn: {flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.badSoft, borderRadius: 10, padding: 11, marginBottom: 10},
+  warnTxt: {color: C.bad, fontSize: 13.5, fontWeight: '700', flex: 1},
+  truck: {backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, borderRadius: 14, padding: 12},
+  cab: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: C.panel2, borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomLeftRadius: 6, borderBottomRightRadius: 6, paddingVertical: 9, marginBottom: 8, marginLeft: 22},
+  lift: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: C.panel2, borderRadius: 6, paddingVertical: 7, marginTop: 8, marginLeft: 22},
+  cabTxt: {color: C.dim, fontSize: 12, fontWeight: '700', letterSpacing: 0.5},
+  grid: {gap: 6},
+  gridRow: {flexDirection: 'row', alignItems: 'center', gap: 6},
+  rowNo: {width: 16, color: C.faint, fontSize: 11, fontWeight: '700', textAlign: 'center'},
+  cell: {flex: 1, height: 46, borderRadius: 8, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 4},
+  cellEmpty: {backgroundColor: C.panel2, opacity: 0.6},
+  cellNo: {fontSize: 18, fontWeight: '900'},
+  head: {color: C.ink, fontSize: 15, fontWeight: '800', marginTop: 18, marginBottom: 4, paddingHorizontal: 2},
+  item: {flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.panel, borderRadius: 10, paddingVertical: 11, paddingHorizontal: 12, marginTop: 6},
+  badge: {width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center'},
+  badgeTxt: {fontSize: 15, fontWeight: '900'},
+  who: {color: C.ink, fontSize: 15, fontWeight: '700'},
+  meta: {color: C.faint, fontSize: 12, marginTop: 1},
+  stRow: {flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4},
+  st: {color: C.faint, fontSize: 12, fontWeight: '600', flexShrink: 1},
+  pal: {color: C.ink, fontSize: 14, fontWeight: '800'},
+  rows: {color: C.faint, fontSize: 11, marginTop: 2},
+}));
