@@ -7,18 +7,8 @@ import {FlatList, Linking, Pressable, StyleSheet, Text, View} from 'react-native
 import {C} from './theme';
 import {Sheet} from './parts';
 
-const PHONE_RE = /((?:\+46[\s-]?|\b0)\d{1,3}(?:[\s-]?\d){5,9}\b)/g;
 const dial = (n: string) => Linking.openURL(`tel:${n.replace(/[^0-9+]/g, '')}`).catch(() => {});
-function LinkedText({text, style, lines}: {text: string; style: any; lines?: number}) {
-  const parts = text.split(PHONE_RE);
-  return (
-    <Text style={style} numberOfLines={lines}>
-      {parts.map((p, i) => (i % 2 === 1 && p.replace(/\D/g, '').length >= 8
-        ? <Text key={i} style={n.link} onPress={() => dial(p)}>{p}</Text>
-        : <Text key={i}>{p}</Text>))}
-    </Text>
-  );
-}
+const pretty = (n: string) => n.replace(/^(0[1-9]0|08|0[1-9]\d)(\d{2,3})(\d{2})(\d{2})$/, '$1-$2 $3 $4');
 
 export type NewOrder = {cid: string; pick: any; drop: any; state?: 'sending' | 'failed'};
 
@@ -36,10 +26,12 @@ export default function NewOrdersView({orders, onAccept, onReject}: {orders: New
           const p = item.pick || {}, d = item.drop || {};
           const info = p.info || d.info || '';
           const busy = item.state === 'sending';
+          const tels: any[] = [];
+          for (const tl of [...(p.tel || []), ...(d.tel || [])]) if (!tels.some(x => x.num === tl.num)) tels.push(tl);
           return (
             <View style={n.card}>
               <View style={n.top}>
-                <Text style={n.badge}>NY ORDER</Text>
+                <View style={n.badgeBox}><Text style={n.badge}>NY ORDER</Text></View>
                 <Text style={n.meta}>{[p.orderNo && `#${p.orderNo}`, p.service, (p.kolli || d.kolli) ? `${p.kolli || d.kolli} kollin` : ''].filter(Boolean).join('  ·  ')}</Text>
               </View>
               <View style={n.leg}>
@@ -60,9 +52,19 @@ export default function NewOrdersView({orders, onAccept, onReject}: {orders: New
               </View>
               {!!info && (
                 <Pressable style={n.info} onPress={() => setFull(f => ({...f, [item.cid]: !f[item.cid]}))}>
-                  <LinkedText text={info} style={n.infoTxt} lines={full[item.cid] ? undefined : 4} />
+                  <Text style={n.infoTxt} numberOfLines={full[item.cid] ? undefined : 4}>{info}</Text>
                   <Text style={n.more}>{full[item.cid] ? 'Visa mindre' : 'Visa hela'}</Text>
                 </Pressable>
+              )}
+              {tels.length > 0 && (
+                <View style={n.tels}>
+                  {tels.map((tl: any) => (
+                    <Pressable key={tl.num} style={n.tel} onPress={() => dial(tl.num)}>
+                      <Text style={n.telName} numberOfLines={1}>{tl.label}</Text>
+                      <Text style={n.telNum}>{pretty(tl.num)}</Text>
+                    </Pressable>
+                  ))}
+                </View>
               )}
               {item.state === 'failed' && <Text style={n.fail}>Opter bekräftade inte – försök igen.</Text>}
               <View style={n.actions}>
@@ -94,7 +96,12 @@ const n = StyleSheet.create({
   empty: {color: C.dim, fontSize: 15, textAlign: 'center', marginTop: 30, paddingHorizontal: 20},
   card: {backgroundColor: C.panel, borderColor: '#6a5428', borderWidth: 1.5, borderRadius: 16, padding: 16, marginBottom: 12},
   top: {flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6},
-  badge: {color: C.onAccent, backgroundColor: C.accent, fontSize: 11, fontWeight: '900', letterSpacing: 1.5, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, overflow: 'hidden'},
+  badgeBox: {backgroundColor: C.accent, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3},
+  badge: {color: C.onAccent, fontSize: 11, fontWeight: '900', letterSpacing: 1.5},
+  tels: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10},
+  tel: {backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12, maxWidth: '100%'},
+  telName: {color: C.dim, fontSize: 12, fontWeight: '700'},
+  telNum: {color: C.accent, fontSize: 15, fontWeight: '800', marginTop: 1},
   meta: {color: C.dim, fontSize: 12, fontWeight: '700', flex: 1},
   leg: {flexDirection: 'row', gap: 12, marginTop: 12},
   verb: {fontSize: 11, fontWeight: '900', letterSpacing: 1.5, width: 52, marginTop: 4},
@@ -104,7 +111,6 @@ const n = StyleSheet.create({
   info: {backgroundColor: C.noteBg, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 11, marginTop: 14},
   infoTxt: {color: C.noteInk, fontSize: 13.5, lineHeight: 19},
   more: {color: C.accent, fontSize: 12, fontWeight: '700', marginTop: 5},
-  link: {color: C.accent, fontWeight: '800', textDecorationLine: 'underline'},
   fail: {color: C.bad, fontSize: 13, fontWeight: '700', marginTop: 10},
   actions: {flexDirection: 'row', gap: 10, marginTop: 16},
   reject: {flex: 1, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 12, paddingVertical: 15, alignItems: 'center'},

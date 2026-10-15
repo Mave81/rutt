@@ -21,19 +21,6 @@ function navigate(st: any) {
 const dial = (num: string) => Linking.openURL(`tel:${num}`).catch(() => {});
 const prettyNum = (n: string) => n.replace(/^(0[1-9]0|08|0[1-9]\d)(\d{2,3})(\d{2})(\d{2})$/, '$1-$2 $3 $4');
 
-// Fritext där telefonnummer blir tryckbara.
-const PHONE_RE = /((?:\+46[\s-]?|\b0)\d{1,3}(?:[\s-]?\d){5,9}\b)/g;
-function LinkedText({text, style, lines}: {text: string; style: any; lines?: number}) {
-  const parts = text.split(PHONE_RE);
-  return (
-    <Text style={style} numberOfLines={lines}>
-      {parts.map((p, i) => (i % 2 === 1 && p.replace(/\D/g, '').length >= 8
-        ? <Text key={i} style={o.link} onPress={() => dial(p.replace(/[^0-9+]/g, ''))}>{p}</Text>
-        : <Text key={i}>{p}</Text>))}
-    </Text>
-  );
-}
-
 // Hur långt sändningen till Opter kommit.
 const SYNC_TXT: Record<string, string> = {
   waiting: 'Skickas till Opter om några sekunder…', sending: 'Skickar till Opter…',
@@ -163,7 +150,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
             {os.avisedAt && av ? <Text style={o.avisedOk}>✓ Aviserad {hhmm(new Date(os.avisedAt))}</Text> : null}
             {!!st.info && (
               <Pressable onPress={() => setFullInfo(f => ({...f, [cid]: !f[cid]}))} style={o.info}>
-                <LinkedText text={st.info} style={o.infoTxt} lines={fullInfo[cid] ? undefined : 4} />
+                <Text style={o.infoTxt} numberOfLines={fullInfo[cid] ? undefined : 4}>{st.info}</Text>
                 <Text style={o.infoMore}>{fullInfo[cid] ? 'Visa mindre' : 'Visa hela'}</Text>
               </Pressable>
             )}

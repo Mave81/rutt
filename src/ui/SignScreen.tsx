@@ -74,13 +74,13 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
 
           <View style={st.secHead}>
             <Text style={st.sec}>Mottagarens underskrift</Text>
-            {req.sig ? <Text style={st.reqTag}>KRÄVS</Text> : null}
+            {req.sig ? <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View> : null}
           </View>
           <SignaturePad height={padH} onChange={setSig} onDrawing={setDrawing} hint="Signera på linjen" />
 
           <View style={st.secHead}>
             <Text style={st.sec}>Namnförtydligande</Text>
-            {req.name ? <Text style={st.reqTag}>KRÄVS</Text> : null}
+            {req.name ? <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View> : null}
           </View>
           <TextInput
             style={st.nameInput}
@@ -107,7 +107,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
 
           <View style={st.secHead}>
             <Text style={st.sec}>Foto{photos.length ? `  ${photos.length}/${MAX_PHOTOS}` : ''}</Text>
-            {req.pic ? <Text style={st.reqTag}>KRÄVS</Text> : null}
+            {req.pic ? <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View> : null}
           </View>
           <View style={st.photoRow}>
             {photos.map((ph, i) => (
@@ -145,7 +145,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
 
           <View style={st.secHead}>
             <Text style={st.sec}>Anmärkning</Text>
-            {req.comment ? <Text style={st.reqTag}>KRÄVS</Text> : null}
+            {req.comment ? <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View> : null}
           </View>
           <TextInput style={st.comment} value={comment} onChangeText={setComment} placeholder="T.ex. ställt vid porten, skadad kartong…" placeholderTextColor={C.faint} multiline />
         </ScrollView>
@@ -170,7 +170,8 @@ const st = StyleSheet.create({
   adr: {color: C.dim, fontSize: 14, marginTop: 3},
   secHead: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 20, marginBottom: 8},
   sec: {color: C.dim, fontSize: 13, fontWeight: '700', letterSpacing: 0.5},
-  reqTag: {color: C.onAccent, backgroundColor: C.accent, fontSize: 10, fontWeight: '800', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, overflow: 'hidden', letterSpacing: 1},
+  reqBox: {backgroundColor: C.accent, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2},
+  reqTag: {color: C.onAccent, fontSize: 10, fontWeight: '800', letterSpacing: 1},
   nameInput: {backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 12, color: C.ink, paddingHorizontal: 14, paddingVertical: 13, fontSize: 18, fontWeight: '600'},
   sugLabel: {color: C.faint, fontSize: 12, marginTop: 10, marginBottom: 7},
   chips: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},

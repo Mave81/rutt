@@ -6,7 +6,7 @@
 import React, {useMemo, useState, useEffect, useRef} from 'react';
 import {
   View, StatusBar, StyleSheet, Text, TextInput, Pressable,
-  FlatList, ActivityIndicator, ScrollView, Keyboard, Share, Vibration,
+  FlatList, ActivityIndicator, ScrollView, Keyboard, Share, Vibration, NativeModules,
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, hhmm} from './src/ui/theme';
@@ -27,7 +27,7 @@ import computeRoute, {slotWhere} from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '15 okt · nytt + autologin';
+const BUILD = '15 okt · stabil v1';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -320,7 +320,21 @@ function AppInner(): React.JSX.Element {
       if (v.name) setDriverName(v.name);
       login(v);
     });
-    loadJSON(CRASH_KEY, []).then((c: any) => setCrashes(c || []));
+    // Android-krasch från förra körningen? Läs in den, spara bland felen och visa under Felsök.
+    (async () => {
+      let list: any[] = await loadJSON(CRASH_KEY, []);
+      try {
+        const CL = NativeModules.CrashLog;
+        const nat = CL && (await CL.getLast());
+        if (nat) {
+          const first = String(nat).split('\n').slice(1).find((l: string) => l.trim()) || String(nat);
+          list = [{at: new Date().toISOString(), where: 'android', msg: first.slice(0, 200), stack: String(nat).slice(0, 3000), build: BUILD}, ...list].slice(0, 12);
+          await saveJSON(CRASH_KEY, list);
+          await CL.clear();
+        }
+      } catch (e) {}
+      setCrashes(list || []);
+    })();
   }, []);
 
   async function login(v?: any) {
