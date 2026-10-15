@@ -6,10 +6,11 @@
 import React, {useMemo, useState, useEffect, useRef} from 'react';
 import {
   View, StatusBar, StyleSheet, Text, TextInput, Pressable,
-  FlatList, ActivityIndicator, ScrollView, Keyboard, Share, Vibration, NativeModules, PermissionsAndroid, Platform,
+  FlatList, ActivityIndicator, ScrollView, Keyboard, Share, Vibration, NativeModules, PermissionsAndroid, Platform, useColorScheme, Linking,
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
-import {C, hhmm, isFutureDay} from './src/ui/theme';
+import {C, themed, hhmm, isFutureDay, applyTheme} from './src/ui/theme';
+import {Bi} from './src/ui/Bi';
 import {Sheet} from './src/ui/parts';
 import OrdersView, {DoneView} from './src/ui/OrdersView';
 import SignScreen from './src/ui/SignScreen';
@@ -27,7 +28,7 @@ import computeRoute, {slotWhere} from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '15 okt · Lossad som Opter';
+const BUILD = '15 okt · A ljust/mörkt';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -127,6 +128,23 @@ function AppInner(): React.JSX.Element {
   const [gps, setGps] = useState<{state: 'av' | 'startar' | 'nekad' | 'söker' | 'ok' | 'fel'; sentAt?: number; acc?: number}>({state: 'av'});
   const [gpsRoutePos, setGpsRoutePos] = useState<any>(null); // position som rutten räknas från (uppdateras vid > 1 km förflyttning)
   const [diagBusy, setDiagBusy] = useState(false);
+  // Ljust / mörkt: Auto följer telefonen. Sparas på telefonen.
+  const [themePref, setThemePref] = useState<'auto' | 'dark' | 'light'>('auto');
+  const sysScheme = useColorScheme();
+  const mode = themePref === 'auto' ? (sysScheme === 'light' ? 'light' : 'dark') : themePref;
+  if (C.mode !== mode) applyTheme(mode);
+  useEffect(() => { loadJSON('rutt.theme', 'auto').then((v: any) => { if (v === 'dark' || v === 'light' || v === 'auto') setThemePref(v); }); }, []);
+  function pickTheme(v: 'auto' | 'dark' | 'light') { setThemePref(v); saveJSON('rutt.theme', v); }
+  // Statusraden: inloggad mot Opter? GPS-tjänsten (med fast notis) igång? Hastighet för kör-läget.
+  const [online, setOnline] = useState<'ja' | 'nej' | 'åter'>('nej');
+  const [gpsStat, setGpsStat] = useState<{running: boolean; notif: boolean; locOn: boolean} | null>(null);
+  const [speed, setSpeed] = useState(0);
+  const [kbOpen, setKbOpen] = useState(false);
+  useEffect(() => {
+    const a = Keyboard.addListener('keyboardDidShow', () => setKbOpen(true));
+    const b = Keyboard.addListener('keyboardDidHide', () => setKbOpen(false));
+    return () => { a.remove(); b.remove(); };
+  }, []);
   // Skicka rådata från Opter (via telefonens dela-meny → Gmail till dig själv) så Claude kan läsa den.
   async function sendDump() {
     if (!client.logon) { setErr('Logga in mot Opter först.'); setDiag(false); return; }
@@ -232,7 +250,7 @@ function AppInner(): React.JSX.Element {
   function flash(text: string, undo: (() => void) | null) {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast({text, undo});
-    toastTimer.current = setTimeout(() => setToast(null), 6000);
+    toastTimer.current = setTimeout(() => setToast(null), 8000);
   }
   // Lastad: raden byter till LOSSA och sorteras in i körordningen.
   // ---- Skicka status till Opter: väntar tills "Ångra" gått ut, sen exakt en gång + kontroll ----
@@ -250,7 +268,7 @@ function AppInner(): React.JSX.Element {
         setSync(cid, step, r.confirmed ? (r.imageDropped ? 'ok-noimg' : 'ok') : 'unconfirmed');
         if (r.rutt && r.rutt.stops && r.rutt.stops.length) setOrders(r.rutt);
       } catch (e) { setSync(cid, step, 'failed'); }
-    }, 6200);
+    }, 8200);
   }
   const cancelSend = (cid: string, step: string) => { if (sendTimers.current[cid + step]) { clearTimeout(sendTimers.current[cid + step]); delete sendTimers.current[cid + step]; } };
   function sendLoad(st: any) {
@@ -447,6 +465,22 @@ function AppInner(): React.JSX.Element {
     return () => { alive = false; if (timer) clearInterval(timer); };
   }, [step, live, gpsOn]);
   function toggleGps() { const v = !gpsOn; setGpsOn(v); saveJSON('rutt.gps.v1', v); }
+  useEffect(() => {
+    if (step !== 'route') { setOnline('nej'); return; }
+    const RL = NativeModules.RuttLocation;
+    let alive = true;
+    const tick = async () => {
+      const ok = !!(client.logon && (client.logon as any).ok);
+      const up = ok && client._alive && client._alive();
+      if (alive) setOnline(!ok ? 'nej' : up ? 'ja' : 'åter');
+      if (!RL) return;
+      try { const st = RL.status && (await RL.status()); if (alive && st) setGpsStat(st); } catch (e) {}
+      try { const l = await RL.getLast(); if (alive) setSpeed(l && Date.now() - l.time < 90000 ? l.speedKmh || 0 : 0); } catch (e) {}
+    };
+    tick();
+    const iv = setInterval(tick, 4000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [step]);
 
   // Vibrera när en ny order kommer in.
   const lastNew = useRef(0);
@@ -456,6 +490,7 @@ function AppInner(): React.JSX.Element {
   }, [newOrders.length, step]);
 
   const unread = msgs.filter(m => m.received && !m.confirmed).length;
+  const navInset = useSafeAreaInsets().bottom;
 
   async function openChat() {
     setTab('chat');
@@ -527,24 +562,49 @@ function AppInner(): React.JSX.Element {
     })();
   }, [tab, msgs, step]);
 
-  const title = step === 'login' ? (driverName ? `Välkommen ${driverName}` : 'Logga in mot Opter') : step === 'pick' ? 'Välj ditt namn' : (driverName ? `Välkommen ${driverName}` : demo ? 'Demo' : 'Dina jobb');
+  const hour = new Date().getHours();
+  const hej = hour < 10 ? 'God morgon' : hour < 18 ? 'Hej' : 'God kväll';
+  const title = step === 'login' ? (driverName ? `Välkommen ${driverName}` : 'Logga in mot Opter') : step === 'pick' ? 'Välj ditt namn' : tab === 'chat' ? 'Kontoret' : tab === 'last' ? 'Lastplan' : tab === 'klart' ? 'Klart idag' : tab === 'nytt' ? 'Nya order' : (driverName ? `${hej} ${driverName.split(' ')[0]}` : demo ? 'Demo' : 'Dina jobb');
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
+      <StatusBar barStyle={C.mode === 'light' ? 'dark-content' : 'light-content'} backgroundColor={C.bg} />
       <View style={s.head}>
-        <View style={{flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between'}}>
+        <View style={s.headTop}>
           <Text style={s.brand}>RUTT</Text>
-          <Pressable hitSlop={10} onPress={() => setDiag(true)}><Text style={s.build}>{BUILD}  ⓘ</Text></Pressable>
+          <View style={{flex: 1}} />
+          {step === 'route' && (() => {
+            // Inloggad mot Opter?
+            const on = demo ? {t: 'Demo', c: C.faint, i: 'info-circle'} : online === 'ja' ? {t: 'Inloggad', c: C.accent2, i: 'person-check-fill'} : online === 'åter' ? {t: 'Ansluter', c: C.accentInk, i: 'arrow-repeat'} : {t: 'Utloggad', c: C.bad, i: 'wifi-off'};
+            // GPS-tjänsten med sin fasta notis.
+            const g = !live ? null
+              : !gpsOn ? {t: 'GPS av', c: C.faint, i: 'geo-fill'}
+              : gps.state === 'nekad' ? {t: 'GPS nekad', c: C.bad, i: 'exclamation-triangle-fill'}
+              : gpsStat && !gpsStat.locOn ? {t: 'Plats av', c: C.bad, i: 'exclamation-triangle-fill'}
+              : gpsStat && !gpsStat.notif ? {t: 'Notis av', c: C.bad, i: 'exclamation-triangle-fill'}
+              : gps.state === 'fel' ? {t: 'GPS fel', c: C.bad, i: 'exclamation-triangle-fill'}
+              : gps.state === 'ok' && (!gpsStat || gpsStat.running) ? {t: 'GPS på', c: C.accent2, i: 'broadcast'}
+              : {t: 'GPS söker', c: C.accentInk, i: 'broadcast'};
+            return (
+              <Pressable hitSlop={8} onPress={() => setDiag(true)} style={s.chips}>
+                <View style={s.stChip}><Bi n={on.i as any} size={13} color={on.c} /><Text style={[s.stChipTxt, {color: on.c}]}>{on.t}</Text></View>
+                {g && <View style={s.stChip}><Bi n={g.i as any} size={13} color={g.c} /><Text style={[s.stChipTxt, {color: g.c}]}>{g.t}</Text></View>}
+              </Pressable>
+            );
+          })()}
+          {step === 'route' && (
+            <Pressable hitSlop={8} onPress={() => setWorkSheet(true)} style={s.iconBtn}><Bi n="cup-hot-fill" size={16} color={work === 'igång' ? C.dim : C.accentInk} /></Pressable>
+          )}
+          <Pressable hitSlop={8} onPress={() => setDiag(true)} style={s.iconBtn}><Bi n="gear-fill" size={16} color={C.dim} /></Pressable>
         </View>
-        <Text style={s.tag}>{title}</Text>
+        <Text style={s.tag} numberOfLines={1}>{title}</Text>
       </View>
 
       {busy && <View style={s.busy}><ActivityIndicator color={C.accent} /><Text style={s.busyTxt}>{status}</Text></View>}
-      {!!err && <Text style={s.err}>{err}</Text>}
+      {!!err && <View style={s.errBox}><Bi n="exclamation-circle-fill" size={15} color={C.bad} /><Text style={s.errTxt}>{err}</Text></View>}
 
       {step === 'login' && !busy && (
-        <ScrollView contentContainerStyle={s.wrap}>
+        <ScrollView contentContainerStyle={s.wrap} keyboardShouldPersistTaps="handled">
           <View style={s.card}>
             <Text style={s.label}>Serveradress</Text>
             <TextInput style={s.input} value={server} onChangeText={setServer} autoCapitalize="none" />
@@ -563,66 +623,87 @@ function AppInner(): React.JSX.Element {
 
       {step === 'pick' && !busy && (
         <View style={s.wrap}>
-          <TextInput style={s.input} value={query} onChangeText={setQuery} placeholder="Sök ditt namn…" placeholderTextColor={C.dim} autoCapitalize="none" />
+          <TextInput style={s.input} value={query} onChangeText={setQuery} placeholder="Sök ditt namn…" placeholderTextColor={C.faint} autoCapitalize="none" />
           <FlatList style={{marginTop: 10}} data={filtered} keyExtractor={r => String(r.resId)}
-            renderItem={({item}) => <Pressable style={s.nameRow} onPress={() => pull(item.resId, item.name)}><Text style={s.nameTxt}>{item.name}</Text></Pressable>} />
+            renderItem={({item}) => <Pressable style={s.nameRow} onPress={() => pull(item.resId, item.name)}><Bi n="person-fill" size={16} color={C.faint} /><Text style={s.nameTxt}>{item.name}</Text></Pressable>} />
         </View>
       )}
 
       {step === 'route' && !busy && (
-        <View style={{flex: 1}}>
-          <View style={s.tabs}>
-            <Pressable onPress={() => setTab('nytt')} style={[s.tabBtn, tab === 'nytt' && s.tabOn, newOrders.length > 0 && tab !== 'nytt' && s.tabAlert]}>
-              <Text style={[s.tabTxt, tab === 'nytt' && s.tabTxtOn, newOrders.length > 0 && tab !== 'nytt' && {color: C.onAccent}]}>Nytt{newOrders.length ? `  ${newOrders.length}` : ''}</Text>
+        <View style={{flex: 1}} key={mode}>
+          {newOrders.length > 0 && tab !== 'nytt' && (
+            <Pressable style={s.banner} onPress={() => setTab('nytt')}>
+              <Bi n="bell-fill" size={16} color={C.onAccent} />
+              <Text style={s.bannerTxt}>{newOrders.length === 1 ? '1 ny order' : `${newOrders.length} nya order`} väntar på svar</Text>
+              <Text style={s.bannerGo}>Visa</Text><Bi n="chevron-right" size={14} color={C.onAccent} />
             </Pressable>
-            <Pressable onPress={() => setTab('plan')} style={[s.tabBtn, tab === 'plan' && s.tabOn]}><Text style={[s.tabTxt, tab === 'plan' && s.tabTxtOn]}>Plan</Text></Pressable>
-            <Pressable onPress={() => setTab('klart')} style={[s.tabBtn, tab === 'klart' && s.tabOn]}>
-              <Text style={[s.tabTxt, tab === 'klart' && s.tabTxtOn]}>Klart{doneOrders.length ? `  ${doneOrders.length}` : ''}</Text>
+          )}
+          {work !== 'igång' && (tab === 'plan' || tab === 'last') && (
+            <Pressable style={s.workBar} onPress={() => setWorkSheet(true)}>
+              <Bi n={work === 'slut' ? 'power' : 'cup-hot-fill'} size={16} color={C.accentInk} />
+              <Text style={s.workTxt}>{work === 'rast' ? 'Du har rast' : work === 'lunch' ? 'Du har lunch' : 'Arbetspasset är avslutat'}</Text>
+              <Text style={s.workAction}>{work === 'slut' ? 'Återuppta' : 'Avsluta'}</Text>
             </Pressable>
-            <Pressable onPress={() => setTab('last')} style={[s.tabBtn, tab === 'last' && s.tabOn]}><Text style={[s.tabTxt, tab === 'last' && s.tabTxtOn]}>Last</Text></Pressable>
-            <Pressable onPress={openChat} style={[s.tabBtn, tab === 'chat' && s.tabOn]}>
-              <Text style={[s.tabTxt, tab === 'chat' && s.tabTxtOn]}>Chatt{unread ? `  ${unread}` : ''}</Text>
-            </Pressable>
-          </View>
+          )}
 
           {tab === 'klart' && <DoneView done={doneOrders} onRetry={retrySync} />}
           {tab === 'nytt' && <NewOrdersView orders={newOrders} onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={(o: any) => setOrderStatus(o, 'reject')} />}
 
-          {(tab === 'plan' || tab === 'last') && (
-            <Pressable style={s.workBar} onPress={() => setWorkSheet(true)}>
-              <View style={[s.workDot, work === 'igång' ? {backgroundColor: C.accent2} : work === 'slut' ? {backgroundColor: C.dim} : {backgroundColor: C.accent}]} />
-              <Text style={s.workTxt}>{work === 'igång' ? 'Arbetspass igång' : work === 'rast' ? 'På rast' : work === 'lunch' ? 'På lunch' : 'Pass avslutat'}</Text>
-              <Text style={s.workAction}>Rast / lunch ›</Text>
-            </Pressable>
-          )}
-          {(tab === 'plan' || tab === 'last') && live && (
-            <Pressable style={s.gpsRow} onPress={() => setDiag(true)}>
-              <View style={[s.workDot, {width: 7, height: 7, backgroundColor: gps.state === 'ok' ? C.accent2 : gps.state === 'nekad' || gps.state === 'fel' ? C.bad : gps.state === 'av' ? C.faint : C.accent}]} />
-              <Text style={[s.gpsTxt, (gps.state === 'nekad' || gps.state === 'fel') && {color: C.bad}]}>
-                {gps.state === 'ok' ? `GPS · position skickad ${hhmm(new Date(gps.sentAt || Date.now()))}${gps.acc ? ` (±${Math.round(gps.acc)} m)` : ''}`
-                  : gps.state === 'söker' ? 'GPS · söker position…' : gps.state === 'startar' ? 'GPS · startar…'
-                  : gps.state === 'nekad' ? 'GPS · platsbehörighet saknas – tryck' : gps.state === 'fel' ? 'GPS · kunde inte skicka – försöker igen' : 'GPS · avstängd'}
-              </Text>
-            </Pressable>
-          )}
-
           {(tab === 'plan' || tab === 'last') && !orders.stops.length && !demo && (
             <View style={s.emptyBox}>
+              <Bi n="inbox-fill" size={30} color={C.faint} />
               <Text style={s.empty}>Inga aktiva jobb just nu.</Text>
-              {!demo && <Pressable style={s.ghost} onPress={() => setDemo(true)}><Text style={s.ghostTxt}>Visa demo så du ser planen</Text></Pressable>}
+              <Pressable style={s.ghost} onPress={() => setDemo(true)}><Text style={s.ghostTxt}>Visa demo så du ser planen</Text></Pressable>
             </View>
           )}
 
           {tab === 'plan' && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any) => setSignStop(st)} onExtra={onExtra} onAvised={onAvised} onRetry={retrySync} live={live} later={later} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any) => setSignStop(st)} onExtra={onExtra} onAvised={onAvised} onRetry={retrySync} live={live} later={later} speed={speed} />
           )}
           {tab === 'last' && route && !(route as any).error && <LastView route={route} cargo={src.cargo} />}
           {tab === 'chat' && <ChatView msgs={chatList} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} onRetry={deliver} />}
-          {(tab === 'plan' || tab === 'last') && route && (route as any).error && <Text style={s.err}>Optimeringsfel: {(route as any).error}</Text>}
+          {(tab === 'plan' || tab === 'last') && route && (route as any).error && <Text style={s.errTxt}>Optimeringsfel: {(route as any).error}</Text>}
+
+          {!kbOpen && (
+            <View style={[s.nav, {paddingBottom: 8 + navInset}]}>
+              {([['plan', 'Plan', 'signpost-2-fill'], ['chat', 'Kontoret', 'chat-left-text-fill'], ['last', 'Last', 'grid-3x3-gap-fill'], ['klart', 'Klart', 'check2-all']] as const).map(([k, label, icon]) => {
+                const on = tab === k;
+                const col = on ? C.accentInk : C.faint;
+                return (
+                  <Pressable key={k} style={s.navBtn} onPress={() => (k === 'chat' ? openChat() : setTab(k as any))}>
+                    <View>
+                      <Bi n={icon as any} size={21} color={col} />
+                      {k === 'chat' && unread > 0 && <View style={s.navDot} />}
+                    </View>
+                    <Text style={[s.navTxt, {color: col}, on && {fontWeight: '800'}]}>{label}{k === 'klart' && doneOrders.length ? ` ${doneOrders.length}` : ''}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
         </View>
       )}
 
-      <Sheet open={diag} onClose={() => setDiag(false)} title="Felsök" sub={`Bygge: ${BUILD}`}>
+      <Sheet open={diag} onClose={() => setDiag(false)} title="Inställningar" sub={`Bygge: ${BUILD}`} scroll>
+        <Text style={s.podLabel}>Utseende</Text>
+        <View style={s.seg}>
+          {([['auto', 'Auto', 'circle-half'], ['dark', 'Mörkt', 'moon-stars-fill'], ['light', 'Ljust', 'sun-fill']] as const).map(([k, label, icon]) => (
+            <Pressable key={k} style={[s.segBtn, themePref === k && s.segOn]} onPress={() => pickTheme(k)}>
+              <Bi n={icon} size={15} color={themePref === k ? C.onAccent : C.dim} />
+              <Text style={[s.segTxt, themePref === k && {color: C.onAccent}]}>{label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        {step === 'route' && !demo && (
+          <View style={{marginTop: 14, gap: 6}}>
+            <StatusLine ok={online === 'ja'} warn={online === 'åter'} text={online === 'ja' ? `Inloggad mot Opter${driverName ? ` som ${driverName}` : ''}` : online === 'åter' ? 'Tappade kontakten – ansluter igen' : 'Inte inloggad'} />
+            <StatusLine ok={!!(gpsStat && gpsStat.running)} text={gpsStat && gpsStat.running ? 'GPS-tjänsten är igång' : 'GPS-tjänsten är inte igång'} />
+            <StatusLine ok={!!(gpsStat && gpsStat.notif)} text={gpsStat && gpsStat.notif ? 'Notisen "Skickar din position" visas' : 'Notiser är avstängda för RUTT'} onFix={gpsStat && !gpsStat.notif ? () => Linking.openSettings() : undefined} />
+            <StatusLine ok={!!(gpsStat && gpsStat.locOn)} text={gpsStat && gpsStat.locOn ? 'Telefonens plats är på' : 'Telefonens plats är avstängd'} />
+            <StatusLine ok={gps.state === 'ok'} warn={gps.state === 'söker' || gps.state === 'startar'} text={gps.state === 'ok' ? `Position skickad ${hhmm(new Date(gps.sentAt || Date.now()))}${gps.acc ? ` (±${Math.round(gps.acc)} m)` : ''}` : gps.state === 'söker' ? 'Söker position…' : gps.state === 'startar' ? 'Startar GPS…' : gps.state === 'nekad' ? 'Platsbehörighet saknas' : gps.state === 'fel' ? 'Kunde inte skicka position' : 'GPS avstängd'} onFix={gps.state === 'nekad' ? () => Linking.openSettings() : undefined} />
+          </View>
+        )}
+        <Text style={s.podLabel}>Felsök</Text>
         <Text style={s.sheetNote}>Skickar Opters rådata för dina jobb (order, adresser, kolli, statustyper, kvittenstyper) så Claude kan läsa den. Välj Gmail och skicka till dig själv.</Text>
         <Pressable style={[s.primaryBtn, diagBusy && {opacity: 0.5}]} disabled={diagBusy} onPress={sendDump}>
           <Text style={s.primaryBtnTxt}>{diagBusy ? 'Hämtar från Opter…' : 'Skicka orderdata till Claude'}</Text>
@@ -638,7 +719,7 @@ function AppInner(): React.JSX.Element {
             <Text style={s.sheetBtnTxt}>Skicka GPS-position</Text>
             <Text style={[s.sheetNote, {marginTop: 2}]}>Kontoret ser var du är (som Opter Driver). Var {client.positionInterval ? client.positionInterval() : 60}:e sekund.</Text>
           </View>
-          <Text style={{color: gpsOn ? C.accent2 : C.faint, fontWeight: '900', fontSize: 15}}>{gpsOn ? 'PÅ' : 'AV'}</Text>
+          <View style={[s.toggle, gpsOn && {backgroundColor: C.accent2}]}><View style={[s.toggleKnob, gpsOn && {alignSelf: 'flex-end'}]} /></View>
         </Pressable>
         {gps.state === 'nekad' && <Text style={[s.sheetNote, {color: C.bad}]}>Platsbehörighet saknas: öppna telefonens Inställningar → Appar → RUTT → Behörigheter → Plats → Tillåt.</Text>}
         {step === 'route' && (
@@ -661,6 +742,7 @@ function AppInner(): React.JSX.Element {
 
       {toast && (
         <View style={s.toast} pointerEvents="box-none">
+          <Bi n="check-circle-fill" size={18} color={C.accent2} />
           <Text style={s.toastTxt} numberOfLines={1}>{toast.text}</Text>
           {toast.undo && <Pressable hitSlop={12} onPress={() => { toast.undo && toast.undo(); setToast(null); }}><Text style={s.toastUndo}>Ångra</Text></Pressable>}
         </View>
@@ -700,7 +782,6 @@ function ChatView({msgs, msgText, setMsgText, onSend, onRetry}: any) {
     return m.received ? `${m.from || ''}${m.from ? ' · ' : ''}${d}${t}` : `${d}${t}`;
   };
   const data = [...msgs].reverse(); // nyast sist visuellt (inverted)
-  const insets = useSafeAreaInsets();
   // Lyft hela chatten över tangentbordet via RN:s egna Keyboard-event
   // (funkar med edge-to-edge utan native-beroende).
   const [kb, setKb] = useState(0);
@@ -745,11 +826,22 @@ function ChatView({msgs, msgText, setMsgText, onSend, onRetry}: any) {
           }}
         />
       )}
-      <View style={[s.sendRow, {paddingBottom: 12 + (kb > 0 ? 0 : insets.bottom)}]}>
+      <View style={[s.sendRow, {paddingBottom: 12}]}>
         <TextInput style={s.sendInput} value={msgText} onChangeText={setMsgText} placeholder="Skriv ett meddelande…" placeholderTextColor={C.dim} multiline />
-        <Pressable style={s.sendBtn} onPress={onSend}><Text style={s.sendBtnTxt}>Skicka</Text></Pressable>
+        <Pressable style={s.sendBtn} onPress={onSend}><Bi n="send-fill" size={18} color={C.onAccent} /></Pressable>
       </View>
     </View>
+  );
+}
+
+function StatusLine({ok, warn, text, onFix}: {ok: boolean; warn?: boolean; text: string; onFix?: () => void}) {
+  const col = ok ? C.accent2 : warn ? C.accentInk : C.bad;
+  return (
+    <Pressable disabled={!onFix} onPress={onFix} style={s.stLine}>
+      <Bi n={ok ? 'check-circle-fill' : warn ? 'arrow-repeat' : 'x-circle-fill'} size={15} color={col} />
+      <Text style={[s.stLineTxt, !ok && !warn && {color: C.bad}]}>{text}</Text>
+      {onFix ? <Text style={s.stFix}>Öppna inställningar</Text> : null}
+    </Pressable>
   );
 }
 
@@ -775,30 +867,53 @@ function WorkSheet({open, work, live, onClose, onPick}: any) {
   );
 }
 
-const s = StyleSheet.create({
-  toast: {position: 'absolute', left: 14, right: 14, bottom: 28, backgroundColor: '#3a352f', borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 12, elevation: 8, shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: {width: 0, height: 4}},
-  toastTxt: {color: C.ink, fontSize: 15, fontWeight: '700', flex: 1},
+const s = themed(() => StyleSheet.create({
+  toast: {position: 'absolute', left: 14, right: 14, bottom: 28, backgroundColor: C.toast, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 12, elevation: 8, shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: {width: 0, height: 4}},
+  toastTxt: {color: '#FFFFFF', fontSize: 15, fontWeight: '700', flex: 1},
   toastUndo: {color: C.accent, fontSize: 15, fontWeight: '900'},
   safe: {flex: 1, backgroundColor: C.bg},
-  head: {paddingHorizontal: 22, paddingTop: 28, paddingBottom: 8},
-  brand: {color: C.ink, fontSize: 32, fontWeight: '800', letterSpacing: 2},
-  tag: {color: C.dim, fontSize: 15, marginTop: 2},
-  build: {color: C.accent, fontSize: 11, opacity: 0.8},
+  head: {paddingHorizontal: 18, paddingTop: 14, paddingBottom: 10},
+  headTop: {flexDirection: 'row', alignItems: 'center', gap: 6},
+  brand: {color: C.accentInk, fontSize: 13, fontWeight: '900', letterSpacing: 3},
+  tag: {color: C.ink, fontSize: 24, fontWeight: '800', marginTop: 6, letterSpacing: -0.2},
+  chips: {flexDirection: 'row', gap: 6},
+  stChip: {flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, borderRadius: 14, paddingHorizontal: 9, paddingVertical: 4},
+  stChipTxt: {fontSize: 11.5, fontWeight: '800'},
+  iconBtn: {width: 32, height: 32, borderRadius: 16, backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, alignItems: 'center', justifyContent: 'center'},
+  errBox: {flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 14, marginBottom: 8, backgroundColor: C.badSoft, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 12},
+  errTxt: {color: C.bad, fontSize: 13, fontWeight: '600', flex: 1},
+  banner: {flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 14, marginBottom: 8, backgroundColor: C.accent, borderRadius: 10, paddingVertical: 11, paddingHorizontal: 14},
+  bannerTxt: {color: C.onAccent, fontSize: 14.5, fontWeight: '800', flex: 1},
+  bannerGo: {color: C.onAccent, fontSize: 13.5, fontWeight: '800'},
+  nav: {flexDirection: 'row', backgroundColor: C.panel, borderTopColor: C.edge, borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 8},
+  navBtn: {flex: 1, alignItems: 'center', gap: 3},
+  navTxt: {fontSize: 11.5, fontWeight: '600'},
+  navDot: {position: 'absolute', top: -2, right: -6, width: 9, height: 9, borderRadius: 5, backgroundColor: C.people, borderColor: C.panel, borderWidth: 1.5},
+  seg: {flexDirection: 'row', gap: 6},
+  segBtn: {flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: C.panel2, borderRadius: 10, paddingVertical: 11},
+  segOn: {backgroundColor: C.accent},
+  segTxt: {color: C.dim, fontSize: 14, fontWeight: '700'},
+  toggle: {width: 46, height: 28, borderRadius: 14, backgroundColor: C.edge, padding: 3, justifyContent: 'center'},
+  toggleKnob: {width: 22, height: 22, borderRadius: 11, backgroundColor: '#FFFFFF'},
+  stLine: {flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 3},
+  stLineTxt: {color: C.ink, fontSize: 13.5, flex: 1},
+  stFix: {color: C.accentInk, fontSize: 12.5, fontWeight: '700'},
+  build: {color: C.accentInk, fontSize: 11, opacity: 0.8},
   wrap: {flexGrow: 1, paddingHorizontal: 18, paddingTop: 8},
   card: {backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, borderRadius: 16, padding: 16},
   label: {color: C.dim, fontSize: 12, marginBottom: 5, marginTop: 10},
   input: {backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 10, color: C.ink, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15},
   row: {flexDirection: 'row', gap: 10},
   btn: {backgroundColor: C.accent, borderRadius: 10, paddingVertical: 13, alignItems: 'center', marginTop: 18},
-  btnTxt: {color: '#2a1d0c', fontSize: 15, fontWeight: '700'},
-  ghost: {marginTop: 12, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 10, paddingVertical: 11, paddingHorizontal: 14, alignSelf: 'flex-start'},
+  btnTxt: {color: C.onAccent, fontSize: 15, fontWeight: '700'},
+  ghost: {marginTop: 6, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 10, paddingVertical: 11, paddingHorizontal: 14, alignSelf: 'flex-start'},
   ghostTxt: {color: C.ink, fontSize: 14},
   busy: {flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 22, paddingVertical: 14},
   busyTxt: {color: C.dim, fontSize: 14},
   err: {color: C.bad, fontSize: 13, paddingHorizontal: 22, paddingVertical: 8},
-  nameRow: {paddingVertical: 13, paddingHorizontal: 12, borderRadius: 9},
+  nameRow: {flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 13, paddingHorizontal: 12, borderRadius: 9},
   nameTxt: {color: C.ink, fontSize: 16},
-  emptyBox: {paddingHorizontal: 22, paddingTop: 6},
+  emptyBox: {flex: 1, alignItems: 'center', paddingHorizontal: 22, paddingTop: 50, gap: 10},
   empty: {color: C.dim, fontSize: 14},
   tabs: {flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingTop: 4, paddingBottom: 10},
   tabBtn: {flex: 1, alignItems: 'center', paddingVertical: 9, paddingHorizontal: 2, borderRadius: 20, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1},
@@ -807,7 +922,7 @@ const s = StyleSheet.create({
   tabAlert: {backgroundColor: C.accent, borderColor: C.accent},
   tabOn: {backgroundColor: C.accent, borderColor: C.accent},
   tabTxt: {color: C.dim, fontSize: 13.5, fontWeight: '700'},
-  tabTxtOn: {color: '#2a1d0c'},
+  tabTxtOn: {color: C.onAccent},
   statRow: {flexDirection: 'row', gap: 10, paddingHorizontal: 18, marginBottom: 8},
   stat: {flex: 1, backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, borderRadius: 12, paddingVertical: 11, alignItems: 'center'},
   statB: {color: C.ink, fontSize: 17, fontWeight: '700'},
@@ -820,64 +935,64 @@ const s = StyleSheet.create({
   foot: {color: C.dim, fontSize: 12, padding: 18, lineHeight: 18},
   loadIntro: {color: C.dim, fontSize: 13, lineHeight: 19, marginBottom: 14},
   slot: {flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 10, borderTopColor: C.edge, borderTopWidth: StyleSheet.hairlineWidth},
-  slotNo: {color: C.accent, fontWeight: '700', width: 26, textAlign: 'center'},
+  slotNo: {color: C.accentInk, fontWeight: '700', width: 26, textAlign: 'center'},
   slotName: {color: C.ink, fontSize: 15},
   slotWhere: {color: C.dim, fontSize: 12, marginTop: 1},
   bubbleWrap: {marginBottom: 12, maxWidth: '82%'},
   bwL: {alignSelf: 'flex-start'},
   bwR: {alignSelf: 'flex-end'},
   bubble: {borderRadius: 16, paddingHorizontal: 13, paddingVertical: 10},
-  bubbleIn: {backgroundColor: '#2c2824', borderBottomLeftRadius: 5},
-  bubbleOut: {backgroundColor: '#4a3a22', borderBottomRightRadius: 5},
+  bubbleIn: {backgroundColor: C.bubbleIn, borderBottomLeftRadius: 5},
+  bubbleOut: {backgroundColor: C.bubbleOut, borderBottomRightRadius: 5},
   bubbleTxt: {color: C.ink, fontSize: 15, lineHeight: 21},
   bubbleStamp: {color: C.dim, fontSize: 11, marginTop: 4},
   stampL: {textAlign: 'left', marginLeft: 6},
   stampR: {textAlign: 'right', marginRight: 6},
   sendRow: {flexDirection: 'row', gap: 8, padding: 12, borderTopColor: C.edge, borderTopWidth: StyleSheet.hairlineWidth, alignItems: 'flex-end'},
   sendInput: {flex: 1, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 10, color: C.ink, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, maxHeight: 120},
-  sendBtn: {backgroundColor: C.accent, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 11},
-  sendBtnTxt: {color: '#2a1d0c', fontSize: 15, fontWeight: '700'},
+  sendBtn: {backgroundColor: C.accent, borderRadius: 22, width: 44, height: 44, alignItems: 'center', justifyContent: 'center'},
+  sendBtnTxt: {color: C.onAccent, fontSize: 15, fontWeight: '700'},
 
   // Arbetstidsrad
-  workBar: {flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 18, marginBottom: 10, backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14},
+  workBar: {flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 14, marginBottom: 8, backgroundColor: C.accentSoft, borderRadius: 10, paddingVertical: 11, paddingHorizontal: 14},
   workDot: {width: 9, height: 9, borderRadius: 5},
   workTxt: {color: C.ink, fontSize: 14, flex: 1, fontWeight: '600'},
-  workAction: {color: C.accent, fontSize: 13, fontWeight: '700'},
+  workAction: {color: C.accentInk, fontSize: 13, fontWeight: '700'},
 
   // Status-brickor på stopp
   chip: {color: C.accent2, fontSize: 12, fontWeight: '700', marginLeft: 8},
   chevron: {color: C.dim, fontSize: 20, marginLeft: 8, marginTop: -2},
 
   // Sheets
-  overlay: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.55)'},
+  overlay: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: C.overlay},
   sheet: {position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: C.panel, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 18, paddingTop: 10},
   sheetHandle: {alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: C.edge, marginBottom: 12},
   sheetTitle: {color: C.ink, fontSize: 18, fontWeight: '800'},
   sheetSub: {color: C.dim, fontSize: 13, marginTop: 2, marginBottom: 2},
   sheetBtn: {backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 16, marginTop: 10},
-  sheetBtnBad: {borderColor: '#5a2f2a'},
+  sheetBtnBad: {borderColor: C.bad},
   sheetBtnTxt: {color: C.ink, fontSize: 15, fontWeight: '600'},
   sheetDiv: {height: 1, backgroundColor: C.edge, marginVertical: 12, opacity: 0.6},
   sheetNote: {color: C.dim, fontSize: 12, marginTop: 12, lineHeight: 17},
   primaryBtn: {backgroundColor: C.accent, borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 10},
-  primaryBtnTxt: {color: '#2a1d0c', fontSize: 15, fontWeight: '800'},
+  primaryBtnTxt: {color: C.onAccent, fontSize: 15, fontWeight: '800'},
 
   // POD
   podLabel: {color: C.dim, fontSize: 12, marginTop: 14, marginBottom: 6, fontWeight: '600'},
-  sigPad: {height: 170, backgroundColor: '#26231f', borderColor: C.edge, borderWidth: 1, borderRadius: 12, overflow: 'hidden', justifyContent: 'center', alignItems: 'center'},
+  sigPad: {height: 170, backgroundColor: C.sigBg, borderColor: C.edge, borderWidth: 1, borderRadius: 12, overflow: 'hidden', justifyContent: 'center', alignItems: 'center'},
   sigHint: {color: C.dim, fontSize: 14},
   sigClear: {alignSelf: 'flex-end', paddingVertical: 6, paddingHorizontal: 4, marginTop: 4},
-  sigClearTxt: {color: C.accent, fontSize: 13, fontWeight: '700'},
+  sigClearTxt: {color: C.accentInk, fontSize: 13, fontWeight: '700'},
   chipsWrap: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
   rChip: {backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 18, paddingVertical: 8, paddingHorizontal: 13},
   rChipOn: {backgroundColor: C.accent, borderColor: C.accent},
   rChipTxt: {color: C.dim, fontSize: 13, fontWeight: '600'},
-  rChipTxtOn: {color: '#2a1d0c'},
+  rChipTxtOn: {color: C.onAccent},
 
   // Stor statusknapp (Lastad / Lossad)
   bigBtn: {backgroundColor: C.accent, borderRadius: 16, paddingVertical: 20, paddingHorizontal: 20, marginTop: 14},
-  bigBtnTxt: {color: '#2a1d0c', fontSize: 22, fontWeight: '800'},
-  bigBtnSub: {color: '#4a3517', fontSize: 13, marginTop: 3, fontWeight: '600'},
+  bigBtnTxt: {color: C.onAccent, fontSize: 22, fontWeight: '800'},
+  bigBtnSub: {color: C.onAccent, opacity: 0.7, fontSize: 13, marginTop: 3, fontWeight: '600'},
 
   // Foto
   photoRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 10},
@@ -886,6 +1001,6 @@ const s = StyleSheet.create({
   photoX: {position: 'absolute', top: 4, right: 4, width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(20,18,16,0.8)', alignItems: 'center', justifyContent: 'center'},
   photoXTxt: {color: C.ink, fontSize: 16, lineHeight: 18, fontWeight: '700'},
   photoAdd: {width: 84, height: 84, borderRadius: 12, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, alignItems: 'center', justifyContent: 'center'},
-  photoAddIco: {color: C.accent, fontSize: 22, fontWeight: '700'},
+  photoAddIco: {color: C.accentInk, fontSize: 22, fontWeight: '700'},
   photoAddTxt: {color: C.dim, fontSize: 12, marginTop: 2, fontWeight: '600'},
-});
+}));

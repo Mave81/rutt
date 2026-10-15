@@ -48,7 +48,7 @@ test('logga in → tryck Nytt → acceptera', async () => {
   await press(r, /Logga in & hämta/);
   await ReactTestRenderer.act(async () => { jest.advanceTimersByTime(50); });
   console.log('EFTER LOGIN:', texts(r).slice(0, 400));
-  await press(r, /^Nytt/);
+  await press(r, /väntar på svar/);
   console.log('NYTT-FLIKEN:', texts(r).slice(0, 600));
   await press(r, /^Acceptera$/);
   console.log('EFTER ACCEPT:', texts(r).slice(0, 300));
@@ -56,6 +56,7 @@ test('logga in → tryck Nytt → acceptera', async () => {
   console.log('KLART-FLIKEN:', texts(r).slice(0, 300));
   await press(r, /^Plan$/);
   await press(r, /^Last$/);
-  await press(r, /^Chatt/);
-  await press(r, /^Nytt/);
+  await press(r, /^Kontoret/);
+  await press(r, /^Plan$/);
+  console.log('PLAN:', texts(r).slice(0, 700));
 });

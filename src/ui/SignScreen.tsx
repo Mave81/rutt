@@ -7,7 +7,7 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {Dimensions, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {C} from './theme';
+import {C, themed} from './theme';
 import {MAX_PHOTOS, SigData, SignaturePad, pickPhoto, useKeyboardLift} from './parts';
 import {ExtrasEditor} from './OrderExtras';
 
@@ -165,7 +165,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
           {fields.count !== false && <><View style={st.secHead}><Text style={st.sec}>Antal kollin</Text>{stop.kolli ? <Text style={st.hint}>Ordern: {stop.kolli}</Text> : null}</View>
           <View style={st.kolliRow}>
             <Pressable style={st.kBtn} onPress={() => setKolli(k => Math.max(0, k - 1))}><Text style={st.kBtnTxt}>−</Text></Pressable>
-            <Text style={[st.kVal, stop.kolli && kolli !== stop.kolli ? {color: C.accent} : null]}>{kolli}</Text>
+            <Text style={[st.kVal, stop.kolli && kolli !== stop.kolli ? {color: C.accentInk} : null]}>{kolli}</Text>
             <Pressable style={st.kBtn} onPress={() => setKolli(k => k + 1)}><Text style={st.kBtnTxt}>+</Text></Pressable>
           </View></>}
 
@@ -208,10 +208,10 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
   );
 }
 
-const st = StyleSheet.create({
+const st = themed(() => StyleSheet.create({
   root: {flex: 1, backgroundColor: C.bg},
   top: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 8},
-  cancel: {color: C.accent, fontSize: 16, fontWeight: '700', width: 60},
+  cancel: {color: C.accentInk, fontSize: 16, fontWeight: '700', width: 60},
   topTitle: {color: C.dim, fontSize: 15, fontWeight: '700', letterSpacing: 1},
   who: {color: C.ink, fontSize: 24, fontWeight: '800', marginTop: 4},
   adr: {color: C.dim, fontSize: 14, marginTop: 3},
@@ -232,19 +232,19 @@ const st = StyleSheet.create({
   photoX: {position: 'absolute', top: 4, right: 4, width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(20,18,16,0.85)', alignItems: 'center', justifyContent: 'center'},
   photoXTxt: {color: C.ink, fontSize: 17, lineHeight: 19, fontWeight: '700'},
   photoAdd: {width: 84, height: 84, borderRadius: 12, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, alignItems: 'center', justifyContent: 'center'},
-  photoAddIco: {color: C.accent, fontSize: 22, fontWeight: '700'},
+  photoAddIco: {color: C.accentInk, fontSize: 22, fontWeight: '700'},
   photoAddTxt: {color: C.dim, fontSize: 12, marginTop: 2, fontWeight: '600'},
   devToggle: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 20, backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 14},
   devToggleTxt: {color: C.ink, fontSize: 14, fontWeight: '600', flex: 1},
-  devPlus: {color: C.accent, fontSize: 18, fontWeight: '800', marginLeft: 8},
+  devPlus: {color: C.accentInk, fontSize: 18, fontWeight: '800', marginLeft: 8},
   hint: {color: C.faint, fontSize: 12},
   kolliRow: {flexDirection: 'row', alignItems: 'center', gap: 18},
   kBtn: {width: 52, height: 52, borderRadius: 14, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, alignItems: 'center', justifyContent: 'center'},
-  kBtnTxt: {color: C.accent, fontSize: 26, fontWeight: '800', lineHeight: 28},
+  kBtnTxt: {color: C.accentInk, fontSize: 26, fontWeight: '800', lineHeight: 28},
   kVal: {color: C.ink, fontSize: 30, fontWeight: '900', minWidth: 54, textAlign: 'center'},
   comment: {backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 12, color: C.ink, paddingHorizontal: 14, paddingVertical: 11, fontSize: 15, minHeight: 70, textAlignVertical: 'top'},
   bottom: {paddingHorizontal: 16, paddingTop: 10, backgroundColor: C.bg, borderTopColor: C.edge, borderTopWidth: StyleSheet.hairlineWidth},
   missing: {color: C.bad, fontSize: 13, fontWeight: '600', marginBottom: 8, textAlign: 'center'},
   doneBtn: {backgroundColor: C.accent2, borderRadius: 14, paddingVertical: 17, alignItems: 'center'},
-  doneTxt: {color: '#14231a', fontSize: 18, fontWeight: '800'},
-});
+  doneTxt: {color: '#FFFFFF', fontSize: 18, fontWeight: '800'},
+}));

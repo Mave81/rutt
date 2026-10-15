@@ -20,6 +20,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -130,6 +131,28 @@ class RuttLocationModule(private val rc: ReactApplicationContext) : ReactContext
     m.putDouble("acc", if (l.hasAccuracy()) l.accuracy.toDouble() else 0.0)
     m.putDouble("time", l.time.toDouble())
     m.putBoolean("running", LastFix.running)
+    promise.resolve(m)
+  }
+
+  // Statusraden i appen: tjänsten igång, notisen tillåten och telefonens plats påslagen.
+  @ReactMethod fun status(promise: Promise) {
+    val m = Arguments.createMap()
+    m.putBoolean("running", LastFix.running)
+    var notif = true
+    try {
+      notif = NotificationManagerCompat.from(rc).areNotificationsEnabled()
+      if (notif && Build.VERSION.SDK_INT >= 26) {
+        val ch = (rc.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).getNotificationChannel("rutt_gps")
+        if (ch != null && ch.importance == NotificationManager.IMPORTANCE_NONE) notif = false
+      }
+    } catch (_: Throwable) {}
+    m.putBoolean("notif", notif)
+    var locOn = true
+    try {
+      val lm = rc.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+      locOn = lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+    } catch (_: Throwable) {}
+    m.putBoolean("locOn", locOn)
     promise.resolve(m)
   }
 }

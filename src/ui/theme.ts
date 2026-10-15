@@ -1,11 +1,44 @@
 // RUTT – färger och små hjälpare som delas av alla vyer.
-export const C = {
-  bg: '#1f1d1a', panel: '#272420', panel2: '#2f2b26', edge: '#3a352f',
-  ink: '#efe9e0', dim: '#b3a89a', faint: '#857b70',
-  accent: '#e8a24c', accent2: '#7fb08a', bad: '#d2766a',
-  onAccent: '#2a1d0c',
-  noteBg: '#3a2f20', noteInk: '#f0d3a6',
+// Två lägen (Kentas märkesfärger): mörkt = #000/#1B1B1B/#242527, ljust = vitt kort på ljusgrå botten.
+// Färg = betydelse: orange = din handling, grönt = live/klart, rött = trasigt/återkallat, blått = människor.
+export type Mode = 'dark' | 'light';
+export const DARK = {
+  mode: 'dark' as Mode,
+  bg: '#000000', panel: '#1B1B1B', panel2: '#242527', edge: '#2a2b2e',
+  ink: '#FFFFFF', dim: '#a8a9ad', faint: '#6e6f73',
+  accent: '#FF9117', accentInk: '#FF9117', accentSoft: '#2b1d0c', onAccent: '#000000',
+  accent2: '#2d9c72', okSoft: '#0f2a20',
+  bad: '#ff5a4a', badSoft: '#2e1210',
+  people: '#2796f2', peopleSoft: '#0e2236',
+  noteBg: '#242527', noteInk: '#e4e4e6',
+  toast: '#242527', sigBg: '#242527', overlay: 'rgba(0,0,0,0.6)',
+  bubbleIn: '#242527', bubbleOut: '#3a2610',
 };
+export const LIGHT: typeof DARK = {
+  mode: 'light',
+  bg: '#f0f2f5', panel: '#FFFFFF', panel2: '#f5f6f8', edge: '#e4e7eb',
+  ink: '#0b0f14', dim: '#465361', faint: '#7e8794',
+  accent: '#FF9117', accentInk: '#a35700', accentSoft: '#fff1e2', onAccent: '#000000',
+  accent2: '#1aa64b', okSoft: '#e5f6ea',
+  bad: '#d93a2b', badSoft: '#fdeceb',
+  people: '#1f7fd1', peopleSoft: '#e6f1fb',
+  noteBg: '#f5f6f8', noteInk: '#465361',
+  toast: '#1B1B1B', sigBg: '#f5f6f8', overlay: 'rgba(11,15,20,0.45)',
+  bubbleIn: '#FFFFFF', bubbleOut: '#fff1e2',
+};
+// C är ett levande objekt: applyTheme() byter värdena och bygger om alla stilar som registrerats via themed().
+export const C: typeof DARK = {...DARK};
+const builders: Array<() => void> = [];
+export function themed<T extends object>(mk: () => T): T {
+  const out: any = {};
+  const build = () => { const v: any = mk(); for (const k of Object.keys(out)) delete out[k]; Object.assign(out, v); };
+  build(); builders.push(build);
+  return out as T;
+}
+export function applyTheme(m: Mode) {
+  Object.assign(C, m === 'light' ? LIGHT : DARK);
+  builders.forEach(b => b());
+}
 export const hhmm = (d: Date | null | undefined) =>
   d ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '–';
 

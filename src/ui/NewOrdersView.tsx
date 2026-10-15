@@ -5,7 +5,7 @@
 import React, {useState} from 'react';
 import {FlatList, Linking, Pressable, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {C, prettyPhone, whenText} from './theme';
+import {C, themed, prettyPhone, whenText} from './theme';
 import {Sheet} from './parts';
 
 const dial = (n: string) => Linking.openURL(`tel:${n.replace(/[^0-9+]/g, '')}`).catch(() => {});
@@ -38,7 +38,7 @@ export default function NewOrdersView({orders, onAccept, onReject}: {orders: New
                 <Text style={n.meta}>{[p.orderNo && `#${p.orderNo}`, p.service, (p.kolli || d.kolli) ? `${p.kolli || d.kolli} kollin` : ''].filter(Boolean).join('  ·  ')}</Text>
               </View>
               <View style={n.leg}>
-                <Text style={[n.verb, {color: C.accent}]}>HÄMTA</Text>
+                <Text style={[n.verb, {color: C.accentInk}]}>HÄMTA</Text>
                 <View style={{flex: 1}}>
                   <Text style={n.who}>{p.who || '—'}</Text>
                   <Text style={n.adr}>{[p.adr, p.area].filter(Boolean).join(', ')}</Text>
@@ -95,16 +95,16 @@ export default function NewOrdersView({orders, onAccept, onReject}: {orders: New
   );
 }
 
-const n = StyleSheet.create({
+const n = themed(() => StyleSheet.create({
   empty: {color: C.dim, fontSize: 15, textAlign: 'center', marginTop: 30, paddingHorizontal: 20},
-  card: {backgroundColor: C.panel, borderColor: '#6a5428', borderWidth: 1.5, borderRadius: 16, padding: 16, marginBottom: 12},
+  card: {backgroundColor: C.panel, borderColor: C.accent, borderWidth: 1.5, borderRadius: 16, padding: 16, marginBottom: 12},
   top: {flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6},
   badgeBox: {backgroundColor: C.accent, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3},
   badge: {color: C.onAccent, fontSize: 11, fontWeight: '900', letterSpacing: 1.5},
   tels: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10},
   tel: {backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12, maxWidth: '100%'},
   telName: {color: C.dim, fontSize: 12, fontWeight: '700'},
-  telNum: {color: C.accent, fontSize: 15, fontWeight: '800', marginTop: 1},
+  telNum: {color: C.accentInk, fontSize: 15, fontWeight: '800', marginTop: 1},
   meta: {color: C.dim, fontSize: 12, fontWeight: '700', flex: 1},
   leg: {flexDirection: 'row', gap: 12, marginTop: 12},
   verb: {fontSize: 11, fontWeight: '900', letterSpacing: 1.5, width: 52, marginTop: 4},
@@ -113,12 +113,12 @@ const n = StyleSheet.create({
   time: {color: C.faint, fontSize: 12, marginTop: 3},
   info: {backgroundColor: C.noteBg, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 11, marginTop: 14},
   infoTxt: {color: C.noteInk, fontSize: 13.5, lineHeight: 19},
-  more: {color: C.accent, fontSize: 12, fontWeight: '700', marginTop: 5},
+  more: {color: C.accentInk, fontSize: 12, fontWeight: '700', marginTop: 5},
   fail: {color: C.bad, fontSize: 13, fontWeight: '700', marginTop: 10},
   actions: {flexDirection: 'row', gap: 10, marginTop: 16},
   reject: {flex: 1, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 12, paddingVertical: 15, alignItems: 'center'},
   rejectTxt: {color: C.ink, fontSize: 16, fontWeight: '800'},
   accept: {flex: 2, backgroundColor: C.accent2, borderRadius: 12, paddingVertical: 15, alignItems: 'center'},
-  acceptTxt: {color: '#14231a', fontSize: 17, fontWeight: '900'},
+  acceptTxt: {color: '#FFFFFF', fontSize: 17, fontWeight: '900'},
   sheetTxt: {color: C.dim, fontSize: 14, marginTop: 8},
-});
+}));

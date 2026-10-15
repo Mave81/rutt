@@ -7,7 +7,7 @@
  */
 import React, {useEffect, useState} from 'react';
 import {Image, Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
-import {C} from './theme';
+import {C, themed} from './theme';
 import {MAX_PHOTOS, Sheet, pickPhoto} from './parts';
 
 // Artiklar som de heter i Opter hos er (från orderns artikellista). Tid räknas i minuter.
@@ -137,7 +137,7 @@ export function MoreSheet({stop, cargo, saved, onClose, onSave}: {
   );
 }
 
-const x = StyleSheet.create({
+const x = themed(() => StyleSheet.create({
   item: {flexDirection: 'row', alignItems: 'center', backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 14, marginTop: 10, flexWrap: 'wrap'},
   itemT: {color: C.ink, fontSize: 16, fontWeight: '700', flexBasis: '85%'},
   itemS: {color: C.faint, fontSize: 12, marginTop: 2, flexBasis: '85%'},
@@ -148,7 +148,7 @@ const x = StyleSheet.create({
   artQty: {color: C.dim, fontSize: 12, marginTop: 2},
   stepper: {flexDirection: 'row', gap: 8},
   stepBtn: {width: 40, height: 40, borderRadius: 10, backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, alignItems: 'center', justifyContent: 'center'},
-  stepTxt: {color: C.accent, fontSize: 22, fontWeight: '800', lineHeight: 24},
+  stepTxt: {color: C.accentInk, fontSize: 22, fontWeight: '800', lineHeight: 24},
   chips: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10},
   chip: {backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 18, paddingVertical: 9, paddingHorizontal: 14},
   chipOn: {backgroundColor: C.accent, borderColor: C.accent},
@@ -160,13 +160,13 @@ const x = StyleSheet.create({
   photoX: {position: 'absolute', top: 4, right: 4, width: 24, height: 24, borderRadius: 12, backgroundColor: 'rgba(20,18,16,0.85)', alignItems: 'center', justifyContent: 'center'},
   photoXTxt: {color: C.ink, fontSize: 16, lineHeight: 18, fontWeight: '700'},
   photoAdd: {width: 78, height: 78, borderRadius: 12, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, alignItems: 'center', justifyContent: 'center'},
-  photoIco: {color: C.accent, fontSize: 20, fontWeight: '700'},
+  photoIco: {color: C.accentInk, fontSize: 20, fontWeight: '700'},
   photoAddTxt: {color: C.dim, fontSize: 12, marginTop: 2, fontWeight: '600'},
   save: {backgroundColor: C.accent, borderRadius: 12, paddingVertical: 15, alignItems: 'center', marginTop: 16, marginBottom: 4},
   saveTxt: {color: C.onAccent, fontSize: 16, fontWeight: '800'},
   lbl: {color: C.dim, fontSize: 13, fontWeight: '700', marginTop: 14},
   bigStep: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 22, marginTop: 8},
   bigBtn: {width: 58, height: 58, borderRadius: 14, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, alignItems: 'center', justifyContent: 'center'},
-  bigBtnTxt: {color: C.accent, fontSize: 28, fontWeight: '800', lineHeight: 30},
+  bigBtnTxt: {color: C.accentInk, fontSize: 28, fontWeight: '800', lineHeight: 30},
   bigVal: {color: C.ink, fontSize: 34, fontWeight: '900', minWidth: 70, textAlign: 'center'},
-});
+}));

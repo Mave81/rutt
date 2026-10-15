@@ -5,7 +5,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {Keyboard, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {launchCamera, launchImageLibrary} from 'react-native-image-picker';
-import {C} from './theme';
+import {C, themed} from './theme';
 
 // Tangentbordets höjd. endCoordinates räknar inte med tangentbordets verktygsrad
 // på många Android-tangentbord, därför en buffert (samma som chatten, beprövad).
@@ -129,18 +129,18 @@ export async function pickPhoto(fromCamera: boolean) {
   return (res.assets || []).filter((a: any) => a.uri).map((a: any) => ({uri: a.uri, b64: a.base64 || null, w: a.width, h: a.height}));
 }
 
-const p = StyleSheet.create({
-  overlay: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.55)'},
+const p = themed(() => StyleSheet.create({
+  overlay: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: C.overlay},
   sheet: {position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: C.panel, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 18, paddingTop: 10},
   handle: {alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: C.edge, marginBottom: 12},
   title: {color: C.ink, fontSize: 18, fontWeight: '800'},
   sub: {color: C.dim, fontSize: 13, marginTop: 2, marginBottom: 2},
-  pad: {backgroundColor: '#2a2622', borderColor: C.edge, borderWidth: 1, borderRadius: 16, overflow: 'hidden'},
+  pad: {backgroundColor: C.sigBg, borderColor: C.edge, borderWidth: 1, borderRadius: 16, overflow: 'hidden'},
   padEmpty: {borderColor: C.accent, borderWidth: 2},
-  sigLine: {position: 'absolute', left: 22, right: 22, height: 2, backgroundColor: '#6b6157'},
-  sigX: {position: 'absolute', left: 24, color: C.accent, fontSize: 26, fontWeight: '800'},
+  sigLine: {position: 'absolute', left: 22, right: 22, height: 2, backgroundColor: C.faint},
+  sigX: {position: 'absolute', left: 24, color: C.accentInk, fontSize: 26, fontWeight: '800'},
   sigUnder: {position: 'absolute', left: 24, color: C.faint, fontSize: 12, fontWeight: '600', letterSpacing: 1},
   sigHint: {position: 'absolute', left: 0, right: 0, textAlign: 'center', color: C.dim, fontSize: 20, fontWeight: '700'},
   clear: {alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 4},
-  clearTxt: {color: C.accent, fontSize: 14, fontWeight: '700'},
-});
+  clearTxt: {color: C.accentInk, fontSize: 14, fontWeight: '700'},
+}));
