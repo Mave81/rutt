@@ -22,7 +22,7 @@ import computeRoute, {slotWhere} from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '15 okt · orderlista + signering';
+const BUILD = '15 okt · orderlista + chatt v3';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -176,9 +176,9 @@ function AppInner(): React.JSX.Element {
   async function deliver(item: any) {
     setPending(p => p.map(x => (x.id === item.id ? {...x, state: 'sending'} : x)));
     try {
-      const m = await client.sendMessage(item.text);
+      const {msgs: m, stored} = await client.sendMessage(item.text);
       setMsgs(m);
-      setPending(p => p.map(x => (x.id === item.id ? {...x, state: 'sent'} : x)));
+      setPending(p => p.map(x => (x.id === item.id ? {...x, state: stored ? 'stored' : 'unconfirmed'} : x)));
     } catch (e: any) {
       setPending(p => p.map(x => (x.id === item.id ? {...x, state: 'failed'} : x)));
     }
@@ -192,10 +192,10 @@ function AppInner(): React.JSX.Element {
     setPending(p => [...p, item]);
     deliver(item);
   }
-  // Ta bort lokala bubblor när serverns egen kopia av meddelandet har kommit.
+  // Ta bort lokala bubblor så fort serverns egen kopia av meddelandet finns (aldrig dubbelt).
   const chatList = useMemo(() => {
     const mine = msgs.filter(m => !m.received);
-    const keep = pending.filter(pm => !(pm.state === 'sent' && mine.some(m => m.text === pm.text && m.created && Math.abs(m.created.getTime() - pm.created.getTime()) < 15 * 60000)));
+    const keep = pending.filter(pm => !(pm.state !== 'failed' && pm.state !== 'sending' && mine.some(m => m.text === pm.text && m.created && Math.abs(m.created.getTime() - pm.created.getTime()) < 15 * 60000)));
     return [...msgs, ...keep].sort((a, b) => (a.created ? a.created.getTime() : 0) - (b.created ? b.created.getTime() : 0));
   }, [msgs, pending]);
 
@@ -392,9 +392,10 @@ function ChatView({msgs, msgText, setMsgText, onSend, onRetry}: any) {
           keyExtractor={(_, i) => String(i)}
           renderItem={({item}) => {
             const failed = item.local && item.state === 'failed';
+            // Ärlig status: "Mottaget av Opter" först när servern sparat det med eget id.
             const status = item.received ? '' : item.local
-              ? (item.state === 'sending' ? '  Skickar…' : failed ? '  Ej skickat – tryck för att försöka igen' : '  ✓ Skickat')
-              : (item.confirmed ? '  ✓✓ Läst' : '  ✓ Skickat');
+              ? (item.state === 'sending' ? '  Skickar…' : failed ? '  Ej skickat – tryck för att försöka igen' : item.state === 'stored' ? '  ✓ Mottaget av Opter' : '  Skickat – väntar på kvitto')
+              : (item.confirmed ? '  ✓✓ Läst' : item.serverId ? '  ✓ Mottaget av Opter' : '  ✓ Skickat');
             return (
               <Pressable disabled={!failed} onPress={() => onRetry && onRetry(item)} style={[s.bubbleWrap, item.received ? s.bwL : s.bwR]}>
                 <View style={[s.bubble, item.received ? s.bubbleIn : s.bubbleOut, item.local && item.state === 'sending' && {opacity: 0.6}, failed && {borderWidth: 1, borderColor: C.bad}]}>

@@ -148,6 +148,7 @@ function wStartTable(w, tableName, key) { wB(w, DT.StartTable); wB(w, TableOrd[t
  * Löpnumret startar från klockan så det inte krockar efter omstart. */
 let __ident = (Math.floor(Date.now() / 1000) % 1000000000) + 1;
 const nextIdentity = () => (__ident = __ident >= 2147483000 ? 1 : __ident + 1);
+const lastIdentity = () => __ident;
 function wNewRow(w, tableName, offId) { wStartTable(w, tableName, { identityId: nextIdentity(), offId: offId || 0, xxxId: 0 }); }
 function wEndTable(w, tableName) { wB(w, DT.EndTable); wB(w, TableOrd[tableName]); }
 function wEndData(w, dyn, fix) { wB(w, DT.EndData); wI64(w, dyn ? dateToTicks(dyn) : 0); wI64(w, fix ? dateToTicks(fix) : 0); }
@@ -204,8 +205,8 @@ function messageList(decoded) {
   for (const r of decoded.rows) {
     if (r.table !== 'FreeTextMessage') continue;
     const c = r.columns;
-    // dedupe: samma meddelande kan komma flera gånger i synken
-    const sig = (c.externalId || '') + '|' + r.key.identityId + '|' + r.key.xxxId + '|' + (c.text || '') + '|' + (c.created || '');
+    // Samma rad = samma serverid (XXX_Id) när det finns, annars samma löpnummer (som Opter).
+    const sig = r.key.xxxId > 0 ? 'x' + r.key.xxxId : 'i' + r.key.identityId + '|' + (c.text || '');
     if (seen.has(sig)) continue;
     seen.add(sig);
     const received = c.fromName ? true : c.outgoing === true; // Outgoing=true = från kontoret
@@ -216,6 +217,7 @@ function messageList(decoded) {
       created: c.created instanceof Date ? c.created : (typeof c.created === 'string' ? new Date(c.created) : null),
       received,                       // true = Mottaget (från kontoret), false = Skickat (av dig)
       confirmed: c.confirmed === true,
+      serverId: r.key.xxxId > 0 ? r.key.xxxId : 0, // > 0 = sparat i Opter
     });
   }
   out.sort((a, b) => (a.created ? a.created.getTime() : 0) - (b.created ? b.created.getTime() : 0));
@@ -309,5 +311,5 @@ function toRutt(decoded) {
 module.exports = {
   MessageType, Table, DT, RST, F, frame, unframe, decodeSync, ticksToDate,
   logonPayload, parseLogon, resourceList, encodeStartWork, encodeWorkStatus, toRutt,
-  messageList, encodeMarkRead, encodeSendMessage,
+  messageList, encodeMarkRead, encodeSendMessage, lastIdentity,
 };

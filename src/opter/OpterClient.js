@@ -26,7 +26,8 @@ function deviceId() {
   return 'rutt-' + (global.__ruttDev || (global.__ruttDev = Math.random().toString(16).slice(2, 18)));
 }
 
-const msgKey = r => `${r.key.identityId}|${r.key.offId}|${r.key.xxxId}`;
+// Opters nyckelregel: har båda ett serverid (XXX_Id > 0) jämförs det, annars löpnumret.
+const sameRow = (a, b) => (a.xxxId > 0 && b.xxxId > 0 ? a.xxxId === b.xxxId : a.identityId === b.identityId && a.identityId !== 0);
 
 export default class OpterClient {
   constructor() {
@@ -38,7 +39,7 @@ export default class OpterClient {
     this.cfg = null;
     this.creds = null;
     this.resId = null;
-    this.msgRows = new Map(); // samlad chatthistorik över alla synkar
+    this.msgRows = []; // samlad chatthistorik över alla synkar (en post per meddelande)
     this._relogin = null;
   }
 
@@ -86,21 +87,29 @@ export default class OpterClient {
     try { await this._relogin; } finally { this._relogin = null; }
   }
 
-  async send(type, payloadBuffer, {retry = true} = {}) {
+  /*
+   * Skicka. Är sessionen död loggar vi in först (då har inget skickats än).
+   * once=true: rader som skapar något nytt (meddelanden m.m.) skickas ALDRIG om
+   * blint efter ett avbrott mitt i – de kan redan ha kommit fram. Då kastas felet
+   * och anroparen kontrollerar mot servern först.
+   */
+  async send(type, payloadBuffer, {retry = true, once = false} = {}) {
     const isLogon = type === P.MessageType.Logon;
+    if (!isLogon && retry && !this._alive()) await this.relogin();
+    let res;
     try {
-      if (!isLogon && !this._alive() && retry) await this.relogin();
-      const res = await this._rawSend(type, payloadBuffer);
-      if (!isLogon && retry && res.type === P.MessageType.NotLoggedOn) {
-        await this.relogin();
-        return await this._rawSend(type, payloadBuffer);
-      }
-      return res;
+      res = await this._rawSend(type, payloadBuffer);
     } catch (e) {
-      if (isLogon || !retry) throw e;
+      if (isLogon || !retry || once) throw e;
       await this.relogin();
       return await this._rawSend(type, payloadBuffer);
     }
+    if (!isLogon && retry && res.type === P.MessageType.NotLoggedOn) {
+      // servern avvisade utan att spara → säkert att skicka om efter inloggning
+      await this.relogin();
+      return await this._rawSend(type, payloadBuffer);
+    }
+    return res;
   }
 
   // Spara ett synksvar: senaste helbild + samlad chatthistorik.
@@ -108,9 +117,12 @@ export default class OpterClient {
     this.lastDecoded = decoded;
     for (const r of decoded.rows || []) {
       if (r.table !== 'FreeTextMessage') continue;
-      const k = msgKey(r);
-      const prev = this.msgRows.get(k);
-      this.msgRows.set(k, prev ? {...prev, columns: {...prev.columns, ...r.columns}} : r);
+      const i = this.msgRows.findIndex(x => sameRow(x.key, r.key));
+      if (i < 0) { this.msgRows.push(r); continue; }
+      const prev = this.msgRows[i];
+      // slå ihop; behåll serverid när det väl tilldelats
+      const key = {...prev.key, ...r.key, xxxId: r.key.xxxId > 0 ? r.key.xxxId : prev.key.xxxId};
+      this.msgRows[i] = {...prev, key, columns: {...prev.columns, ...r.columns}};
     }
     return decoded;
   }
@@ -159,28 +171,56 @@ export default class OpterClient {
 
   // ---- chatt ----
   messages() {
-    return P.messageList({rows: [...this.msgRows.values()]});
+    return P.messageList({rows: this.msgRows});
   }
   async markRead(keys) {
     if (!keys || !keys.length) return;
     const res = await this.send(P.MessageType.Synchronize, P.encodeMarkRead(keys));
     // markera lokalt direkt, oavsett hur mycket servern skickar tillbaka
-    for (const key of keys) {
-      const k = `${key.identityId}|${key.offId}|${key.xxxId}`;
-      const r = this.msgRows.get(k);
-      if (r) this.msgRows.set(k, {...r, columns: {...r.columns, confirmed: true}});
-    }
+    this.msgRows = this.msgRows.map(r => (keys.some(k => sameRow(k, r.key)) ? {...r, columns: {...r.columns, confirmed: true}} : r));
     this._take(P.decodeSync(res.payload));
+  }
+  /*
+   * Skicka chattmeddelande, exakt en gång.
+   * Returnerar {msgs, stored}: stored = Opter har gett meddelandet ett eget id (sparat hos dem).
+   */
+  _stored(identity, text, after) {
+    return this.msgRows.some(r => {
+      const c = r.columns || {};
+      if (!(r.key.xxxId > 0)) return false;
+      if (r.key.identityId === identity) return true;
+      // fullsynk kan komma utan vårt löpnummer → känn igen på text + tid + att det är förarens
+      const t = c.created instanceof Date ? c.created.getTime() : 0;
+      return !c.fromName && c.outgoing !== true && (c.text || '') === text && t >= after - 120000;
+    });
   }
   async sendMessage(text) {
     if (!this.logon) throw new Error('inte inloggad');
+    const started = Date.now();
     const payload = P.encodeSendMessage({offId: this.logon.acdOffId, resId: this.resId, vhcId: this.logon.vhcId, text});
-    const res = await this.send(P.MessageType.Synchronize, payload);
-    if (res.type === P.MessageType.Corrupt || res.type === P.MessageType.NotLoggedOn) {
-      throw new Error('Servern tog inte emot meddelandet');
+    const myId = P.lastIdentity();
+    let midFlightError = null;
+    try {
+      const res = await this.send(P.MessageType.Synchronize, payload, {once: true});
+      if (res.type === P.MessageType.Corrupt) throw new Error('Servern kunde inte läsa meddelandet');
+      this._take(P.decodeSync(res.payload));
+    } catch (e) {
+      midFlightError = e;
+      try { await this.relogin(); } catch (e2) { throw e; }
     }
-    this._take(P.decodeSync(res.payload));
-    return this.messages();
+    // Kolla mot servern att det faktiskt sparats innan vi säger "mottaget".
+    if (!this._stored(myId, text, started)) { try { await this.syncRef(); } catch (e) {} }
+    let stored = this._stored(myId, text, started);
+    if (!stored && midFlightError) {
+      // Kom aldrig fram → nu (och bara nu) skickar vi en gång till.
+      const again = P.encodeSendMessage({offId: this.logon.acdOffId, resId: this.resId, vhcId: this.logon.vhcId, text});
+      const againId = P.lastIdentity();
+      const res2 = await this.send(P.MessageType.Synchronize, again, {once: true});
+      this._take(P.decodeSync(res2.payload));
+      if (!this._stored(againId, text, started)) { try { await this.syncRef(); } catch (e) {} }
+      stored = this._stored(againId, text, started);
+    }
+    return {msgs: this.messages(), stored};
   }
 
   async disconnect() {
