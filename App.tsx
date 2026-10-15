@@ -22,7 +22,7 @@ const C = {
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '15 okt · lastad/lossad + foto';
+const BUILD = '15 okt · chatt skickar';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 // Avvikelseorsaker för "extra tid / tidsavvikelse" vid leverans.
@@ -125,12 +125,33 @@ function AppInner(): React.JSX.Element {
     const toRead = msgs.filter(m => m.received && !m.confirmed).map(m => m.key);
     if (toRead.length) { try { await client.markRead(toRead); setMsgs(client.messages()); } catch (e) {} }
   }
+  // Skicka: visas direkt som "Skickar…", blir "Skickat" eller "Ej skickat – tryck igen".
+  const [pending, setPending] = useState<any[]>([]);
+  async function deliver(item: any) {
+    setPending(p => p.map(x => (x.id === item.id ? {...x, state: 'sending'} : x)));
+    try {
+      const m = await client.sendMessage(item.text);
+      setMsgs(m);
+      setPending(p => p.map(x => (x.id === item.id ? {...x, state: 'sent'} : x)));
+    } catch (e: any) {
+      setPending(p => p.map(x => (x.id === item.id ? {...x, state: 'failed'} : x)));
+    }
+  }
   async function sendMsg() {
     const t = msgText.trim();
     if (!t) return;
     setMsgText('');
-    try { const m = await client.sendMessage(t); setMsgs(m); } catch (e: any) { setErr(String(e?.message || e)); }
+    if (demo || !client.logon) { setErr('Logga in mot Opter för att skicka meddelanden.'); return; }
+    const item = {id: Date.now() + Math.random(), text: t, created: new Date(), received: false, state: 'sending', local: true};
+    setPending(p => [...p, item]);
+    deliver(item);
   }
+  // Ta bort lokala bubblor när serverns egen kopia av meddelandet har kommit.
+  const chatList = useMemo(() => {
+    const mine = msgs.filter(m => !m.received);
+    const keep = pending.filter(pm => !(pm.state === 'sent' && mine.some(m => m.text === pm.text && m.created && Math.abs(m.created.getTime() - pm.created.getTime()) < 15 * 60000)));
+    return [...msgs, ...keep].sort((a, b) => (a.created ? a.created.getTime() : 0) - (b.created ? b.created.getTime() : 0));
+  }, [msgs, pending]);
 
   const live = !demo && orders.stops.length > 0; // skarpt läge = riktiga jobb inloggade
 
@@ -252,7 +273,7 @@ function AppInner(): React.JSX.Element {
 
           {tab === 'plan' && route && !(route as any).error && <PlanView route={route} stat={stat} onStop={setStopIx} />}
           {tab === 'last' && route && !(route as any).error && <LastView route={route} />}
-          {tab === 'chat' && <ChatView msgs={msgs} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} />}
+          {tab === 'chat' && <ChatView msgs={chatList} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} onRetry={deliver} />}
           {tab !== 'chat' && route && (route as any).error && <Text style={s.err}>Optimeringsfel: {(route as any).error}</Text>}
         </View>
       )}
@@ -342,7 +363,7 @@ function LastView({route}: {route: any}) {
   );
 }
 
-function ChatView({msgs, msgText, setMsgText, onSend}: any) {
+function ChatView({msgs, msgText, setMsgText, onSend, onRetry}: any) {
   const stamp = (m: any) => {
     const t = m.created ? hhmm(m.created) : '';
     const sameDay = m.created && new Date().toDateString() === m.created.toDateString();
@@ -376,17 +397,22 @@ function ChatView({msgs, msgText, setMsgText, onSend}: any) {
           inverted
           keyboardShouldPersistTaps="handled"
           keyExtractor={(_, i) => String(i)}
-          renderItem={({item}) => (
-            <View style={[s.bubbleWrap, item.received ? s.bwL : s.bwR]}>
-              <View style={[s.bubble, item.received ? s.bubbleIn : s.bubbleOut]}>
-                <Text style={s.bubbleTxt}>{item.text}</Text>
-              </View>
-              <Text style={[s.bubbleStamp, item.received ? s.stampL : s.stampR]}>
-                {stamp(item)}
-                {!item.received ? (item.confirmed ? '  ✓✓ Läst' : '  ✓ Skickat') : ''}
-              </Text>
-            </View>
-          )}
+          renderItem={({item}) => {
+            const failed = item.local && item.state === 'failed';
+            const status = item.received ? '' : item.local
+              ? (item.state === 'sending' ? '  Skickar…' : failed ? '  Ej skickat – tryck för att försöka igen' : '  ✓ Skickat')
+              : (item.confirmed ? '  ✓✓ Läst' : '  ✓ Skickat');
+            return (
+              <Pressable disabled={!failed} onPress={() => onRetry && onRetry(item)} style={[s.bubbleWrap, item.received ? s.bwL : s.bwR]}>
+                <View style={[s.bubble, item.received ? s.bubbleIn : s.bubbleOut, item.local && item.state === 'sending' && {opacity: 0.6}, failed && {borderWidth: 1, borderColor: C.bad}]}>
+                  <Text style={s.bubbleTxt}>{item.text}</Text>
+                </View>
+                <Text style={[s.bubbleStamp, item.received ? s.stampL : s.stampR, failed && {color: C.bad}]}>
+                  {stamp(item)}{status}
+                </Text>
+              </Pressable>
+            );
+          }}
         />
       )}
       <View style={[s.sendRow, {paddingBottom: 12 + (kb > 0 ? 0 : insets.bottom)}]}>

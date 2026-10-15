@@ -139,36 +139,37 @@ function wBool(w, prop, val) { if (val == null) { wB(w, DT.BoolNull); wB(w, prop
 function wStr(w, prop, val) { if (val == null || val === '') { wB(w, DT.StringNull); wB(w, prop); } else { wB(w, DT.String); wB(w, prop); const s = Buffer.from(val, CHARSET); wI16(w, s.length); w.push(s); } }
 function wDate(w, prop, val) { if (val == null) { wB(w, DT.DateTimeNull); wB(w, prop); } else { wB(w, DT.DateTime); wB(w, prop); wI32(w, dateToSecs2000(val)); } }
 function wStartTable(w, tableName, key) { wB(w, DT.StartTable); wB(w, TableOrd[tableName]); wB(w, 14); wI32(w, key.identityId || 0); wI32(w, key.offId || 0); wI32(w, key.xxxId || 0); wB(w, 0); wB(w, 0); }
+/* Nya rader: Opter ger varje nyskapad rad ett eget löpnummer (identityId) och
+ * kontors-id (OFF_Id) i radhuvudet; XXX_Id = 0 tills servern tilldelat ett.
+ * Löpnumret startar från klockan så det inte krockar efter omstart. */
+let __ident = (Math.floor(Date.now() / 1000) % 1000000000) + 1;
+const nextIdentity = () => (__ident = __ident >= 2147483000 ? 1 : __ident + 1);
+function wNewRow(w, tableName, offId) { wStartTable(w, tableName, { identityId: nextIdentity(), offId: offId || 0, xxxId: 0 }); }
 function wEndTable(w, tableName) { wB(w, DT.EndTable); wB(w, TableOrd[tableName]); }
 function wEndData(w, dyn, fix) { wB(w, DT.EndData); wI64(w, dyn ? dateToTicks(dyn) : 0); wI64(w, fix ? dateToTicks(fix) : 0); }
 
 /* StartWork-uppladdning: en ResourceStatusLog-post + EndData(0,0) för full hämtning. */
+function wResourceStatus(w, { offId, resId, vhcId, rstType }) {
+  wNewRow(w, 'ResourceStatusLog', offId);
+  if (resId) wInt(w, 1, resId);     // RSL_RES_Id
+  if (rstType) wInt(w, 2, rstType); // RSL_RST_Id
+  if (vhcId) wInt(w, 3, vhcId);     // RSL_VHC_Id
+  // RSL_Outgoing=false och tomt telefonnr = standard → skrivs inte (som Opter)
+  wDate(w, 10, new Date());         // RSL_LogTime
+  wEndTable(w, 'ResourceStatusLog');
+}
 function encodeStartWork({ offId, resId, vhcId }) {
   const w = W();
-  wStartTable(w, 'ResourceStatusLog', { identityId: 0, offId: 0, xxxId: 0 });
-  wInt(w, 1, resId);          // RSL_RES_Id
-  wInt(w, 2, RST.StartWork);  // RSL_RST_Id
-  wInt(w, 3, vhcId);          // RSL_VHC_Id
-  wBool(w, 4, false);         // RSL_Outgoing
-  wStr(w, 5, '');             // RSL_PhoneNumber
-  wDate(w, 10, new Date());   // RSL_LogTime
-  wEndTable(w, 'ResourceStatusLog');
+  wResourceStatus(w, { offId, resId, vhcId, rstType: RST.StartWork });
   wEndData(w, null, null);    // 0,0 = full synk tillbaka
   return w.build();
 }
 
 /* Arbetstidsstatus (rast/lunch/avsluta dag) – samma ResourceStatusLog-mekanism
  * som StartWork, bara annan RST-typ. Verifierad shape. */
-function encodeWorkStatus({ rstType, resId, vhcId }) {
+function encodeWorkStatus({ offId, rstType, resId, vhcId }) {
   const w = W();
-  wStartTable(w, 'ResourceStatusLog', { identityId: 0, offId: 0, xxxId: 0 });
-  wInt(w, 1, resId);          // RSL_RES_Id
-  wInt(w, 2, rstType);        // RSL_RST_Id
-  wInt(w, 3, vhcId);          // RSL_VHC_Id
-  wBool(w, 4, false);         // RSL_Outgoing
-  wStr(w, 5, '');             // RSL_PhoneNumber
-  wDate(w, 10, new Date());   // RSL_LogTime
-  wEndTable(w, 'ResourceStatusLog');
+  wResourceStatus(w, { offId, resId, vhcId, rstType });
   wEndData(w, null, null);
   return w.build();
 }
@@ -203,7 +204,7 @@ function messageList(decoded) {
     const sig = (c.externalId || '') + '|' + r.key.identityId + '|' + r.key.xxxId + '|' + (c.text || '') + '|' + (c.created || '');
     if (seen.has(sig)) continue;
     seen.add(sig);
-    const received = c.fromName ? true : c.outgoing === false;
+    const received = c.fromName ? true : c.outgoing === true; // Outgoing=true = från kontoret
     out.push({
       key: r.key,
       text: c.text || '',
@@ -230,13 +231,14 @@ function encodeMarkRead(keys) {
 }
 
 /* Skicka ett nytt meddelande (FTM_Outgoing = true) → synka upp */
-function encodeSendMessage({resId, vhcId, text}) {
+/* I Opter betyder FTM_Outgoing=true "från kontoret". Förarens meddelande är
+ * Outgoing=false (standard → skrivs inte), precis som Opter Driver gör. */
+function encodeSendMessage({offId, resId, vhcId, shiId, text}) {
   const w = W();
-  wStartTable(w, 'FreeTextMessage', {identityId: 0, offId: 0, xxxId: 0});
-  wInt(w, 1, resId);               // FTM_RES_Id
-  wInt(w, 2, vhcId);               // FTM_VHC_Id
-  wBool(w, 4, true);               // FTM_Outgoing
-  wBool(w, 5, false);              // FTM_Confirmed
+  wNewRow(w, 'FreeTextMessage', offId);
+  if (resId) wInt(w, 1, resId);    // FTM_RES_Id
+  if (vhcId) wInt(w, 2, vhcId);    // FTM_VHC_Id
+  if (shiId) wInt(w, 3, shiId);    // FTM_SHI_Id (valfritt: kopplat till en order)
   wStr(w, 6, text);                // FTM_Text
   wDate(w, 7, new Date());         // FTM_Created
   wEndTable(w, 'FreeTextMessage');
