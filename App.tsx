@@ -29,7 +29,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '15 okt · lasta tidigare + navigera';
+const BUILD = '15 okt · orderdata direkt';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -156,9 +156,20 @@ function AppInner(): React.JSX.Element {
     try {
       const d: any = await client.dump();
       d.crashes = await loadJSON(CRASH_KEY, []);
+      d.build = BUILD;
       const json = JSON.stringify(d);
-      await Share.share({title: 'RUTT orderdata ' + new Date().toLocaleString('sv-SE'), message: 'RUTT-DATA v1\n' + json});
-    } catch (e: any) { setErr('Kunde inte ta fram data: ' + String(e?.message || e)); }
+      // Direkt till din server (forre.nu/rutt/dump.php) – Claude läser filen på datorn. Ingen delningsmeny, ingen storleksgräns.
+      let sent = '', why = '';
+      try {
+        const r = await fetch('https://forre.nu/rutt/dump.php', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: json});
+        const j: any = await r.json().catch(() => null);
+        if (r.ok && j && j.ok) sent = `${Math.round(json.length / 1024)} kB`; else why = (j && j.err) || `svar ${r.status}`;
+      } catch (e: any) { why = String(e?.message || e); }
+      if (sent) { flash(`Orderdata skickad till Claude · ${sent}`, null); return; }
+      // Reserv: dela-menyn klarar bara mindre text (Android-gräns), så skicka en kortad version.
+      const small = json.length > 400000 ? JSON.stringify({...d, rows: (d.rows || []).filter((r: any) => /^(Shipment|Address|DefaultPodType|Setting)/.test(r.t)).slice(0, 1500), trimmed: true, uploadErr: why}) : json;
+      await Share.share({title: 'RUTT orderdata', message: 'RUTT-DATA v1\n' + small.slice(0, 450000)});
+    } catch (e: any) { setErr('Kunde inte skicka orderdata: ' + String(e?.message || e)); }
     finally { setDiagBusy(false); setDiag(false); }
   }
 
@@ -727,7 +738,7 @@ function AppInner(): React.JSX.Element {
           </View>
         )}
         <Text style={s.podLabel}>Felsök</Text>
-        <Text style={s.sheetNote}>Skickar Opters rådata för dina jobb (order, adresser, kolli, statustyper, kvittenstyper) så Claude kan läsa den. Välj Gmail och skicka till dig själv.</Text>
+        <Text style={s.sheetNote}>Skickar Opters rådata för dina jobb (order, adresser, kolli, statustyper, kvittenstyper) så Claude kan läsa den. Den skickas direkt till din server, Claude läser den därifrån.</Text>
         <Pressable style={[s.primaryBtn, diagBusy && {opacity: 0.5}]} disabled={diagBusy} onPress={sendDump}>
           <Text style={s.primaryBtnTxt}>{diagBusy ? 'Hämtar från Opter…' : 'Skicka orderdata till Claude'}</Text>
         </Pressable>
