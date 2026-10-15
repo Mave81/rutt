@@ -240,7 +240,7 @@ export default class OpterClient {
     if (!this.logon) throw new Error('inte inloggad');
     const offId = this.logon.acdOffId;
     const attempt = async (podData) => {
-      const payload = P.encodeShipmentStatus({live, offId, statusId, pod: podData});
+      const payload = P.encodeShipmentStatus({live, statusId, pod: podData});
       try {
         const res = await this.send(P.MessageType.Synchronize, payload, {once: true});
         if (res.type === P.MessageType.Corrupt) throw new Error('Opter kunde inte läsa uppdateringen');
@@ -255,19 +255,19 @@ export default class OpterClient {
     let sent = await attempt(pod);
     try { await this._fullSync(); } catch (e) {}
     let cur = this._statusOf(live.shiId);
-    let confirmed = cur === statusId || cur === null;
+    let confirmed = cur === statusId || (cur === null && sent);
     if (!confirmed && !sent && pod && pod.image) {
       // stor bild kan ha stoppat sändningen → skicka utan bild
       imageDropped = true;
       sent = await attempt({...pod, image: null});
       try { await this._fullSync(); } catch (e) {}
       cur = this._statusOf(live.shiId);
-      confirmed = cur === statusId || cur === null;
+      confirmed = cur === statusId || (cur === null && sent);
     } else if (!confirmed && !sent) {
       sent = await attempt(pod);
       try { await this._fullSync(); } catch (e) {}
       cur = this._statusOf(live.shiId);
-      confirmed = cur === statusId || cur === null;
+      confirmed = cur === statusId || (cur === null && sent);
     }
     return {confirmed, imageDropped, rutt: P.toRutt(this.lastDecoded)};
   }

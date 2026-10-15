@@ -23,15 +23,29 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
   const [extras, setExtras] = useState<Record<string, number>>({});
   const [kolli, setKolli] = useState(0);
   const [comment, setComment] = useState('');
+  const [comment2, setComment2] = useState('');
+  const [typeId, setTypeId] = useState(0);
+  const [subId, setSubId] = useState(0);
 
   useEffect(() => {
-    setSig(null); setName(''); setPhotos([]); setComment('');
+    setSig(null); setName(''); setPhotos([]); setComment(''); setComment2('');
+    setTypeId((stop && stop.pod && stop.pod.defaultId) || 0); setSubId(0);
     setExtras((saved && saved.extras) || {}); setExtOpen(!!(saved && saved.extras && Object.keys(saved.extras).length));
     setKolli((saved && saved.kolli) || (stop && stop.kolli) || 0);
   }, [stop, saved]);
 
   const padH = Math.max(230, Math.min(400, Math.round(Dimensions.get('window').height * 0.36)));
-  const req = (stop && stop.req) || {};
+  // Kvittenstyp väljer du själv (som i Opter). Krav = orderns krav OCH typens krav.
+  const P = (stop && stop.pod) || null;
+  const types: any[] = (P && P.types) || [];
+  const type = types.find(t => t.id === typeId) || null;
+  const subs: any[] = type && P ? P.subTypes.filter((x: any) => x.mainId === type.id) : [];
+  const sub = subs.find(x => x.id === subId) || null;
+  const eff = sub || type;
+  const sr = (P && P.shipReq) || {};
+  const req: any = P ? (eff ? {sig: sr.sig && eff.req.sig, name: sr.name && eff.req.name, pic: sr.pic && eff.req.pic, remark: sr.remark && eff.req.remark, comment: sr.comment && eff.req.comment, sub: !!(type && type.showSub && type.requireSub && subs.length)} : {}) : ((stop && stop.req) || {});
+  const fields = (P && P.fields) || {remark: true, comment: false, count: true, pic: true};
+  const showComment2 = !!(fields.comment || req.comment);
   // Förslag: Opters egna för ordern först, sen tidigare mottagare hos samma företag.
   const suggestions = useMemo(() => {
     const out: string[] = [];
@@ -48,7 +62,9 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
   if (req.sig && !sig) missing.push('signatur');
   if (req.name && name.trim().length < 2) missing.push('namnförtydligande');
   if (req.pic && photos.length === 0) missing.push('foto');
-  if (req.comment && comment.trim().length === 0) missing.push('kommentar');
+  if (req.remark && comment.trim().length === 0) missing.push('anmärkning');
+  if (req.comment && comment2.trim().length === 0) missing.push((fields.commentName || 'kommentar').toLowerCase());
+  if (req.sub && !sub) missing.push('undertyp');
   const ok = missing.length === 0;
 
   async function addPhoto(cam: boolean) {
@@ -56,7 +72,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
   }
   function done() {
     if (!ok) return;
-    onDone({name: name.trim(), sig, photos, extras, kolli, comment: comment.trim(), at: Date.now()});
+    onDone({name: name.trim(), sig, photos, extras, kolli, comment: comment.trim(), comment2: comment2.trim(), typeId: type ? type.id : 0, subId: sub ? sub.id : 0, typeName: eff ? eff.name : '', at: Date.now()});
   }
 
   return (
@@ -71,6 +87,28 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
         <ScrollView style={{flex: 1}} contentContainerStyle={{paddingHorizontal: 16, paddingBottom: 20}} scrollEnabled={!drawing} keyboardShouldPersistTaps="handled">
           <Text style={st.who} numberOfLines={2}>{stop.who || 'Mottagare'}</Text>
           <Text style={st.adr} numberOfLines={2}>{[stop.adr, stop.area].filter(Boolean).join(', ')}{stop.orderNo ? `  ·  Order ${stop.orderNo}` : ''}</Text>
+
+          {types.length > 0 && (
+            <>
+              <View style={st.secHead}><Text style={st.sec}>Typ av kvittens</Text></View>
+              <View style={st.chips}>
+                {types.map(t => (
+                  <Pressable key={t.id} disabled={P && P.lockMain && t.id !== P.defaultId} style={[st.chip, t.id === typeId && st.chipOn, P && P.lockMain && t.id !== P.defaultId && {opacity: 0.35}]} onPress={() => { setTypeId(t.id); setSubId(0); }}>
+                    <Text style={[st.chipTxt, t.id === typeId && st.chipTxtOn]}>{t.name}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              {type && type.showSub && subs.length > 0 && (
+                <View style={[st.chips, {marginTop: 8}]}>
+                  {subs.map(x => (
+                    <Pressable key={x.id} style={[st.chip, x.id === subId && st.chipOn]} onPress={() => setSubId(x.id === subId ? 0 : x.id)}>
+                      <Text style={[st.chipTxt, x.id === subId && st.chipTxtOn]}>{x.name}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </>
+          )}
 
           <View style={st.secHead}>
             <Text style={st.sec}>Mottagarens underskrift</Text>
@@ -124,12 +162,12 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
             )}
           </View>
 
-          <View style={st.secHead}><Text style={st.sec}>Antal kollin</Text>{stop.kolli ? <Text style={st.hint}>Ordern: {stop.kolli}</Text> : null}</View>
+          {fields.count !== false && <><View style={st.secHead}><Text style={st.sec}>Antal kollin</Text>{stop.kolli ? <Text style={st.hint}>Ordern: {stop.kolli}</Text> : null}</View>
           <View style={st.kolliRow}>
             <Pressable style={st.kBtn} onPress={() => setKolli(k => Math.max(0, k - 1))}><Text style={st.kBtnTxt}>−</Text></Pressable>
             <Text style={[st.kVal, stop.kolli && kolli !== stop.kolli ? {color: C.accent} : null]}>{kolli}</Text>
             <Pressable style={st.kBtn} onPress={() => setKolli(k => k + 1)}><Text style={st.kBtnTxt}>+</Text></Pressable>
-          </View>
+          </View></>}
 
           {!extOpen ? (
             <Pressable style={st.devToggle} onPress={() => setExtOpen(true)}>
@@ -145,9 +183,18 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
 
           <View style={st.secHead}>
             <Text style={st.sec}>Anmärkning</Text>
-            {req.comment ? <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View> : null}
+            {req.remark ? <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View> : null}
           </View>
           <TextInput style={st.comment} value={comment} onChangeText={setComment} placeholder="T.ex. ställt vid porten, skadad kartong…" placeholderTextColor={C.faint} multiline />
+          {showComment2 && (
+            <>
+              <View style={st.secHead}>
+                <Text style={st.sec}>{fields.commentName || 'Kommentar'}</Text>
+                {req.comment ? <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View> : null}
+              </View>
+              <TextInput style={st.comment} value={comment2} onChangeText={setComment2} placeholderTextColor={C.faint} multiline />
+            </>
+          )}
         </ScrollView>
 
         <View style={[st.bottom, {paddingBottom: kb > 0 ? 10 : 12 + insets.bottom}]}>

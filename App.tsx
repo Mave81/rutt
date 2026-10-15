@@ -27,7 +27,7 @@ import computeRoute, {slotWhere} from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '15 okt · scroll + Klart';
+const BUILD = '15 okt · Lossad som Opter';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -258,17 +258,26 @@ function AppInner(): React.JSX.Element {
     if (!live || !L || !L.loadSt) return;
     queueSend(st.pickup, 'load', () => client.setStatus(L, L.loadSt.id, null));
   }
-  function sendUnload(st: any, pod: any) {
+  // Lossad → Opter, byte för byte som Opter Driver (registerPod + setShipmentStatus i samma synk).
+  async function sendUnload(st: any, pod: any) {
     const L = st.live;
     if (!live || !L || !L.unloadSt) return;
     const scale = PixelRatio.get();
     const first = (pod.photos || [])[0];
-    const podData = L.podType ? {
-      sptId: L.podType && L.podType.kind === 'spt' ? L.podType.id : 0,
-      dptId: L.podType && L.podType.kind === 'dpt' ? L.podType.id : 0,
-      name: pod.name || '', remark: pod.comment || '',
+    const typeId = pod.typeId || (L.podType && L.podType.id) || 0;
+    // Position bara om den är färsk (< 10 min), som Opter.
+    let pos: any = null;
+    try { const l = NativeModules.RuttLocation && (await NativeModules.RuttLocation.getLast()); if (l && l.lat && Date.now() - l.time < 10 * 60000) pos = l; } catch (e) {}
+    const podData = typeId ? {
+      // Ordern utan egna kvittenstyper: Opter skickar SPT_Id = −DPT_Id. Annars DPT_Id.
+      sptId: L.hasSpt ? 0 : -typeId,
+      dptId: L.hasSpt ? typeId : 0,
+      sptIdSub: !L.hasSpt && pod.subId ? pod.subId : 0,
+      dptIdSub: L.hasSpt && pod.subId ? pod.subId : 0,
+      name: pod.name || '', remark: pod.comment || '', comment: pod.comment2 || '',
       signature: pod.sig ? P.signatureString(pod.sig.strokes, scale) : '',
       packageCount: pod.kolli != null ? pod.kolli : null,
+      lat: pos ? pos.lat : null, lng: pos ? pos.lng : null,
       image: first && first.b64 ? Buffer.from(first.b64, 'base64') : null,
     } : null;
     queueSend(st.drop, 'unload', () => client.setStatus(L, L.unloadSt.id, podData));

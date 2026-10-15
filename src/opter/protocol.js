@@ -57,6 +57,7 @@ const F = {
     55: 'driverMessage', 58: 'shipmentId', 59: 'orderId',
     30: 'freightBill', 33: 'goodsType', 37: 'distanceKm', 52: 'extMessage', 54: 'senderInstr',
     21: 'customerId', 23: 'customerRef', 34: 'senderRef', 35: 'receiverRef', 36: 'timeMinutes',
+    56: 'externalId', 101: 'customerDefaultPOT', 138: 'podLockMainType',
     61: 'podNameReq', 62: 'podSigReq', 63: 'podRemarkReq', 71: 'orderReceiver', 73: 'customerPhone1',
     117: 'podPicReq', 119: 'customerRefPhone', 120: 'customerRefMobile', 121: 'podCommentReq', 123: 'customerPhone2',
   },
@@ -65,9 +66,10 @@ const F = {
   Position: { 1: 'resId', 2: 'vhcId', 3: 'lng', 4: 'lat', 5: 'alt', 6: 'dir', 7: 'speed', 8: 'time' },
   ShipmentStatus: { 1: 'shiId', 2: 'dstId', 3: 'arrived', 4: 'accepted', 5: 'rejected', 6: 'pickup', 7: 'delivery', 8: 'completed', 10: 'userOption', 11: 'msgRequired', 14: 'pod', 15: 'code', 16: 'name', 21: 'order' },
   ShipmentStatusLog: { 1: 'shiId', 2: 'shsId', 3: 'deleted', 4: 'logTime' },
-  ShipmentPodType: { 1: 'shiId', 2: 'nameReq', 3: 'sigReq', 4: 'remarkReq', 5: 'name', 6: 'descr', 7: 'revoked', 9: 'isDefault', 14: 'commentReq', 16: 'picReq' },
-  DefaultPodType: { 1: 'nameReq', 2: 'sigReq', 3: 'remarkReq', 4: 'name', 5: 'descr', 7: 'isDefault', 8: 'active', 13: 'commentReq', 15: 'picReq', 16: 'allowBeforePickup', 17: 'allowAfterPickup' },
-  ShipmentPod: { 1: 'shiId', 2: 'sptId', 3: 'dptId', 4: 'date', 5: 'time', 6: 'name', 8: 'signature', 9: 'packageCount', 14: 'comment' },
+  ShipmentPodType: { 1: 'shiId', 2: 'nameReq', 3: 'sigReq', 4: 'remarkReq', 5: 'name', 6: 'descr', 7: 'revoked', 8: 'externalId', 9: 'isDefault', 10: 'mainId', 11: 'showSub', 12: 'requireSub', 13: 'externalIdMain', 14: 'commentReq', 15: 'scanCommentReq', 16: 'picReq' },
+  DefaultPodType: { 1: 'nameReq', 2: 'sigReq', 3: 'remarkReq', 4: 'name', 5: 'descr', 6: 'externalId', 7: 'isDefault', 8: 'active', 9: 'mainId', 10: 'showSub', 11: 'requireSub', 12: 'externalIdMain', 13: 'commentReq', 14: 'scanCommentReq', 15: 'picReq', 16: 'allowBeforePickup', 17: 'allowAfterPickup' },
+  ShipmentPod: { 1: 'shiId', 2: 'sptId', 3: 'dptId', 4: 'date', 5: 'time', 6: 'name', 7: 'descr', 8: 'signature', 9: 'packageCount', 10: 'sptIdSub', 11: 'dptIdSub', 12: 'lat', 13: 'lng', 14: 'comment' },
+  ShipmentPackagePod: { 1: 'spaId' },
   ShipmentPackage: { 1: 'shiId', 2: 'quantity', 3: 'weight', 14: 'text', 15: 'packageType' },
   FreeTextMessage: { 1: 'resId', 2: 'vhcId', 3: 'shiId', 4: 'outgoing', 5: 'confirmed', 6: 'text', 7: 'created', 8: 'externalId', 9: 'fromName' },
 };
@@ -170,7 +172,11 @@ function wStartTable(w, tableName, key) { wB(w, DT.StartTable); wB(w, TableOrd[t
 let __ident = (Math.floor(Date.now() / 1000) % 1000000000) + 1;
 const nextIdentity = () => (__ident = __ident >= 2147483000 ? 1 : __ident + 1);
 const lastIdentity = () => __ident;
-function wNewRow(w, tableName, offId) { wStartTable(w, tableName, { identityId: nextIdentity(), offId: offId || 0, xxxId: 0 }); }
+function wNewRow(w, tableName, offId) {
+  const off = offId || 0;
+  wStartTable(w, tableName, { identityId: nextIdentity(), offId: off, xxxId: 0 });
+  if (off !== 1) wInt(w, 250, off); // OFF_Id som data (Opter skriver den när den skiljer sig från 1)
+}
 function wEndTable(w, tableName) { wB(w, DT.EndTable); wB(w, TableOrd[tableName]); }
 function wEndData(w, dyn, fix) { wB(w, DT.EndData); wI64(w, dyn ? dateToTicks(dyn) : 0); wI64(w, fix ? dateToTicks(fix) : 0); }
 
@@ -216,31 +222,44 @@ function signatureString(strokes, scale) {
   }
   return out.join(',');
 }
-function encodeShipmentStatus({ live, offId, statusId, pod }) {
+function encodeShipmentStatus({ live, statusId, pod }) {
+  // Exakt som Opter Driver: (registerPod + setShipmentStatus) i samma synk.
+  //  Shipment: 11 SHI_SHS_Id (+ 56 SHI_ExternalId som String när en kvittens följer med).
+  //  Underrader i ordning: ShipmentStatusLog, ShipmentPod (med ShipmentPackagePod per kolli).
+  //  Nya underrader har OFF_Id 0 (huvud + 250 = 0), XXX_Id 0.
   const w = W();
   const k = live.key;
   wB(w, DT.StartTable); wB(w, TableOrd.Shipment); wB(w, 14);
   wI32(w, k.identityId || 0); wI32(w, k.offId || 0); wI32(w, k.xxxId || 0);
   wB(w, (live.hdr && live.hdr.extra) || 0); wB(w, (live.hdr && live.hdr.conf) || 0);
   wInt(w, 11, statusId);                                  // SHI_SHS_Id
-  wNewRow(w, 'ShipmentStatusLog', offId || k.offId);
+  if (pod) { const ext = String(live.externalId || ''); wB(w, DT.String); wB(w, 56); const b = Buffer.from(ext, CHARSET); wI16(w, b.length); if (b.length) w.push(b); }
+  wNewRow(w, 'ShipmentStatusLog', 0);
   wInt(w, 1, live.shiId);                                 // SSL_SHI_Id
   wInt(w, 2, statusId);                                   // SSL_SHS_Id
   wDate(w, 4, new Date());                                // SSL_LogTime
   wEndTable(w, 'ShipmentStatusLog');
   if (pod) {
     const now = new Date();
-    wNewRow(w, 'ShipmentPod', offId || k.offId);
-    wInt(w, 1, live.shiId);                               // SHP_SHI_Id
-    if (pod.sptId) wInt(w, 2, pod.sptId);                 // SHP_SPT_Id
+    wNewRow(w, 'ShipmentPod', 0);
+    for (const spaId of (live.packageIds || [])) {        // en ShipmentPackagePod per kolli
+      wNewRow(w, 'ShipmentPackagePod', 0);
+      wInt(w, 1, spaId);
+      wEndTable(w, 'ShipmentPackagePod');
+    }
+    if (pod.sptId) wInt(w, 2, pod.sptId);                 // SHP_SPT_Id (−DPT_Id när ordern saknar egna typer)
     if (pod.dptId) wInt(w, 3, pod.dptId);                 // SHP_DPT_Id
     wDate(w, 4, now); wDate(w, 5, now);                   // SHP_Date, SHP_Time
     if (pod.name) wStr(w, 6, pod.name);                   // SHP_Name
     if (pod.remark) wStr(w, 7, pod.remark);               // SHP_Descr (anmärkning)
+    if (pod.comment) wStr(w, 14, pod.comment);            // SHP_Comment
     if (pod.signature) wStr(w, 8, pod.signature);         // SHP_Signature
     if (pod.packageCount != null) wInt(w, 9, pod.packageCount); // SHP_PackageCount
-    if (pod.comment) wStr(w, 14, pod.comment);            // SHP_Comment
-    if (pod.image) wBytes(w, 15, pod.image);              // SHP_Image (jpeg)
+    if (pod.sptIdSub) wInt(w, 10, pod.sptIdSub);
+    if (pod.dptIdSub) wInt(w, 11, pod.dptIdSub);
+    if (pod.lng != null) wDec(w, 13, pod.lng);            // SHP_Longitude
+    if (pod.lat != null) wDec(w, 12, pod.lat);            // SHP_Latitude
+    if (pod.image) wBytes(w, 15, pod.image);              // bild (jpeg)
     wEndTable(w, 'ShipmentPod');
   }
   wEndTable(w, 'Shipment');
@@ -458,14 +477,20 @@ function toRutt(decoded) {
   const addresses = {};
   for (const r of decoded.rows) if (r.table === 'Address') for (const id of [r.key.identityId, r.key.xxxId]) if (id) addresses[id] = r.columns;
   const pkgBy = {};
-  for (const r of decoded.rows) if (r.table === 'ShipmentPackage') { const k = r.columns.shiId; (pkgBy[k] = pkgBy[k] || []).push(r.columns); }
+  for (const r of decoded.rows) if (r.table === 'ShipmentPackage') { const k = r.columns.shiId || (r.parent && r.parent.key && r.parent.key.xxxId); (pkgBy[k] = pkgBy[k] || []).push({...r.columns, _id: r.key.xxxId}); }
 
   const sugBy = {};
   for (const r of decoded.rows) if (r.table === 'ShipmentPodSuggestion' && !r.columns.revoked && r.columns.name) { const k = r.columns.shiId; (sugBy[k] = sugBy[k] || []).push(String(r.columns.name).trim()); }
 
   // Orderns egna statusar och kvittenstyper (ligger som underrader i orderns block).
   const belongs = (r, shiId) => (r.columns.shiId === shiId) || (r.parent && r.parent.table === 'Shipment' && r.parent.key.xxxId === shiId);
-  const defPods = decoded.rows.filter(r => r.table === 'DefaultPodType' && r.columns.active !== false).map(r => ({id: r.key.xxxId, kind: 'dpt', ...r.columns}));
+  const defPods = decoded.rows.filter(r => r.table === 'DefaultPodType' && r.columns.active !== false).map(r => ({id: r.key.xxxId, ...r.columns}));
+  const podTypesFor = (beforePickup) => {
+    const ok = defPods.filter(d => beforePickup ? d.allowBeforePickup : d.allowAfterPickup);
+    return {main: ok.filter(d => !d.mainId), sub: ok.filter(d => d.mainId)};
+  };
+  const sBool = (name, def) => /^(true|1|ja|yes)$/i.test(String(setting(decoded, name, def ? 'true' : 'false')));
+  const podFields = { remark: sBool('PodRemarkEnabled', true), comment: sBool('PodCommentEnabled', false), count: sBool('PodPackageCountEnabled', true), pic: sBool('PodPictureEnabled', false), commentName: String(setting(decoded, 'PodCommentName', '') || '') };
 
   // Serverinställningar som styr vilka ordrar Opter Driver visar.
   const sTrue = (name) => /^(true|1|ja|yes)$/i.test(String(setting(decoded, name, 'false')));
@@ -511,20 +536,30 @@ function toRutt(decoded) {
     const acceptSt = statuses.find(s => s.accepted && !s.rejected) || byName(/bekräftad|accepterad/i) || null;
     const rejectSt = statuses.find(s => s.rejected) || byName(/nekad/i) || null;
     const serverDone = !!(curSt && (curSt.completed || (curSt.delivery && !curSt.pickup)));
-    const spts = decoded.rows.filter(x => x.table === 'ShipmentPodType' && belongs(x, shiId) && !x.columns.revoked).map(x => ({id: x.key.xxxId, kind: 'spt', ...x.columns}));
-    const podList = spts.length ? spts : defPods;
-    const podType = podList.find(pt => /lossad/i.test(String(pt.name || ''))) || podList.find(pt => pt.isDefault) || podList[0] || null;
+    // Kvittenstyper exakt som Opter (ProofOfDelivery.loadDefaultPodTypes): bara DefaultPodType,
+    // aktiva, tillåtna efter hämtning; förvald = kundens standardtyp, annars standard, annars första.
+    const hasSpt = decoded.rows.some(x => x.table === 'ShipmentPodType' && belongs(x, shiId));
+    const pts = podTypesFor(false);
+    const mk = (d) => ({id: d.id, name: String(d.name || 'Kvittens'), descr: d.descr || '', mainId: d.mainId || 0,
+      req: {name: !!d.nameReq, sig: !!d.sigReq, remark: !!d.remarkReq, comment: !!d.commentReq, pic: !!d.picReq},
+      showSub: !!d.showSub, requireSub: !!d.requireSub});
+    const podTypes = pts.main.map(mk), podSubTypes = pts.sub.map(mk);
+    const defPod = podTypes.find(t => c.customerDefaultPOT && t.id === c.customerDefaultPOT) || podTypes.find((t, i) => pts.main[i].isDefault) || podTypes[0] || null;
+    const podType = defPod;
     const live = { key: r.key, hdr: r.hdr, shiId, offId: r.key.offId, statuses: statuses.map(s => ({id: s.id, name: s.name})), cur: curSt ? curSt.name : null, curId: c.shsId || 0,
       isNew: isNew && !consHidden, tab: tabF, revoked: revokedOpen, consignment: !!c.isConsignment || !!c.consignmentParent, locked: !!c.locked,
       shipDate: (c.shipmentDate instanceof Date && c.shipmentDate.getFullYear() > 2001) ? ymd(c.shipmentDate) : (c.orderDate instanceof Date && c.orderDate.getFullYear() > 2001 ? ymd(c.orderDate) : null),
       doneAt: (() => { const logs = decoded.rows.filter(x => x.table === 'ShipmentStatusLog' && belongs(x, shiId) && x.columns.shsId === c.shsId && x.columns.logTime instanceof Date); return logs.length ? Math.max(...logs.map(x => x.columns.logTime.getTime())) : null; })(),
       serverDone, acceptSt: acceptSt ? {id: acceptSt.id, name: acceptSt.name} : null, rejectSt: rejectSt ? {id: rejectSt.id, name: rejectSt.name} : null,
       loadSt: loadSt ? {id: loadSt.id, name: loadSt.name} : null, unloadSt: unloadSt ? {id: unloadSt.id, name: unloadSt.name, pod: !!unloadSt.pod} : null,
-      podType: podType ? {id: podType.id, kind: podType.kind, name: podType.name} : null };
+      podType: podType ? {id: podType.id, name: podType.name} : null, hasSpt, externalId: c.externalId || '',
+      packageIds: pkgs.map(p => p._id).filter(Boolean) };
     const pkgText = pkgs.map(p => [p.quantity ? p.quantity + ' st' : '', p.packageType, p.text].filter(Boolean).join(' ')).filter(Boolean).join(', ');
     cargo[cid] = { name: c.customer || c.serviceType || ('Order ' + cid), pal, kg, to: to && to.city ? to.city : '', goods: pkgText };
-    const req = { name: !!c.podNameReq, sig: !!c.podSigReq, pic: !!c.podPicReq, comment: !!(c.podCommentReq || c.podRemarkReq) };
-    if (podType) { req.name = req.name || !!podType.nameReq; req.sig = req.sig || !!podType.sigReq; req.pic = req.pic || !!podType.picReq; req.comment = req.comment || !!(podType.commentReq || podType.remarkReq); }
+    // Krav som Opter: ett fält krävs bara om BÅDE ordern och den valda kvittenstypen kräver det.
+    const shipReq = { name: !!c.podNameReq, sig: !!c.podSigReq, remark: !!c.podRemarkReq, comment: !!c.podCommentReq, pic: !!c.podPicReq };
+    const req = podType ? { name: shipReq.name && podType.req.name, sig: shipReq.sig && podType.req.sig, remark: shipReq.remark && podType.req.remark, comment: shipReq.comment && podType.req.comment, pic: shipReq.pic && podType.req.pic } : {};
+    const pod = { types: podTypes, subTypes: podSubTypes, defaultId: podType ? podType.id : 0, shipReq, fields: podFields, lockMain: !!c.podLockMainType };
     // All fritext för ordern, i den ordning Opter visar den, utan dubbletter.
     // Fritext: utan rader som bara är fraktsedel-/ordernumret och utan upprepade rader.
     const junk = new Set([String(c.freightBill || ''), String(c.shipmentId || ''), String(c.orderId || '')].filter(Boolean));
@@ -541,7 +576,7 @@ function toRutt(decoded) {
     const common = { live, shiId, orderNo: c.orderId || null, freightBill: c.freightBill || c.shipmentId || null, customer: c.customer || '', service: c.serviceType || '', kg, pal, kolli, goods: pkgText, info, km: Number(c.distanceKm) || null, minutes: Number(c.timeMinutes) || null, msg: '', driverMsg: '' };
     const merge = (a, b) => { const seen = new Set(a.map(x => x.num)); return [...a, ...b.filter(x => !seen.has(x.num) && seen.add(x.num))]; };
     stops.push({ ...common, verb: 'Hämta', adr: line(from), area: from && from.city ? from.city : '', zip: from && from.zip || '', lat: from && from.lat != null ? Number(from.lat) : null, lng: from && from.lng != null ? Number(from.lng) : null, pickup: cid, deadline: tLP && tLP.hhmm, dlDate: tLP && tLP.date, earliest: tEP && tEP.hhmm, openDate: tEP && tEP.date, tEarliest: tEP, tLatest: tLP, who: (from && from.company) || c.customer || '', contact: contact(from), tel: merge(phones(from, c, 'from'), textTel), code: from && from.entreCode || '', adrMsg: [from && from.driverMessage, from && from.info].filter(Boolean).join(' · '), ref: c.senderRef || '', note: [c.serviceType, kg ? kg + ' kg' : '', c.message].filter(Boolean).join(' · ') });
-    stops.push({ ...common, verb: 'Lämna', adr: line(to), area: to && to.city ? to.city : '', zip: to && to.zip || '', lat: to && to.lat != null ? Number(to.lat) : null, lng: to && to.lng != null ? Number(to.lng) : null, drop: cid, deadline: tLD && tLD.hhmm, dlDate: tLD && tLD.date, earliest: tED && tED.hhmm, openDate: tED && tED.date, tEarliest: tED, tLatest: tLD, who: (to && to.company) || c.orderReceiver || c.customer || '', contact: contact(to), tel: merge(phones(to, c, 'to'), textTel), avise: avisering(info), code: to && to.entreCode || '', adrMsg: [to && to.driverMessage, to && to.info].filter(Boolean).join(' · '), ref: c.receiverRef || '', req, suggest: [...new Set(sugBy[shiId] || [])], note: [kg ? kg + ' kg' : '', c.driverMessage].filter(Boolean).join(' · ') });
+    stops.push({ ...common, verb: 'Lämna', adr: line(to), area: to && to.city ? to.city : '', zip: to && to.zip || '', lat: to && to.lat != null ? Number(to.lat) : null, lng: to && to.lng != null ? Number(to.lng) : null, drop: cid, deadline: tLD && tLD.hhmm, dlDate: tLD && tLD.date, earliest: tED && tED.hhmm, openDate: tED && tED.date, tEarliest: tED, tLatest: tLD, who: (to && to.company) || c.orderReceiver || c.customer || '', contact: contact(to), tel: merge(phones(to, c, 'to'), textTel), avise: avisering(info), code: to && to.entreCode || '', adrMsg: [to && to.driverMessage, to && to.info].filter(Boolean).join(' · '), ref: c.receiverRef || '', req, pod, suggest: [...new Set(sugBy[shiId] || [])], note: [kg ? kg + ' kg' : '', c.driverMessage].filter(Boolean).join(' · ') });
   }
   return { cargo, stops };
 }
