@@ -28,6 +28,13 @@ const GENERIC = /^(nummer|kund|referens|avsändare|mottagare|växel|kontor)/i;
 function Face({label}: {label: string}) {
   return <View style={o.avatar}>{GENERIC.test(String(label || '')) ? <Bi n="building" size={15} color={C.people} /> : <Text style={o.avatarTxt}>{initials(label)}</Text>}</View>;
 }
+// Info som bara upprepar godsraden ("2 pall 760 kg") visas inte två gånger.
+const norm = (x: any) => String(x || '').toLowerCase().replace(/[^a-z0-9åäö]/g, '');
+function uniqNotes(list: any[], goods: string) {
+  const g = norm(goods), seen = new Set<string>(), out: string[] = [];
+  for (const n of list) { const k = norm(n); if (!k || seen.has(k) || (g && g.includes(k))) continue; seen.add(k); out.push(String(n)); }
+  return out;
+}
 const initials = (s: string) => String(s || '').replace(/\(.*?\)/g, '').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
 
 // Hur långt sändningen till Opter kommit.
@@ -171,6 +178,82 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     );
   }
 
+  // Personerna på ett stopp: rund avatar, SMS (bara mobil) och Ring.
+  const peopleRows = (st: any) => {
+    const tel = (st.tel || []).slice(0, 3);
+    if (!tel.length) return null;
+    return (
+      <View style={o.people}>
+        {tel.map((t: any) => (
+          <View key={t.num} style={o.person}>
+            <Face label={t.label} />
+            <View style={{flex: 1, minWidth: 0}}>
+              <Text style={o.pName} numberOfLines={1}>{String(t.label).replace(/\s*\(mobil\)/i, '')}</Text>
+              <Text style={o.pNum}>{/\(mobil\)/i.test(t.label) ? 'Mobil · ' : ''}{prettyPhone(t.num)}</Text>
+            </View>
+            {isMobile(t.num) && (
+              <Pressable hitSlop={6} style={o.pBtn} onPress={() => setSms({name: String(t.label).replace(/\s*\(mobil\)/i, ''), num: t.num, who: st.who})}>
+                <Bi n="chat-dots-fill" size={18} color={C.people} />
+              </Pressable>
+            )}
+            <Pressable hitSlop={6} style={o.pBtn} onPress={() => dial(t.num)}>
+              <Bi n="telephone-fill" size={18} color={C.people} />
+            </Pressable>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
+  // ---- Senare dagar: en rad per ORDER (hämta + lämna ihop), inte per stopp ----
+  const laterOrders = (() => {
+    const by: Record<string, any> = {}; const out: any[] = [];
+    for (const st of later) {
+      const cid = String(st.pickup || st.drop);
+      if (!by[cid]) { by[cid] = {cid, pick: null, drop: null}; out.push(by[cid]); }
+      if (st.pickup) by[cid].pick = st; else by[cid].drop = st;
+    }
+    return out;
+  })();
+  const when = (st: any) => (st ? whenText(st.tEarliest || st.tLatest) : '');
+  const plannedCard = (g: any) => {
+    const any = g.pick || g.drop;
+    const c = cargo[g.cid] || {};
+    const gName = c.goods || c.name || '';
+    const goods = [c.pal ? `${c.pal} pall` : '', c.kg ? `${c.kg} kg` : '', /^order\b/i.test(gName) ? '' : gName].filter(Boolean).join(' · ');
+    const orderLine = [any.orderNo && `Order ${any.orderNo}`, any.freightBill && any.freightBill !== any.orderNo && `Fraktsedel ${any.freightBill}`, any.service].filter(Boolean).join('  ·  ');
+    const notes = uniqNotes([g.pick && g.pick.adrMsg, g.drop && g.drop.adrMsg, any.info], goods);
+    const leg = (st: any, pickup: boolean) => st && (
+      <View style={o.leg}>
+        <View style={o.headRow}>
+          <View style={[o.verb, {backgroundColor: pickup ? C.accentSoft : C.okSoft}]}>
+            <Bi n={pickup ? 'box-seam-fill' : 'check-circle-fill'} size={12} color={pickup ? C.accentInk : C.accent2} />
+            <Text style={[o.verbTxt, {color: pickup ? C.accentInk : C.accent2}]}>{pickup ? 'HÄMTA' : 'LÄMNA'}</Text>
+          </View>
+          <Text style={o.legWhen}>{when(st)}</Text>
+          <View style={{flex: 1}} />
+          <Pressable hitSlop={8} style={o.legNav} onPress={() => navigate(st)}><Bi n="cursor-fill" size={15} color={C.ink} /></Pressable>
+        </View>
+        <Text style={o.legWho} numberOfLines={2}>{st.who || '—'}</Text>
+        <View style={o.adrRow}><Bi n="geo-alt-fill" size={13} color={C.faint} /><Text style={o.adr} numberOfLines={2}>{[st.adr, st.area].filter(Boolean).join(', ')}</Text></View>
+        {!!st.code && <View style={o.codeChip}><Bi n="key-fill" size={13} color={C.onAccent} /><Text style={o.codeTxt}>Portkod {st.code}</Text></View>}
+        {peopleRows(st)}
+      </View>
+    );
+    return (
+      <View style={o.hero}>
+        <View style={o.headRow}>
+          <Bi n="calendar-event" size={15} color={C.dim} />
+          <Text style={o.num}>Planerad order{any.orderNo ? ` ${any.orderNo}` : ''}</Text>
+        </View>
+        {leg(g.pick, true)}
+        {leg(g.drop, false)}
+        {notes.length > 0 && <View style={o.info}><Bi n="info-circle" size={15} color={C.dim} style={{marginTop: 1}} /><Text style={o.infoTxt}>{notes.join('\n')}</Text></View>}
+        {(!!goods || !!orderLine) && <Text style={o.orderLine}>{[goods, orderLine].filter(Boolean).join('  ·  ')}</Text>}
+      </View>
+    );
+  };
+
   // ---- Stoppkortet ----
   const heroCard = (item: Row, planned?: boolean) => {
     const {st, kind, cid, plan} = item;
@@ -188,8 +271,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     const orderLine = [st.orderNo && `Order ${st.orderNo}`, st.freightBill && st.freightBill !== st.orderNo && `Fraktsedel ${st.freightBill}`, st.ref && `Ref ${st.ref}`, st.service].filter(Boolean).join('  ·  ');
     const gName = c.goods || c.name || '';
     const goods = [c.pal ? `${c.pal} pall` : '', c.kg ? `${c.kg} kg` : '', /^order\b/i.test(gName) ? '' : gName].filter(Boolean).join(' · ');
-    const tel = (st.tel || []).slice(0, 3);
-    const notes = [st.adrMsg, st.info].filter(Boolean);
+    const notes = uniqNotes([st.adrMsg, st.info], goods);
     return (
       <View style={o.hero}>
         <View style={o.headRow}>
@@ -267,27 +349,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
           <Text style={o.meta}>Lossas sen i {item.dropLater.area}{item.dropLater.eta ? ` ca ${hhmm(item.dropLater.eta)}` : ''}</Text>
         )}
 
-        {tel.length > 0 && (
-          <View style={o.people}>
-            {tel.map((t: any) => (
-              <View key={t.num} style={o.person}>
-                <Face label={t.label} />
-                <View style={{flex: 1, minWidth: 0}}>
-                  <Text style={o.pName} numberOfLines={1}>{String(t.label).replace(/\s*\(mobil\)/i, '')}</Text>
-                  <Text style={o.pNum}>{/\(mobil\)/i.test(t.label) ? 'Mobil · ' : ''}{prettyPhone(t.num)}</Text>
-                </View>
-                {isMobile(t.num) && (
-                  <Pressable hitSlop={6} style={o.pBtn} onPress={() => setSms({name: String(t.label).replace(/\s*\(mobil\)/, ''), num: t.num, who: st.who})}>
-                    <Bi n="chat-dots-fill" size={18} color={C.people} />
-                  </Pressable>
-                )}
-                <Pressable hitSlop={6} style={o.pBtn} onPress={() => dial(t.num)}>
-                  <Bi n="telephone-fill" size={18} color={C.people} />
-                </Pressable>
-              </View>
-            ))}
-          </View>
-        )}
+        {peopleRows(st)}
 
         <Pressable style={o.navBtn} onPress={() => navigate(st)}>
           <Bi n="cursor-fill" size={16} color={C.ink} />
@@ -354,15 +416,14 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         ListFooterComponent={
           later.length ? (
             <View style={{marginTop: 18}}>
-              <View style={o.restHead}><Text style={o.restTitle}>Senare dagar</Text><Text style={o.restSum}>{later.length}</Text></View>
-              {later.map((st: any, i: number) => (
-                <Pressable key={i} style={o.row} onPress={() => setPlanned(st)}>
+              <View style={o.restHead}><Text style={o.restTitle}>Senare dagar</Text><Text style={o.restSum}>{laterOrders.length} {laterOrders.length === 1 ? 'order' : 'order'}</Text></View>
+              {laterOrders.map((g: any) => (
+                <Pressable key={g.cid} style={o.row} onPress={() => setPlanned(g)}>
                   <View style={[o.rowIco, {backgroundColor: C.panel2}]}><Bi n="calendar-event" size={14} color={C.dim} /></View>
                   <View style={{flex: 1, minWidth: 0}}>
-                    <Text style={o.rowWho} numberOfLines={1}>{st.who || '—'}</Text>
-                    <Text style={o.rowMeta} numberOfLines={1}>{st.pickup ? 'Hämta' : 'Lämna'} · {[st.adr, st.area].filter(Boolean).join(', ')}</Text>
+                    <Text style={o.rowWho} numberOfLines={1}>{[g.pick && g.pick.who, g.drop && g.drop.who].filter(Boolean).join('  →  ') || '—'}</Text>
+                    <Text style={o.rowMeta} numberOfLines={1}>{[g.pick && `Hämta ${when(g.pick)}`, g.drop && `Lämna ${when(g.drop)}`].filter(Boolean).join(' · ')}</Text>
                   </View>
-                  <Text style={o.rowEta}>{whenText(st.tEarliest || st.tLatest)}</Text>
                   <Bi n="chevron-right" size={14} color={C.faint} />
                 </Pressable>
               ))}
@@ -381,8 +442,8 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
       <CallSheet st={callStop} onClose={() => setCallStop(null)} />
       <SmsSheet to={sms} onClose={() => setSms(null)} />
       <Sheet open={!!planned} onClose={() => setPlanned(null)} scroll>
-        {planned ? heroCard({kind: planned.pickup ? 'pickup' : 'drop', st: planned, cid: planned.pickup || planned.drop, plan: null}, true) : null}
-        {planned ? <Text style={o.plannedNote}>Syns i planen {whenText(planned.tEarliest || planned.tLatest) || 'den dagen'}. Ring, SMS och Navigera fungerar redan nu.</Text> : null}
+        {planned ? plannedCard(planned) : null}
+        {planned ? <Text style={o.plannedNote}>Syns i planen {when(planned.pick || planned.drop) || 'den dagen'}. Ring, SMS och Navigera fungerar redan nu.</Text> : null}
       </Sheet>
     </View>
   );
@@ -454,6 +515,12 @@ const o = themed(() => StyleSheet.create({
   rowEta: {color: C.dim, fontSize: 14, fontWeight: '800'},
   allDoneBox: {alignItems: 'center', gap: 10, marginTop: 40},
   allDone: {color: C.dim, fontSize: 15, textAlign: 'center'},
+  leg: {marginTop: 14},
+  legWhen: {color: C.ink, fontSize: 14, fontWeight: '800'},
+  legNav: {width: 34, height: 34, borderRadius: 17, backgroundColor: C.panel2, alignItems: 'center', justifyContent: 'center'},
+  legWho: {color: C.ink, fontSize: 19, fontWeight: '800', marginTop: 8},
+  codeChip: {flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', backgroundColor: C.accent, borderRadius: 6, paddingHorizontal: 9, paddingVertical: 5, marginTop: 8},
+  codeTxt: {color: C.onAccent, fontSize: 13.5, fontWeight: '800', letterSpacing: 0.5},
   plannedNote: {color: C.faint, fontSize: 12, textAlign: 'center', marginTop: 4, marginBottom: 6, lineHeight: 17},
   backDrive: {flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'center', paddingVertical: 8, marginBottom: 4},
   backDriveTxt: {color: C.dim, fontSize: 13, fontWeight: '700'},
