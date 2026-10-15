@@ -4,11 +4,11 @@
  */
 import React, {useState} from 'react';
 import {FlatList, Linking, Pressable, StyleSheet, Text, View} from 'react-native';
-import {C} from './theme';
+import {C, prettyPhone, whenText} from './theme';
 import {Sheet} from './parts';
 
 const dial = (n: string) => Linking.openURL(`tel:${n.replace(/[^0-9+]/g, '')}`).catch(() => {});
-const pretty = (n: string) => n.replace(/^(0[1-9]0|08|0[1-9]\d)(\d{2,3})(\d{2})(\d{2})$/, '$1-$2 $3 $4');
+const pretty = prettyPhone;
 
 export type NewOrder = {cid: string; pick: any; drop: any; state?: 'sending' | 'failed'};
 
@@ -39,7 +39,7 @@ export default function NewOrdersView({orders, onAccept, onReject}: {orders: New
                 <View style={{flex: 1}}>
                   <Text style={n.who}>{p.who || '—'}</Text>
                   <Text style={n.adr}>{[p.adr, p.area].filter(Boolean).join(', ')}</Text>
-                  <Text style={n.time}>{[p.earliest && `Tidigast ${p.earliest}`, p.deadline && `Senast ${p.deadline}`].filter(Boolean).join('  ·  ') || 'Ingen tid angiven'}</Text>
+                  <Text style={n.time}>{[p.tEarliest && `Tidigast ${whenText(p.tEarliest)}`, p.tLatest && `Senast ${whenText(p.tLatest)}`].filter(Boolean).join('  ·  ') || 'Ingen tid angiven'}</Text>
                 </View>
               </View>
               <View style={n.leg}>
@@ -47,7 +47,7 @@ export default function NewOrdersView({orders, onAccept, onReject}: {orders: New
                 <View style={{flex: 1}}>
                   <Text style={n.who}>{d.who || '—'}</Text>
                   <Text style={n.adr}>{[d.adr, d.area].filter(Boolean).join(', ')}</Text>
-                  <Text style={n.time}>{[d.earliest && `Tidigast ${d.earliest}`, d.deadline && `Senast ${d.deadline}`].filter(Boolean).join('  ·  ') || 'Ingen tid angiven'}</Text>
+                  <Text style={n.time}>{[d.tEarliest && `Tidigast ${whenText(d.tEarliest)}`, d.tLatest && `Senast ${whenText(d.tLatest)}`].filter(Boolean).join('  ·  ') || 'Ingen tid angiven'}</Text>
                 </View>
               </View>
               {!!info && (

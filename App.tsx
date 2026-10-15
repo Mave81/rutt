@@ -9,9 +9,9 @@ import {
   FlatList, ActivityIndicator, ScrollView, Keyboard, Share, Vibration, NativeModules, PermissionsAndroid, Platform,
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
-import {C, hhmm} from './src/ui/theme';
+import {C, hhmm, isFutureDay} from './src/ui/theme';
 import {Sheet} from './src/ui/parts';
-import OrdersView from './src/ui/OrdersView';
+import OrdersView, {DoneView} from './src/ui/OrdersView';
 import SignScreen from './src/ui/SignScreen';
 import NewOrdersView from './src/ui/NewOrdersView';
 import {loadJSON, saveJSON, ORDERS_KEY, NAMES_KEY, companyKey, rememberName} from './src/store';
@@ -27,7 +27,7 @@ import computeRoute, {slotWhere} from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '15 okt · GPS';
+const BUILD = '15 okt · flikar som Opter';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -100,7 +100,7 @@ export default function App(): React.JSX.Element {
 
 function AppInner(): React.JSX.Element {
   const [step, setStep] = useState<'login' | 'pick' | 'route'>('login');
-  const [tab, setTab] = useState<'nytt' | 'plan' | 'last' | 'chat'>('plan');
+  const [tab, setTab] = useState<'nytt' | 'plan' | 'klart' | 'last' | 'chat'>('plan');
   const [msgs, setMsgs] = useState<any[]>([]);
   const [msgText, setMsgText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -156,24 +156,39 @@ function AppInner(): React.JSX.Element {
   );
 
   const fullSrc: any = orders.stops.length ? orders : demo ? DEMO : null;
-  // Nya ordrar (ej accepterade i Opter) ligger i "Nytt" och räknas inte in i rutten.
-  const isNewCid = (cid: string) => {
-    if (!fullSrc) return false;
+  // ---- Var hör varje order hemma? Opters regler (live.tab) + dina tryck i RUTT ----
+  const cidsAll: string[] = useMemo(() => (fullSrc ? [...new Set(fullSrc.stops.map((s: any) => String(s.pickup || s.drop)))] as string[] : []), [fullSrc]);
+  const legs = (cid: string) => ({pick: fullSrc.stops.find((s: any) => String(s.pickup) === cid), drop: fullSrc.stops.find((s: any) => String(s.drop) === cid)});
+  const classOf = (cid: string): 'new' | 'todo' | 'done' | 'hidden' => {
     const o = ost[cid] || {};
-    if (o.acceptedAt || o.rejectedAt) return false;
-    return fullSrc.stops.some((s: any) => (s.pickup === cid || s.drop === cid) && s.live && s.live.isNew);
+    if (o.rejectedAt) return 'hidden';
+    const {pick, drop} = legs(cid);
+    const L = (pick && pick.live) || (drop && drop.live);
+    const t0 = L ? L.tab : 'todo'; // demo: allt är att göra
+    if (o.doneAt) return 'done';
+    if (t0 === 'new' || t0 === 'revoked') return o.acceptedAt ? 'todo' : 'new';
+    return t0;
   };
-  const rejected = (cid: string) => !!(ost[cid] && ost[cid].rejectedAt);
-  const newOrders = useMemo(() => {
-    if (!fullSrc) return [];
-    const cids = [...new Set(fullSrc.stops.map((s: any) => s.pickup || s.drop))] as string[];
-    return cids.filter(isNewCid).map(cid => ({cid, pick: fullSrc.stops.find((s: any) => s.pickup === cid), drop: fullSrc.stops.find((s: any) => s.drop === cid), state: newState[cid]}));
-  }, [fullSrc, ost, newState]);
-  const src: any = useMemo(() => {
-    if (!fullSrc) return null;
-    const hide = new Set(newOrders.map((o: any) => o.cid));
-    return {cargo: fullSrc.cargo, stops: fullSrc.stops.filter((s: any) => { const c = s.pickup || s.drop; return !hide.has(c) && !rejected(c); })};
-  }, [fullSrc, newOrders, ost]);
+  const cls = useMemo(() => { const m: Record<string, string> = {}; for (const c of cidsAll) m[c] = classOf(c); return m; }, [cidsAll, ost, fullSrc]);
+  const newOrders = useMemo(() => cidsAll.filter(c => cls[c] === 'new').map(cid => ({cid, ...legs(cid), state: newState[cid]})), [cidsAll, cls, newState]);
+  const doneOrders = useMemo(() => cidsAll.filter(c => cls[c] === 'done').map(cid => {
+    const {pick, drop} = legs(cid); const st = drop || pick || {}; const o = ost[cid] || {}; const L = st.live || {};
+    return {cid, who: st.who, adr: st.adr, area: st.area, orderNo: st.orderNo, doneAt: o.doneAt || L.doneAt || null, pod: o.pod, damages: o.damages && o.damages.length,
+      sync: o.sync && o.sync.unload, byOpter: !o.doneAt, rejected: /nekad/i.test(String(L.cur || ''))};
+  }).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)), [cidsAll, cls, ost]);
+  // Dagens plan: "att göra"-ordrar. Steg som ska göras en senare dag läggs under "Senare dagar".
+  const {src, later} = useMemo(() => {
+    if (!fullSrc) return {src: null as any, later: [] as any[]};
+    const keep: any[] = [], lat: any[] = [];
+    for (const c of cidsAll) {
+      if (cls[c] !== 'todo') continue;
+      const {pick, drop} = legs(c);
+      if (pick && isFutureDay(pick.tEarliest)) { lat.push(pick); if (drop) lat.push(drop); continue; }
+      if (pick) keep.push(pick);
+      if (drop) { if (isFutureDay(drop.tEarliest)) lat.push(drop); else keep.push(drop); }
+    }
+    return {src: {cargo: fullSrc.cargo, stops: keep}, later: lat};
+  }, [fullSrc, cidsAll, cls]);
   const live = !demo && orders.stops.length > 0; // skarpt läge = riktiga jobb inloggade
   // Står ordern redan som Lastad i Opter (t.ex. satt i Opter Driver)?
   const serverLoaded = (s: any) => !!(s.live && s.live.loadSt && s.live.curId === s.live.loadSt.id);
@@ -194,7 +209,7 @@ function AppInner(): React.JSX.Element {
     }
     if (gpsRoutePos && Date.now() - gpsRoutePos.time < 10 * 60000) cur = {lat: gpsRoutePos.lat, lng: gpsRoutePos.lng};
     const anyDone = Object.keys(ost).length > 0;
-    const now = src === DEMO && !anyDone ? new Date(new Date().setHours(6, 0, 0, 0)).getTime() : Date.now();
+    const now = fullSrc === DEMO && !anyDone ? new Date(new Date().setHours(6, 0, 0, 0)).getTime() : Date.now();
     try {
       return computeRoute(stops, src.cargo, {...START, cur}, now);
     } catch (e: any) {
@@ -207,7 +222,7 @@ function AppInner(): React.JSX.Element {
   useEffect(() => { loadJSON(NAMES_KEY, {}).then(n => setNames(n || {})); }, []);
   useEffect(() => {
     if (!src) return;
-    const key = ORDERS_KEY(src === DEMO);
+    const key = ORDERS_KEY(fullSrc === DEMO);
     if (ostLoaded.current === key) return;
     ostLoaded.current = key;
     loadJSON(key, {}).then(v => setOst(v || {}));
@@ -260,8 +275,8 @@ function AppInner(): React.JSX.Element {
   }
   function retrySync(cid: string) {
     const o = ost[cid] || {};
-    const pick = src && src.stops.find((s: any) => s.pickup === cid);
-    const drop = src && src.stops.find((s: any) => s.drop === cid);
+    const pick = fullSrc && fullSrc.stops.find((s: any) => String(s.pickup) === String(cid));
+    const drop = fullSrc && fullSrc.stops.find((s: any) => String(s.drop) === String(cid));
     if (o.doneAt && drop) sendUnload(drop, podMem.current[cid] || o.pod || {});
     else if (o.loadedAt && pick) sendLoad(pick);
   }
@@ -547,27 +562,31 @@ function AppInner(): React.JSX.Element {
 
       {step === 'route' && !busy && (
         <View style={{flex: 1}}>
-          <View style={s.tabs}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{flexGrow: 0}} contentContainerStyle={s.tabs}>
             <Pressable onPress={() => setTab('nytt')} style={[s.tabBtn, tab === 'nytt' && s.tabOn, newOrders.length > 0 && tab !== 'nytt' && s.tabAlert]}>
               <Text style={[s.tabTxt, tab === 'nytt' && s.tabTxtOn, newOrders.length > 0 && tab !== 'nytt' && {color: C.onAccent}]}>Nytt{newOrders.length ? `  ${newOrders.length}` : ''}</Text>
             </Pressable>
             <Pressable onPress={() => setTab('plan')} style={[s.tabBtn, tab === 'plan' && s.tabOn]}><Text style={[s.tabTxt, tab === 'plan' && s.tabTxtOn]}>Plan</Text></Pressable>
+            <Pressable onPress={() => setTab('klart')} style={[s.tabBtn, tab === 'klart' && s.tabOn]}>
+              <Text style={[s.tabTxt, tab === 'klart' && s.tabTxtOn]}>Klart{doneOrders.length ? `  ${doneOrders.length}` : ''}</Text>
+            </Pressable>
             <Pressable onPress={() => setTab('last')} style={[s.tabBtn, tab === 'last' && s.tabOn]}><Text style={[s.tabTxt, tab === 'last' && s.tabTxtOn]}>Last</Text></Pressable>
             <Pressable onPress={openChat} style={[s.tabBtn, tab === 'chat' && s.tabOn]}>
               <Text style={[s.tabTxt, tab === 'chat' && s.tabTxtOn]}>Chatt{unread ? `  ${unread}` : ''}</Text>
             </Pressable>
-          </View>
+          </ScrollView>
 
+          {tab === 'klart' && <DoneView done={doneOrders} onRetry={retrySync} />}
           {tab === 'nytt' && <NewOrdersView orders={newOrders} onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={(o: any) => setOrderStatus(o, 'reject')} />}
 
-          {tab !== 'chat' && tab !== 'nytt' && (
+          {(tab === 'plan' || tab === 'last') && (
             <Pressable style={s.workBar} onPress={() => setWorkSheet(true)}>
               <View style={[s.workDot, work === 'igång' ? {backgroundColor: C.accent2} : work === 'slut' ? {backgroundColor: C.dim} : {backgroundColor: C.accent}]} />
               <Text style={s.workTxt}>{work === 'igång' ? 'Arbetspass igång' : work === 'rast' ? 'På rast' : work === 'lunch' ? 'På lunch' : 'Pass avslutat'}</Text>
               <Text style={s.workAction}>Rast / lunch ›</Text>
             </Pressable>
           )}
-          {tab !== 'chat' && tab !== 'nytt' && live && (
+          {(tab === 'plan' || tab === 'last') && live && (
             <Pressable style={s.gpsRow} onPress={() => setDiag(true)}>
               <View style={[s.workDot, {width: 7, height: 7, backgroundColor: gps.state === 'ok' ? C.accent2 : gps.state === 'nekad' || gps.state === 'fel' ? C.bad : gps.state === 'av' ? C.faint : C.accent}]} />
               <Text style={[s.gpsTxt, (gps.state === 'nekad' || gps.state === 'fel') && {color: C.bad}]}>
@@ -578,7 +597,7 @@ function AppInner(): React.JSX.Element {
             </Pressable>
           )}
 
-          {tab !== 'chat' && tab !== 'nytt' && !orders.stops.length && !demo && (
+          {(tab === 'plan' || tab === 'last') && !orders.stops.length && !demo && (
             <View style={s.emptyBox}>
               <Text style={s.empty}>Inga aktiva jobb just nu.</Text>
               {!demo && <Pressable style={s.ghost} onPress={() => setDemo(true)}><Text style={s.ghostTxt}>Visa demo så du ser planen</Text></Pressable>}
@@ -586,11 +605,11 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any) => setSignStop(st)} onExtra={onExtra} onAvised={onAvised} onRetry={retrySync} live={live} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any) => setSignStop(st)} onExtra={onExtra} onAvised={onAvised} onRetry={retrySync} live={live} later={later} />
           )}
           {tab === 'last' && route && !(route as any).error && <LastView route={route} cargo={src.cargo} />}
           {tab === 'chat' && <ChatView msgs={chatList} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} onRetry={deliver} />}
-          {tab !== 'chat' && tab !== 'nytt' && route && (route as any).error && <Text style={s.err}>Optimeringsfel: {(route as any).error}</Text>}
+          {(tab === 'plan' || tab === 'last') && route && (route as any).error && <Text style={s.err}>Optimeringsfel: {(route as any).error}</Text>}
         </View>
       )}
 

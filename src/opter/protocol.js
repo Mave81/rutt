@@ -48,6 +48,9 @@ const F = {
   Address: { 2: 'line1', 3: 'line2', 4: 'line3', 5: 'company', 6: 'street', 7: 'streetNo', 8: 'zip', 9: 'city', 11: 'entreCode', 12: 'phone', 16: 'driverMessage', 17: 'info', 18: 'lng', 19: 'lat' },
   Resource: { 1: 'name', 2: 'shortId', 3: 'externalId' },
   Shipment: {
+    1: 'consignmentParent', 14: 'orderDate', 15: 'shipmentDate', 60: 'locked', 66: 'revoked', 67: 'revokedConfirmed', 80: 'isConsignment',
+    124: 'latestDelDT', 125: 'latestDelDateTTY', 126: 'latestDelTimeTTY', 127: 'earliestDelDT', 128: 'earliestDelDateTTY', 129: 'earliestDelTimeTTY',
+    130: 'latestPickDT', 131: 'latestPickDateTTY', 132: 'latestPickTimeTTY', 133: 'earliestPickDT', 134: 'earliestPickDateTTY', 135: 'earliestPickTimeTTY',
     2: 'adrFrom', 3: 'adrTo', 11: 'shsId', 16: 'earliestPickup', 17: 'latestPickup',
     18: 'earliestDelivery', 19: 'latestDelivery', 20: 'customer',
     24: 'serviceType', 43: 'weight', 51: 'packages', 53: 'message',
@@ -396,10 +399,17 @@ function extractPhones(text) {
     let name = '', firm = '';
     for (let i = words.length - 1; i >= 0; i--) {
       const w = words[i], lw = w.toLowerCase().replace(/[^a-zåäöé]/g, '');
+      if (/^\d/.test(w)) break;            // ett husnummer/siffra – leta aldrig förbi den
       if (!lw) continue;
-      if (/^\d/.test(w)) break;
       if (STOP.has(lw)) { continue; }
-      if (/^[A-ZÅÄÖ]/.test(w)) { name = w.replace(/[^A-Za-zÅÄÖåäöé-]/g, ''); 
+      if (/^[A-ZÅÄÖ]/.test(w)) { name = w.replace(/[^A-Za-zÅÄÖåäöé-]/g, '');
+        // flerordsnamn: "Edströms Logistik", "Cafe Nero"
+        for (let k = i - 1, n = 0; k >= 0 && n < 2; k--, n++) {
+          const pw = words[k], plw = pw.toLowerCase().replace(/[^a-zåäöé]/g, '');
+          if (!/^[A-ZÅÄÖ]/.test(pw) || STOP.has(plw) || /[.!?:;]$/.test(pw)) break;
+          name = pw.replace(/[^A-Za-zÅÄÖåäöé-]/g, '') + ' ' + name;
+        }
+
         const pi = words.slice(i + 1).findIndex(x => x.toLowerCase() === 'på');
         if (pi >= 0 && words[i + 2 + pi]) firm = words[i + 2 + pi].replace(/[^A-Za-zÅÄÖåäöé-]/g, '');
         break; }
@@ -430,6 +440,18 @@ function avisering(text) {
   return {min: h.min, who: who ? {label: who.label, num: who.num} : null};
 }
 
+/* ---- Tider som Opter visar dem ----
+ * Datum+tid-fältet gäller bara om dess tidstyp (TTY) inte är 0 (Fallback = inte satt).
+ * Returnerar {hhmm, date:'YYYY-MM-DD'|null, ms} eller null.
+ */
+const ymd = (d) => { const p = new Intl.DateTimeFormat('sv-SE', {year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Europe/Stockholm'}).formatToParts(d); const g = (k) => (p.find(x => x.type === k) || {}).value; return `${g('year')}-${g('month')}-${g('day')}`; };
+function optTime(dt, dateTTY, timeTTY) {
+  if (!(dt instanceof Date) || isNaN(dt)) return null;
+  const hasDate = !!dateTTY, hasTime = !!timeTTY;
+  if (!hasDate && !hasTime) return null;
+  return {hhmm: hasTime ? hhmm(dt) : null, date: ymd(dt), hasDate, ms: dt.getTime()};
+}
+
 /* ---- Opter-rader → rutt {cargo, stops} ---- */
 const hhmm = (d) => d ? new Intl.DateTimeFormat('sv-SE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Stockholm' }).format(d) : null;
 function toRutt(decoded) {
@@ -444,6 +466,10 @@ function toRutt(decoded) {
   // Orderns egna statusar och kvittenstyper (ligger som underrader i orderns block).
   const belongs = (r, shiId) => (r.columns.shiId === shiId) || (r.parent && r.parent.table === 'Shipment' && r.parent.key.xxxId === shiId);
   const defPods = decoded.rows.filter(r => r.table === 'DefaultPodType' && r.columns.active !== false).map(r => ({id: r.key.xxxId, kind: 'dpt', ...r.columns}));
+
+  // Serverinställningar som styr vilka ordrar Opter Driver visar.
+  const sTrue = (name) => /^(true|1|ja|yes)$/i.test(String(setting(decoded, name, 'false')));
+  const showCons = sTrue('IncludeConsignments'), showConsChildren = sTrue('IncludeConsignmentChildren');
 
   const cargo = {}; const stops = []; let n = 0;
   const line = (a) => a ? [a.street, a.streetNo].filter(Boolean).join(' ') : '';
@@ -473,8 +499,15 @@ function toRutt(decoded) {
     const loadSt = byName(/^lastad$/i) || statuses.find(s => s.pickup && !s.delivery) || null;
     const unloadSt = byName(/^lossad$/i) || statuses.find(s => s.delivery || s.completed) || null;
     const curSt = statuses.find(s => s.id === c.shsId) || null;
-    // Som Opter: ny tills aktuell status har accepterad/hämtning/leverans/klar/nekad.
-    const isNew = !curSt || !(curSt.accepted || curSt.pickup || curSt.delivery || curSt.completed || curSt.rejected);
+    // Exakt som Opter (Shipment.isUserAttentionRequired / ShipmentListFragment):
+    //  ingen aktuell status → visas inte som ny; ny = aktuell status saknar accepterad/hämtning/leverans/klar/nekad.
+    const revoked = !!c.revoked, revokedOpen = revoked && !c.revokedConfirmed;
+    const isNew = !!curSt && !revoked && !(curSt.accepted || curSt.pickup || curSt.delivery || curSt.completed || curSt.rejected);
+    const tab = !curSt ? 'hidden' : revokedOpen ? 'revoked' : isNew ? 'new' : revoked ? 'hidden'
+      : (curSt.delivery || curSt.rejected || curSt.completed) ? 'done' : (curSt.accepted || curSt.pickup) ? 'todo' : 'hidden';
+    // Samlingsordrar och deras delordrar döljs som i Opter (om inte servern säger annat).
+    const consHidden = (c.isConsignment && !showCons) || (c.consignmentParent && !showConsChildren);
+    const tabF = consHidden ? 'hidden' : tab;
     const acceptSt = statuses.find(s => s.accepted && !s.rejected) || byName(/bekräftad|accepterad/i) || null;
     const rejectSt = statuses.find(s => s.rejected) || byName(/nekad/i) || null;
     const serverDone = !!(curSt && (curSt.completed || (curSt.delivery && !curSt.pickup)));
@@ -482,7 +515,10 @@ function toRutt(decoded) {
     const podList = spts.length ? spts : defPods;
     const podType = podList.find(pt => /lossad/i.test(String(pt.name || ''))) || podList.find(pt => pt.isDefault) || podList[0] || null;
     const live = { key: r.key, hdr: r.hdr, shiId, offId: r.key.offId, statuses: statuses.map(s => ({id: s.id, name: s.name})), cur: curSt ? curSt.name : null, curId: c.shsId || 0,
-      isNew, serverDone, acceptSt: acceptSt ? {id: acceptSt.id, name: acceptSt.name} : null, rejectSt: rejectSt ? {id: rejectSt.id, name: rejectSt.name} : null,
+      isNew: isNew && !consHidden, tab: tabF, revoked: revokedOpen, consignment: !!c.isConsignment || !!c.consignmentParent, locked: !!c.locked,
+      shipDate: (c.shipmentDate instanceof Date && c.shipmentDate.getFullYear() > 2001) ? ymd(c.shipmentDate) : (c.orderDate instanceof Date && c.orderDate.getFullYear() > 2001 ? ymd(c.orderDate) : null),
+      doneAt: (() => { const logs = decoded.rows.filter(x => x.table === 'ShipmentStatusLog' && belongs(x, shiId) && x.columns.shsId === c.shsId && x.columns.logTime instanceof Date); return logs.length ? Math.max(...logs.map(x => x.columns.logTime.getTime())) : null; })(),
+      serverDone, acceptSt: acceptSt ? {id: acceptSt.id, name: acceptSt.name} : null, rejectSt: rejectSt ? {id: rejectSt.id, name: rejectSt.name} : null,
       loadSt: loadSt ? {id: loadSt.id, name: loadSt.name} : null, unloadSt: unloadSt ? {id: unloadSt.id, name: unloadSt.name, pod: !!unloadSt.pod} : null,
       podType: podType ? {id: podType.id, kind: podType.kind, name: podType.name} : null };
     const pkgText = pkgs.map(p => [p.quantity ? p.quantity + ' st' : '', p.packageType, p.text].filter(Boolean).join(' ')).filter(Boolean).join(', ');
@@ -490,13 +526,22 @@ function toRutt(decoded) {
     const req = { name: !!c.podNameReq, sig: !!c.podSigReq, pic: !!c.podPicReq, comment: !!(c.podCommentReq || c.podRemarkReq) };
     if (podType) { req.name = req.name || !!podType.nameReq; req.sig = req.sig || !!podType.sigReq; req.pic = req.pic || !!podType.picReq; req.comment = req.comment || !!(podType.commentReq || podType.remarkReq); }
     // All fritext för ordern, i den ordning Opter visar den, utan dubbletter.
-    const info = [...new Set([c.extMessage, c.message, c.senderInstr, c.driverMessage].map(x => String(x || '').trim()).filter(Boolean))].join('\n\n');
+    // Fritext: utan rader som bara är fraktsedel-/ordernumret och utan upprepade rader.
+    const junk = new Set([String(c.freightBill || ''), String(c.shipmentId || ''), String(c.orderId || '')].filter(Boolean));
+    const seenL = new Set();
+    const info = [c.extMessage, c.message, c.senderInstr, c.driverMessage].map(x => String(x || '')).join('\n')
+      .split('\n').map(l => l.replace(/\s+$/, '')).filter(l => { const k = l.trim(); if (!k) return true; if (junk.has(k)) return false; if (seenL.has(k)) return false; seenL.add(k); return true; })
+      .join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    const tEP = optTime(c.earliestPickDT, c.earliestPickDateTTY, c.earliestPickTimeTTY);
+    const tLP = optTime(c.latestPickDT, c.latestPickDateTTY, c.latestPickTimeTTY);
+    const tED = optTime(c.earliestDelDT, c.earliestDelDateTTY, c.earliestDelTimeTTY);
+    const tLD = optTime(c.latestDelDT, c.latestDelDateTTY, c.latestDelTimeTTY);
     const textTel = extractPhones(info);
     const kolli = Number(c.packages) || pkgs.reduce((s, p) => s + (Number(p.quantity) || 0), 0) || 0;
     const common = { live, shiId, orderNo: c.orderId || null, freightBill: c.freightBill || c.shipmentId || null, customer: c.customer || '', service: c.serviceType || '', kg, pal, kolli, goods: pkgText, info, km: Number(c.distanceKm) || null, minutes: Number(c.timeMinutes) || null, msg: '', driverMsg: '' };
     const merge = (a, b) => { const seen = new Set(a.map(x => x.num)); return [...a, ...b.filter(x => !seen.has(x.num) && seen.add(x.num))]; };
-    stops.push({ ...common, verb: 'Hämta', adr: line(from), area: from && from.city ? from.city : '', zip: from && from.zip || '', lat: from && from.lat != null ? Number(from.lat) : null, lng: from && from.lng != null ? Number(from.lng) : null, pickup: cid, deadline: hhmm(c.latestPickup), earliest: hhmm(c.earliestPickup), who: (from && from.company) || c.customer || '', contact: contact(from), tel: merge(phones(from, c, 'from'), textTel), code: from && from.entreCode || '', adrMsg: [from && from.driverMessage, from && from.info].filter(Boolean).join(' · '), ref: c.senderRef || '', note: [c.serviceType, kg ? kg + ' kg' : '', c.message].filter(Boolean).join(' · ') });
-    stops.push({ ...common, verb: 'Lämna', adr: line(to), area: to && to.city ? to.city : '', zip: to && to.zip || '', lat: to && to.lat != null ? Number(to.lat) : null, lng: to && to.lng != null ? Number(to.lng) : null, drop: cid, deadline: hhmm(c.latestDelivery), earliest: hhmm(c.earliestDelivery), who: (to && to.company) || c.orderReceiver || c.customer || '', contact: contact(to), tel: merge(phones(to, c, 'to'), textTel), avise: avisering(info), code: to && to.entreCode || '', adrMsg: [to && to.driverMessage, to && to.info].filter(Boolean).join(' · '), ref: c.receiverRef || '', req, suggest: [...new Set(sugBy[shiId] || [])], note: [kg ? kg + ' kg' : '', c.driverMessage].filter(Boolean).join(' · ') });
+    stops.push({ ...common, verb: 'Hämta', adr: line(from), area: from && from.city ? from.city : '', zip: from && from.zip || '', lat: from && from.lat != null ? Number(from.lat) : null, lng: from && from.lng != null ? Number(from.lng) : null, pickup: cid, deadline: tLP && tLP.hhmm, dlDate: tLP && tLP.date, earliest: tEP && tEP.hhmm, openDate: tEP && tEP.date, tEarliest: tEP, tLatest: tLP, who: (from && from.company) || c.customer || '', contact: contact(from), tel: merge(phones(from, c, 'from'), textTel), code: from && from.entreCode || '', adrMsg: [from && from.driverMessage, from && from.info].filter(Boolean).join(' · '), ref: c.senderRef || '', note: [c.serviceType, kg ? kg + ' kg' : '', c.message].filter(Boolean).join(' · ') });
+    stops.push({ ...common, verb: 'Lämna', adr: line(to), area: to && to.city ? to.city : '', zip: to && to.zip || '', lat: to && to.lat != null ? Number(to.lat) : null, lng: to && to.lng != null ? Number(to.lng) : null, drop: cid, deadline: tLD && tLD.hhmm, dlDate: tLD && tLD.date, earliest: tED && tED.hhmm, openDate: tED && tED.date, tEarliest: tED, tLatest: tLD, who: (to && to.company) || c.orderReceiver || c.customer || '', contact: contact(to), tel: merge(phones(to, c, 'to'), textTel), avise: avisering(info), code: to && to.entreCode || '', adrMsg: [to && to.driverMessage, to && to.info].filter(Boolean).join(' · '), ref: c.receiverRef || '', req, suggest: [...new Set(sugBy[shiId] || [])], note: [kg ? kg + ' kg' : '', c.driverMessage].filter(Boolean).join(' · ') });
   }
   return { cargo, stops };
 }
@@ -504,5 +549,5 @@ function toRutt(decoded) {
 module.exports = {
   MessageType, Table, DT, RST, F, frame, unframe, decodeSync, ticksToDate,
   logonPayload, parseLogon, resourceList, encodeStartWork, encodeWorkStatus, toRutt,
-  messageList, encodeMarkRead, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering, encodeShipmentStatus, signatureString, encodePosition, setting,
+  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering, encodeShipmentStatus, signatureString, encodePosition, setting,
 };

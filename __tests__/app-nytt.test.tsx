@@ -19,7 +19,7 @@ function payload() {
     status(600, 'Meddelad', 1, []), status(601, 'Bekräftad', 2, [Bo(4, true), Bo(10, true)]), status(602, 'Nekad', 3, [Bo(5, true), Bo(10, true)]),
     status(603, 'Lastad', 4, [Bo(6, true)]), status(604, 'Lossad', 5, [Bo(7, true), Bo(8, true)]), en('Shipment')]);
   return Buffer.concat([adr(11, 'BDX', 'Transportvägen 7', 'STOCKHOLM'), adr(12, '""', 'Nytorgsgatan 33', 'Stockholm'), adr(13, 'Stena', 'Metallvägen 60', 'Rosersberg'), adr(14, 'Distribution', 'Rudsjöterassen', 'Haninge'),
-    ship(226825, 600, 11, 12), ship(226815, 601, 13, 14), Buffer.from([3]), Buffer.alloc(16)]);
+    ship(226825, 600, 11, 12), ship(226815, 601, 13, 14), ship(226188, 604, 13, 14), Buffer.from([3]), Buffer.alloc(16)]);
 }
 const mockRutt = P.toRutt(P.decodeSync(payload()));
 jest.mock('../src/opter/OpterClient', () => jest.fn().mockImplementation(() => ({
@@ -52,6 +52,8 @@ test('logga in → tryck Nytt → acceptera', async () => {
   console.log('NYTT-FLIKEN:', texts(r).slice(0, 600));
   await press(r, /^Acceptera$/);
   console.log('EFTER ACCEPT:', texts(r).slice(0, 300));
+  await press(r, /^Klart/);
+  console.log('KLART-FLIKEN:', texts(r).slice(0, 300));
   await press(r, /^Plan$/);
   await press(r, /^Last$/);
   await press(r, /^Chatt/);

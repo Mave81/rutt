@@ -8,7 +8,7 @@
  */
 import React, {useMemo, useState} from 'react';
 import {FlatList, Linking, Pressable, StyleSheet, Text, View} from 'react-native';
-import {C, hhmm} from './theme';
+import {C, hhmm, prettyPhone, whenText} from './theme';
 import {Sheet} from './parts';
 import {MoreSheet} from './OrderExtras';
 
@@ -19,7 +19,7 @@ function navigate(st: any) {
   Linking.openURL(`google.navigation:q=${q}`).catch(() => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${q}`).catch(() => {}));
 }
 const dial = (num: string) => Linking.openURL(`tel:${num}`).catch(() => {});
-const prettyNum = (n: string) => n.replace(/^(0[1-9]0|08|0[1-9]\d)(\d{2,3})(\d{2})(\d{2})$/, '$1-$2 $3 $4');
+const prettyNum = prettyPhone;
 
 // Hur långt sändningen till Opter kommit.
 const SYNC_TXT: Record<string, string> = {
@@ -38,16 +38,15 @@ function SyncLine({state, label, onRetry}: {state?: string; label: string; onRet
   );
 }
 
-export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onExtra, onAvised, onRetry, live}: {
+export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onExtra, onAvised, onRetry, live, later = []}: {
   route: any; cargo: any; ost: Record<string, any>; allStops: any[];
   onLoaded: (st: any) => void; onUnload: (st: any) => void;
   onExtra: (cid: string, kind: 'extras' | 'damage' | 'kolli', data: any) => void;
   onAvised: (cid: string) => void;
-  onRetry: (cid: string) => void; live: boolean;
+  onRetry: (cid: string) => void; live: boolean; later?: any[];
 }) {
   const [open, setOpen] = useState<string | null>(null); // utfälld rad (cid) utöver NÄSTA
   const [callStop, setCallStop] = useState<any>(null);
-  const [showDone, setShowDone] = useState(false);
   const [more, setMore] = useState<{st: any; cid: string} | null>(null);
   const [fullInfo, setFullInfo] = useState<Record<string, boolean>>({});
   const now = Date.now();
@@ -58,19 +57,14 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     const dropAt: Record<string, any> = {};
     order.forEach((s: any, i: number) => { if (s.drop) dropAt[s.drop] = {eta: prow[i] && prow[i].eta, area: s.area || s.adr}; });
     const out: Row[] = [];
+    // Lämningen visas så fort hämtningen är avklarad – i RUTT eller i Opter (då finns ingen hämtning kvar i rutten).
+    const pendingPick = new Set(order.filter((s: any) => s.pickup).map((s: any) => String(s.pickup)));
     order.forEach((s: any, i: number) => {
       if (s.pickup) out.push({kind: 'pickup', st: s, cid: s.pickup, plan: prow[i], dropLater: dropAt[s.pickup] || null});
-      else if (s.drop && ost[s.drop] && ost[s.drop].loadedAt) out.push({kind: 'drop', st: s, cid: s.drop, plan: prow[i]});
+      else if (s.drop && !pendingPick.has(String(s.drop))) out.push({kind: 'drop', st: s, cid: s.drop, plan: prow[i]});
     });
     return out;
   }, [route, ost]);
-
-  const done = useMemo(() => {
-    return Object.keys(ost)
-      .filter(cid => ost[cid] && ost[cid].doneAt)
-      .map(cid => ({cid, o: ost[cid], st: allStops.find(s => s.drop === cid) || {}}))
-      .sort((a, b) => b.o.doneAt - a.o.doneAt);
-  }, [ost, allStops]);
 
   const p = route.plan;
   const left = rows.length;
@@ -128,7 +122,8 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         {!pickup && <SyncLine state={os.sync && os.sync.load} label="Lastad" onRetry={() => onRetry(cid)} />}
         {!pickup && !(os.sync && os.sync.load) && st.live && st.live.cur && /lastad/i.test(st.live.cur) && <Text style={[o.sync, {color: C.accent2}]}>✓ Lastad i Opter</Text>}
         <Text style={o.meta}>
-          {st.deadline ? `Senast ${st.deadline}` : 'Ingen sluttid'}
+          {st.tEarliest && (st.tEarliest.date !== (st.tLatest && st.tLatest.date) || !st.tLatest) && st.tEarliest.hhmm ? `Tidigast ${whenText(st.tEarliest)}  ·  ` : ''}
+          {st.tLatest ? `Senast ${whenText(st.tLatest)}` : 'Ingen sluttid'}
           {late ? `  ·  ${late} min sen` : ''}
           {plan && plan.early ? `  ·  öppnar om ${plan.early} min` : ''}
           {plan && plan.leg && plan.leg.km ? `  ·  ${plan.leg.km.toFixed(1)} km dit` : ''}
@@ -197,21 +192,15 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         contentContainerStyle={{paddingHorizontal: 14, paddingBottom: 30}}
         ListEmptyComponent={<Text style={o.allDone}>Allt är klart för idag. Snyggt jobbat!</Text>}
         ListFooterComponent={
-          done.length ? (
-            <View style={{marginTop: 10}}>
-              <Pressable style={o.doneHead} onPress={() => setShowDone(!showDone)}>
-                <Text style={o.doneHeadTxt}>Klart  ·  {done.length}</Text>
-                <Text style={o.doneChev}>{showDone ? 'Dölj' : 'Visa'}</Text>
-              </Pressable>
-              {showDone && done.map(({cid, o: os, st}) => (
-                <View key={cid} style={o.doneRow}>
-                  <Text style={o.doneCheck}>✓</Text>
+          later.length ? (
+            <View style={{marginTop: 14}}>
+              <Text style={o.laterHead}>Senare dagar  ·  {later.length}</Text>
+              {later.map((st: any, i: number) => (
+                <View key={i} style={o.laterRow}>
+                  <Text style={[o.laterVerb, {color: st.pickup ? C.accent : C.accent2}]}>{st.pickup ? 'HÄMTA' : 'LÄMNA'}</Text>
                   <View style={{flex: 1}}>
-                    <Text style={o.doneWho} numberOfLines={1}>{st.who || os.who || cid}</Text>
-                    <Text style={o.doneMeta} numberOfLines={1}>
-                      Lossad {hhmm(new Date(os.doneAt))}{os.pod && os.pod.name ? `  ·  ${os.pod.name}` : ''}{os.pod && os.pod.photos && os.pod.photos.length ? `  ·  ${os.pod.photos.length} foto` : ''}{os.damages && os.damages.length ? `  ·  avvikelse` : ''}
-                    </Text>
-                    <SyncLine state={os.sync && os.sync.unload} label="Lossad" onRetry={() => onRetry(cid)} />
+                    <Text style={o.doneWho} numberOfLines={1}>{st.who || '—'}</Text>
+                    <Text style={o.doneMeta} numberOfLines={1}>{[st.adr, st.area].filter(Boolean).join(', ')}  ·  {whenText(st.tEarliest || st.tLatest)}</Text>
                   </View>
                 </View>
               ))}
@@ -281,6 +270,9 @@ const o = StyleSheet.create({
   doneHeadTxt: {color: C.dim, fontSize: 14, fontWeight: '800', letterSpacing: 0.5},
   doneChev: {color: C.accent, fontSize: 13, fontWeight: '700'},
   doneRow: {flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 4, borderTopColor: C.edge, borderTopWidth: StyleSheet.hairlineWidth, opacity: 0.85},
+  doneCard: {backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, borderRadius: 14, padding: 14, marginBottom: 10},
+  doneTime: {color: C.dim, fontSize: 14, fontWeight: '800'},
+  doneWho2: {color: C.ink, fontSize: 17, fontWeight: '800', marginTop: 6},
   doneCheck: {color: C.accent2, fontSize: 16, fontWeight: '900', width: 18, textAlign: 'center'},
   doneWho: {color: C.ink, fontSize: 15, fontWeight: '700'},
   doneMeta: {color: C.faint, fontSize: 12, marginTop: 1},
@@ -299,7 +291,40 @@ const o = StyleSheet.create({
   info: {backgroundColor: C.noteBg, borderRadius: 10, paddingVertical: 9, paddingHorizontal: 11, marginTop: 10},
   infoTxt: {color: C.noteInk, fontSize: 13.5, lineHeight: 19},
   infoMore: {color: C.accent, fontSize: 12, fontWeight: '700', marginTop: 5},
+  laterHead: {color: C.dim, fontSize: 14, fontWeight: '800', paddingVertical: 10, paddingHorizontal: 4},
+  laterRow: {flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 4, borderTopColor: C.edge, borderTopWidth: StyleSheet.hairlineWidth},
+  laterVerb: {fontSize: 11, fontWeight: '900', letterSpacing: 1.2, width: 50},
   callRow: {backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 14, marginTop: 10},
   callLabel: {color: C.dim, fontSize: 12, fontWeight: '600'},
   callNum: {color: C.ink, fontSize: 18, fontWeight: '800', marginTop: 2},
 });
+
+
+/* ---- Klart: allt som är lossat (i RUTT eller i Opter) ---- */
+export function DoneView({done, onRetry}: {done: any[]; onRetry: (cid: string) => void}) {
+  return (
+    <FlatList
+      data={done}
+      keyExtractor={d => String(d.cid)}
+      contentContainerStyle={{paddingHorizontal: 14, paddingBottom: 30}}
+      ListEmptyComponent={<Text style={o.allDone}>Inget klart än idag.</Text>}
+      renderItem={({item: d}) => (
+        <View style={o.doneCard}>
+          <View style={o.headRow}>
+            <Text style={o.doneCheck}>✓</Text>
+            <Text style={[o.verbTxt, {color: C.accent2}]}>{d.rejected ? 'NEKAD' : 'LOSSAD'}</Text>
+            <View style={{flex: 1}} />
+            <Text style={o.doneTime}>{d.doneAt ? hhmm(new Date(d.doneAt)) : ''}</Text>
+          </View>
+          <Text style={o.doneWho2} numberOfLines={1}>{d.who || '—'}</Text>
+          <Text style={o.doneMeta} numberOfLines={1}>{[d.adr, d.area].filter(Boolean).join(', ')}{d.orderNo ? `  ·  Order ${d.orderNo}` : ''}</Text>
+          {(d.pod && (d.pod.name || (d.pod.photos && d.pod.photos.length))) ? (
+            <Text style={o.doneMeta}>{d.pod.name ? `Mottagare: ${d.pod.name}` : ''}{d.pod.photos && d.pod.photos.length ? `  ·  ${d.pod.photos.length} foto` : ''}{d.damages ? '  ·  avvikelse' : ''}</Text>
+          ) : null}
+          {d.byOpter && <Text style={o.doneMeta}>Klarmarkerad i Opter</Text>}
+          <SyncLine state={d.sync} label="Lossad" onRetry={() => onRetry(d.cid)} />
+        </View>
+      )}
+    />
+  );
+}

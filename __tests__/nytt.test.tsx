@@ -31,3 +31,15 @@ test('Plan med riktig orderdata renderas', () => {
   ReactTestRenderer.act(() => { r = ReactTestRenderer.create(W(<OrdersView route={route} cargo={{X: {pal: 1}}} ost={{}} allStops={stops} onLoaded={() => {}} onUnload={() => {}} onExtra={() => {}} onAvised={() => {}} onRetry={() => {}} live={false} />)); });
   expect(r.toJSON()).toBeTruthy();
 });
+
+test('Order Lastad i Opter visas som LOSSA', () => {
+  const pk = {...pick, done: true, lat: 59.3, lng: 18.0, live: {tab: 'todo'}};
+  const dr = {...drop, lat: 59.31, lng: 18.08, live: {tab: 'todo'}};
+  const route = computeRoute([pk, dr], {X: {name: 'Bud', pal: 1, kg: 0}}, {lat: 59.24, lng: 18.22, end: '15:00'}, Date.now());
+  let r: any;
+  ReactTestRenderer.act(() => { r = ReactTestRenderer.create(W(<OrdersView route={route} cargo={{X: {pal: 1}}} ost={{}} allStops={[pk, dr]} onLoaded={() => {}} onUnload={() => {}} onExtra={() => {}} onAvised={() => {}} onRetry={() => {}} live={false} />)); });
+  const {Text} = require('react-native');
+  const txt = r.root.findAll((n: any) => n.type === Text).map((n: any) => [].concat(n.props.children).filter((x: any) => typeof x === 'string').join('')).join(' | ');
+  expect(txt).toContain('LOSSA');
+  expect(txt).toContain('Nytorgsgatan');
+});
