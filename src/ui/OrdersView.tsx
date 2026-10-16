@@ -259,8 +259,8 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     return (
       <View style={o.hero}>
         <View style={o.headRow}>
-          <Bi n="calendar-event" size={15} color={C.dim} />
-          <Text style={o.num}>Planerad order{any.orderNo ? ` ${any.orderNo}` : ''}</Text>
+          <Bi n={g.today ? "box-seam" : "calendar-event"} size={15} color={C.dim} />
+          <Text style={o.num}>{g.today ? 'Hela ordern' : 'Planerad order'}{any.orderNo ? ` ${any.orderNo}` : ''}</Text>
         </View>
         {leg(g.pick, true)}
         {leg(g.drop, false)}
@@ -277,7 +277,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     const pickup = kind === 'pickup';
     const late = plan && plan.late;
     const os = ost[cid] || {};
-    const dropStop = pickup ? allStops.find((s: any) => s.drop === cid) : st;
+    const dropStop = pickup ? (allStops.find((s: any) => s.drop === cid) || later.find((s: any) => s.drop === cid)) : st; // lämningen kan ligga en senare dag
     const av = dropStop && dropStop.avise;
     const dropEta = pickup ? item.dropLater && item.dropLater.eta : plan && plan.eta;
     const aviseAt = av && dropEta ? new Date(new Date(dropEta).getTime() - av.min * 60000) : null;
@@ -362,15 +362,16 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         )}
         {(!!goods || !!orderLine) && <Text style={o.orderLine} numberOfLines={2}>{[goods, orderLine].filter(Boolean).join('  ·  ')}</Text>}
         {pickup && dropStop && (
-          <View style={o.thenRow}>
+          <Pressable style={o.thenRow} onPress={() => setPlanned({cid, pick: st, drop: dropStop, today: true})}>
             <View style={[o.rowIco, {backgroundColor: C.okSoft, width: 30, height: 30}]}><Bi n="check-circle-fill" size={13} color={C.accent2} /></View>
             <View style={{flex: 1, minWidth: 0}}>
               <Text style={o.thenLbl}>Lämnas sen{item.dropLater && item.dropLater.eta ? ` ca ${hhmm(item.dropLater.eta)}` : dropStop.tLatest ? ` · senast ${whenText(dropStop.tLatest)}` : ''}</Text>
               <Text style={o.thenWho} numberOfLines={1}>{dropStop.who || '—'}</Text>
-              <Text style={o.rowMeta} numberOfLines={1}>{[dropStop.adr, dropStop.area].filter(Boolean).join(', ')}</Text>
+              <Text style={o.rowMeta} numberOfLines={1}>{[dropStop.adr, dropStop.area].filter(Boolean).join(', ')}{(dropStop.tel || []).length ? `  ·  ${(dropStop.tel || []).length} kontakt${(dropStop.tel || []).length > 1 ? 'er' : ''}` : ''}</Text>
+              <Text style={o.thenMore}>Visa mottagaren</Text>
             </View>
             <Pressable hitSlop={8} style={o.thenNav} onPress={() => setNavFor(dropStop)}><Bi n="cursor-fill" size={15} color={C.ink} /></Pressable>
-          </View>
+          </Pressable>
         )}
 
         {peopleRows(st)}
@@ -477,7 +478,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
       {onReorder ? <ReorderSheet open={reorder} items={orderItems} manual={!!route.manual} onClose={() => setReorder(false)} onSave={keys => { setReorder(false); setFocus(null); onReorder(keys); }} /> : null}
       <Sheet open={!!planned} onClose={() => setPlanned(null)} scroll>
         {planned ? plannedCard(planned) : null}
-        {planned ? <Text style={o.plannedNote}>Planerad {when(planned.pick || planned.drop) || 'senare'} – men det är du som bestämmer. Kan du lasta tidigare drar du bara Lastad.</Text> : null}
+        {planned && !planned.today ? <Text style={o.plannedNote}>Planerad {when(planned.pick || planned.drop) || 'senare'} – men det är du som bestämmer. Kan du lasta tidigare drar du bara Lastad.</Text> : null}
       </Sheet>
     </View>
   );
@@ -564,6 +565,7 @@ const o = themed(() => StyleSheet.create({
   thenRow: {flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12, backgroundColor: C.panel2, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 10},
   thenLbl: {color: C.faint, fontSize: 11.5, fontWeight: '700'},
   thenWho: {color: C.ink, fontSize: 14.5, fontWeight: '700', marginTop: 1},
+  thenMore: {color: C.accentInk, fontSize: 12, fontWeight: '700', marginTop: 3},
   thenNav: {width: 36, height: 36, borderRadius: 18, backgroundColor: C.panel, alignItems: 'center', justifyContent: 'center'},
   signBtn: {flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10, backgroundColor: C.peopleSoft, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 14},
   signTxt: {color: C.people, fontSize: 15, fontWeight: '800', flex: 1},

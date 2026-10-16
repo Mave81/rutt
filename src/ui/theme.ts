@@ -4,7 +4,7 @@
 export type Mode = 'dark' | 'light';
 export const DARK = {
   mode: 'dark' as Mode,
-  bg: '#000000', panel: '#1B1B1B', panel2: '#242527', edge: '#2a2b2e',
+  bg: '#121212', panel: '#1B1B1B', panel2: '#242527', edge: '#2a2b2e',
   ink: '#FFFFFF', dim: '#a8a9ad', faint: '#6e6f73',
   accent: '#FF9117', accentInk: '#FF9117', accentSoft: '#2b1d0c', onAccent: '#000000',
   accent2: '#2d9c72', okSoft: '#0f2a20',
