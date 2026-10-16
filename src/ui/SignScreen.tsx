@@ -18,6 +18,8 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
   const {kb, lift} = useKeyboardLift();
   const [sig, setSig] = useState<SigData | null>(null);
   const [drawing, setDrawing] = useState(false);
+  // Hur kvitteras det? Signatur är standard. Bara namn, eller foto när kunden inte är på plats.
+  const [mode, setMode] = useState<'sig' | 'namn' | 'foto'>('sig');
   const [fs, setFs] = useState(false); // helskärm för kunden
   const [fsSig, setFsSig] = useState(false); // signaturen kom från helskärm
   const [padKey, setPadKey] = useState(0);
@@ -32,7 +34,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
   const [subId, setSubId] = useState(0);
 
   useEffect(() => {
-    setSig(null); setFsSig(false); setName(''); setPhotos([]); setComment(''); setComment2('');
+    setSig(null); setFsSig(false); setMode('sig'); setName(''); setPhotos([]); setComment(''); setComment2('');
     setTypeId((stop && stop.pod && stop.pod.defaultId) || 0); setSubId(0);
     setExtras((saved && saved.extras) || {}); setExtOpen(!!(saved && saved.extras && Object.keys(saved.extras).length));
     setKolli((saved && saved.kolli) || (stop && stop.kolli) || 0);
@@ -62,10 +64,13 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
 
   if (!stop) return null;
 
+  const group: any[] = (stop.group && stop.group.length > 1) ? stop.group : [];
+  const officeSig = !!req.sig; // kontoret kräver signatur → bara signatur går
   const missing: string[] = [];
-  if (req.sig && !sig) missing.push('signatur');
-  if (req.name && name.trim().length < 2) missing.push('namnförtydligande');
-  if (req.pic && photos.length === 0) missing.push('foto');
+  if ((mode === 'sig' || officeSig) && !sig) missing.push(officeSig && mode !== 'sig' ? 'signatur (kontoret kräver)' : 'signatur');
+  if ((req.name || mode === 'namn') && name.trim().length < 2) missing.push('namnförtydligande');
+  if (mode === 'foto' && name.trim().length < 2) missing.push('vem som bad om fotot');
+  if ((req.pic || mode === 'foto') && photos.length === 0) missing.push('foto');
   if (req.remark && comment.trim().length === 0) missing.push('anmärkning');
   if (req.comment && comment2.trim().length === 0) missing.push((fields.commentName || 'kommentar').toLowerCase());
   if (req.sub && !sub) missing.push('undertyp');
@@ -76,7 +81,9 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
   }
   function done() {
     if (!ok) return;
-    onDone({name: name.trim(), sig, photos, extras, kolli, comment: comment.trim(), comment2: comment2.trim(), typeId: type ? type.id : 0, subId: sub ? sub.id : 0, typeName: eff ? eff.name : '', at: Date.now()});
+    const autoNote = mode === 'foto' ? `Kund ej på plats – foto taget på begäran av ${name.trim()}` : '';
+    const cm = comment.trim() || autoNote;
+    onDone({mode, name: name.trim(), sig: mode === 'sig' || officeSig ? sig : null, photos, extras, kolli: group.length ? null : kolli, comment: cm, comment2: comment2.trim(), typeId: type ? type.id : 0, subId: sub ? sub.id : 0, typeName: eff ? eff.name : '', at: Date.now()});
   }
 
   return (
@@ -114,9 +121,50 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
             </>
           )}
 
+          {group.length > 0 && (
+            <View style={st.grp}>
+              <Text style={st.grpHead}>Samma kvittens för {group.length} order</Text>
+              {group.map((g: any) => <Text key={g.drop} style={st.grpTxt} numberOfLines={1}>• {[g.orderNo && `Order ${g.orderNo}`, g.kolli && `${g.kolli} kolli`].filter(Boolean).join(' · ') || g.who}</Text>)}
+            </View>
+          )}
+
+          <View style={st.secHead}><Text style={st.sec}>Hur kvitteras det?</Text></View>
+          <View style={st.modes}>
+            {([['sig', 'Signatur', 'pen-fill'], ['namn', 'Bara namn', 'input-cursor-text'], ['foto', 'Kund ej på plats', 'camera-fill']] as const).map(([k, label, icon]) => {
+              const off = officeSig && k !== 'sig';
+              return (
+                <Pressable key={k} disabled={off} style={[st.mode, mode === k && st.modeOn, off && {opacity: 0.35}]} onPress={() => setMode(k)}>
+                  <Bi n={icon} size={16} color={mode === k ? C.onAccent : C.dim} />
+                  <Text style={[st.modeTxt, mode === k && {color: C.onAccent}]}>{label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {officeSig && <Text style={st.hint2}>Kontoret kräver signatur på den här ordern.</Text>}
+
+          {mode === 'foto' && (
+            <>
+              <Pressable style={st.bigCam} onPress={() => addPhoto(true)}>
+                <Bi n="camera-fill" size={26} color={C.onAccent} />
+                <Text style={st.bigCamTxt}>{photos.length ? `Ta ett till foto  (${photos.length})` : 'Ta foto på godset'}</Text>
+              </Pressable>
+              {photos.length > 0 && (
+                <View style={[st.photoRow, {marginTop: 10}]}>
+                  {photos.map((ph, i) => (
+                    <View key={i} style={st.photoBox}>
+                      <Image source={{uri: ph.uri}} style={st.photoImg} />
+                      <Pressable style={st.photoX} hitSlop={8} onPress={() => setPhotos(x => x.filter((_, j) => j !== i))}><Text style={st.photoXTxt}>×</Text></Pressable>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </>
+          )}
+
+          {mode === 'sig' && <>
           <View style={st.secHead}>
             <Text style={st.sec}>Mottagarens underskrift</Text>
-            {req.sig ? <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View> : null}
+            <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View>
           </View>
           <Pressable style={st.fsBtn} onPress={() => setFs(true)}>
             <Bi n="pen-fill" size={16} color={C.people} />
@@ -132,16 +180,17 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
           ) : (
             <SignaturePad key={padKey} height={padH} onChange={setSig} onDrawing={setDrawing} hint="Signera på linjen" />
           )}
+          </>}
 
           <View style={st.secHead}>
-            <Text style={st.sec}>Namnförtydligande</Text>
-            {req.name ? <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View> : null}
+            <Text style={st.sec}>{mode === 'foto' ? 'Vem bad om fotot?' : 'Namnförtydligande'}</Text>
+            {req.name || mode !== 'sig' ? <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View> : null}
           </View>
           <TextInput
             style={st.nameInput}
             value={name}
             onChangeText={setName}
-            placeholder="Mottagarens namn"
+            placeholder={mode === 'foto' ? 'Namn på den som bad om foto' : 'Mottagarens namn'}
             placeholderTextColor={C.faint}
             autoCapitalize="words"
             autoCorrect={false}
@@ -160,6 +209,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
             </>
           )}
 
+          {mode !== 'foto' && <>
           <View style={st.secHead}>
             <Text style={st.sec}>Foto{photos.length ? `  ${photos.length}/${MAX_PHOTOS}` : ''}</Text>
             {req.pic ? <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View> : null}
@@ -178,8 +228,9 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
               </>
             )}
           </View>
+          </>}
 
-          {fields.count !== false && <><View style={st.secHead}><Text style={st.sec}>Antal kollin</Text>{stop.kolli ? <Text style={st.hint}>Ordern: {stop.kolli}</Text> : null}</View>
+          {fields.count !== false && !group.length && <><View style={st.secHead}><Text style={st.sec}>Antal kollin</Text>{stop.kolli ? <Text style={st.hint}>Ordern: {stop.kolli}</Text> : null}</View>
           <View style={st.kolliRow}>
             <Pressable style={st.kBtn} onPress={() => setKolli(k => Math.max(0, k - 1))}><Text style={st.kBtnTxt}>−</Text></Pressable>
             <Text style={[st.kVal, stop.kolli && kolli !== stop.kolli ? {color: C.accentInk} : null]}>{kolli}</Text>
@@ -263,6 +314,16 @@ const st = themed(() => StyleSheet.create({
   comment: {backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 12, color: C.ink, paddingHorizontal: 14, paddingVertical: 11, fontSize: 15, minHeight: 70, textAlignVertical: 'top'},
   bottom: {paddingHorizontal: 16, paddingTop: 10, backgroundColor: C.bg, borderTopColor: C.edge, borderTopWidth: StyleSheet.hairlineWidth},
   missing: {color: C.bad, fontSize: 13, fontWeight: '600', marginBottom: 8, textAlign: 'center'},
+  grp: {marginTop: 14, backgroundColor: C.panel, borderRadius: 12, padding: 12, gap: 4},
+  grpHead: {color: C.ink, fontSize: 14, fontWeight: '800', marginBottom: 2},
+  grpTxt: {color: C.dim, fontSize: 13},
+  modes: {flexDirection: 'row', gap: 6},
+  mode: {flex: 1, alignItems: 'center', gap: 4, backgroundColor: C.panel2, borderRadius: 10, paddingVertical: 11},
+  modeOn: {backgroundColor: C.accent},
+  modeTxt: {color: C.dim, fontSize: 12.5, fontWeight: '700'},
+  hint2: {color: C.faint, fontSize: 12, marginTop: 6},
+  bigCam: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 14, backgroundColor: C.accent, borderRadius: 14, paddingVertical: 20},
+  bigCamTxt: {color: C.onAccent, fontSize: 17, fontWeight: '800'},
   fsBtn: {flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.peopleSoft, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, marginBottom: 10},
   fsTxt: {color: C.people, fontSize: 14.5, fontWeight: '800', flex: 1},
   redo: {color: C.accentInk, fontSize: 14, fontWeight: '700'},

@@ -29,7 +29,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '16 okt · hela ordern + #121212';
+const BUILD = '16 okt · flera order + kvittenssätt';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -360,12 +360,17 @@ function AppInner(): React.JSX.Element {
     } catch (e) { setNewState(s => ({...s, [o.cid]: 'failed'})); }
   }
 
-  function onLoaded(st: any) {
-    const cid = st.pickup;
-    const prev = ost[cid];
-    setOst(o => ({...o, [cid]: {...(o[cid] || {}), loadedAt: Date.now()}}));
-    sendLoad(st);
-    flash(`Lastad · ${st.who || 'order'}`, () => { cancelSend(cid, 'load'); setOst(o => { const n = {...o}; if (prev) n[cid] = prev; else delete n[cid]; return n; }); });
+  // Lastad – en eller flera order på samma ställe på en gång. Ångra tar tillbaka alla.
+  function onLoaded(st: any, more: any[] = []) {
+    const list = [st, ...more];
+    const prev: Record<string, any> = {};
+    for (const x of list) prev[x.pickup] = ost[x.pickup];
+    setOst(o => { const n = {...o}; for (const x of list) n[x.pickup] = {...(o[x.pickup] || {}), loadedAt: Date.now()}; return n; });
+    list.forEach(x => sendLoad(x));
+    flash(list.length > 1 ? `Lastad · ${list.length} order hos ${st.who || ''}` : `Lastad · ${st.who || 'order'}`, () => {
+      list.forEach(x => cancelSend(x.pickup, 'load'));
+      setOst(o => { const n = {...o}; for (const x of list) { if (prev[x.pickup]) n[x.pickup] = prev[x.pickup]; else delete n[x.pickup]; } return n; });
+    });
   }
   // Tillägg / avvikelse / ändrat kolliantal från "Mer".
   function onExtra(cid: string, kind: 'extras' | 'damage' | 'kolli', data: any) {
@@ -380,15 +385,31 @@ function AppInner(): React.JSX.Element {
   function onAvised(cid: string) { setOst(o => ({...o, [cid]: {...(o[cid] || {}), avisedAt: Date.now()}})); }
 
   // Lossad: kvittensen sparas, ordern flyttar till Klart, namnet minns till nästa gång.
-  function onSigned(st: any, pod: any) {
-    const cid = st.drop;
-    const prev = ost[cid];
+  // Lossad – samma kvittens (signatur/namn/foto) gäller alla order som lossas på stället. Kollin räknas per order.
+  function onSigned(st0: any, pod0: any) {
+    const list = st0.group && st0.group.length ? st0.group : [st0];
+    const many = list.length > 1;
+    const prev: Record<string, any> = {};
+    for (const x of list) prev[x.drop] = ost[x.drop];
     setSignStop(null);
-    setOst(o => ({...o, [cid]: {...(o[cid] || {}), who: st.who, loadedAt: (o[cid] && o[cid].loadedAt) || Date.now(), doneAt: Date.now(), extras: pod.extras || (o[cid] && o[cid].extras), kolli: pod.kolli, pod: {...pod, photos: (pod.photos || []).map((x: any) => ({uri: x.uri}))}}}));
-    podMem.current[cid] = pod;
-    if (pod.name) setNames(n => { const nn = rememberName(n, st.who, pod.name); saveJSON(NAMES_KEY, nn); return nn; });
-    sendUnload(st, pod);
-    flash(`Lossad · ${st.who || 'order'}`, () => { cancelSend(cid, 'unload'); setOst(o => { const n = {...o}; if (prev) n[cid] = prev; else delete n[cid]; return n; }); });
+    setOst(o => {
+      const n = {...o};
+      for (const st of list) {
+        const cid = st.drop, pod = many ? {...pod0, kolli: st.kolli != null ? st.kolli : null} : pod0;
+        n[cid] = {...(o[cid] || {}), who: st.who, loadedAt: (o[cid] && o[cid].loadedAt) || Date.now(), doneAt: Date.now(), extras: pod.extras || (o[cid] && o[cid].extras), kolli: pod.kolli, pod: {...pod, photos: (pod.photos || []).map((x: any) => ({uri: x.uri}))}};
+      }
+      return n;
+    });
+    for (const st of list) {
+      const pod = many ? {...pod0, kolli: st.kolli != null ? st.kolli : null} : pod0;
+      podMem.current[st.drop] = pod;
+      sendUnload(st, pod);
+    }
+    if (pod0.name) setNames(n => { const nn = rememberName(n, st0.who, pod0.name); saveJSON(NAMES_KEY, nn); return nn; });
+    flash(many ? `Lossad · ${list.length} order hos ${st0.who || ''}` : `Lossad · ${st0.who || 'order'}`, () => {
+      list.forEach((x: any) => cancelSend(x.drop, 'unload'));
+      setOst(o => { const n = {...o}; for (const x of list) { if (prev[x.drop]) n[x.drop] = prev[x.drop]; else delete n[x.drop]; } return n; });
+    });
   }
 
   // Inloggningen sparas på telefonen efter första gången: server, användare, lösenord och ditt namn.
@@ -704,7 +725,7 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any) => setSignStop(st)} onExtra={onExtra} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any, more: any[] = []) => setSignStop(more.length ? {...st, group: [st, ...more]} : st)} onExtra={onExtra} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} />
           )}
           {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} />}
           {tab === 'chat' && <ChatView msgs={chatList} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} onRetry={deliver} />}

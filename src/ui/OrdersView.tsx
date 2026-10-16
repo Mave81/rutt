@@ -85,6 +85,15 @@ function uniqNotes(list: any[], goods: string) {
   for (const n of list) { const k = norm(n); if (!k || seen.has(k) || (g && g.includes(k))) continue; seen.add(k); out.push(String(n)); }
   return out;
 }
+// Samma ställe: inom ~60 m när båda har koordinater, annars samma gatuadress + ort.
+const normAdr = (s: any) => `${String(s.adr || '').toLowerCase().replace(/\s+/g, '')}|${String(s.zip || s.area || '').toLowerCase().replace(/\s+/g, '')}`;
+export function samePlace(a: any, b: any) {
+  if (a.lat != null && b.lat != null && a.lng != null && b.lng != null) {
+    const dx = (a.lng - b.lng) * 111320 * Math.cos((a.lat * Math.PI) / 180), dy = (a.lat - b.lat) * 110540;
+    if (Math.hypot(dx, dy) < 60) return true;
+  }
+  return !!a.adr && normAdr(a) === normAdr(b);
+}
 const initials = (s: string) => String(s || '').replace(/\(.*?\)/g, '').trim().split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
 
 // Hur långt sändningen till Opter kommit.
@@ -142,7 +151,7 @@ function SmsSheet({to, onClose}: {to: {name: string; num: string; who: string} |
 
 export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onExtra, onAvised, onRetry, live, later = [], onReorder}: {
   route: any; cargo: any; ost: Record<string, any>; allStops: any[];
-  onLoaded: (st: any) => void; onUnload: (st: any) => void;
+  onLoaded: (st: any, more?: any[]) => void; onUnload: (st: any, more?: any[]) => void;
   onExtra: (cid: string, kind: 'extras' | 'damage' | 'kolli', data: any) => void;
   onAvised: (cid: string) => void;
   onRetry: (cid: string) => void; live: boolean; later?: any[]; onReorder?: (keys: string[] | null) => void;
@@ -153,6 +162,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   const [more, setMore] = useState<{st: any; cid: string} | null>(null);
   const [fullInfo, setFullInfo] = useState<Record<string, boolean>>({});
   const [reorder, setReorder] = useState(false);
+  const [unsel, setUnsel] = useState<Record<string, boolean>>({}); // order på samma ställe som du bockat ur
   const [navFor, setNavFor] = useState<any>(null);
   const [planned, setPlanned] = useState<any>(null); // order för senare dag, visas som kort i ett blad // visa planen fast bilen rullar
   const now = Date.now();
@@ -273,6 +283,10 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   // ---- Stoppkortet ----
   const heroCard = (item: Row, planned?: boolean) => {
     const {st, kind, cid, plan} = item;
+    // Fler order av samma slag på samma ställe (t.ex. 3 hämtningar hos Flügger) – bockade som standard.
+    const same = planned ? [] : rows.filter(r => r !== item && r.kind === kind && samePlace(r.st, st));
+    const chosen = same.filter(r => !unsel[r.kind + r.cid]);
+    const orderTxt = (x: any) => [x.orderNo ? `Order ${x.orderNo}` : '', x.kolli ? `${x.kolli} kolli` : '', (cargo[x.pickup || x.drop] || {}).goods || ''].filter(Boolean).join(' · ') || (x.who || 'Order');
     const c = cargo[cid] || {};
     const pickup = kind === 'pickup';
     const late = plan && plan.late;
@@ -377,14 +391,32 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         {peopleRows(st)}
 
         <NavButton st={st} leg={plan && plan.leg} onMore={() => setNavFor(st)} />
+        {!planned && same.length > 0 && (
+          <View style={o.grp}>
+            <Text style={o.grpHead}>{same.length + 1} order på samma ställe – {pickup ? 'lastas' : 'lossas'} tillsammans</Text>
+            <View style={o.grpRow}>
+              <Bi n="check-square-fill" size={18} color={C.accent2} />
+              <Text style={o.grpTxt} numberOfLines={1}>{orderTxt(st)}</Text>
+            </View>
+            {same.map(r => {
+              const k = r.kind + r.cid, on = !unsel[k];
+              return (
+                <Pressable key={k} style={o.grpRow} hitSlop={4} onPress={() => setUnsel(u => ({...u, [k]: on}))}>
+                  <Bi n={on ? 'check-square-fill' : 'square'} size={18} color={on ? C.accent2 : C.faint} />
+                  <Text style={[o.grpTxt, !on && {color: C.faint}]} numberOfLines={1}>{orderTxt(r.st)}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
         {!planned && !pickup && (
-          <Pressable style={o.signBtn} onPress={() => { setFocus(null); onUnload(st); }}>
+          <Pressable style={o.signBtn} onPress={() => { setFocus(null); onUnload(st, chosen.map(r => r.st)); }}>
             <Bi n="pen-fill" size={16} color={C.people} />
-            <Text style={o.signTxt}>Kunden signerar</Text>
-            <Text style={o.signSub}>{st.req && st.req.sig ? 'krävs' : 'valfritt'}</Text>
+            <Text style={o.signTxt}>Kvittens & signatur</Text>
+            <Text style={o.signSub}>{chosen.length ? `${chosen.length + 1} order` : 'signatur som standard'}</Text>
           </Pressable>
         )}
-        {!planned && <Slider key={kind + cid} label={pickup ? 'Dra för Lastad' : 'Dra för Lossad'} tone={pickup ? 'go' : 'ok'} onDone={() => { setFocus(null); if (pickup) onLoaded(st); else onUnload(st); }} />}
+        {!planned && <Slider key={kind + cid + chosen.length} label={(pickup ? 'Dra för Lastad' : 'Dra för Lossad') + (chosen.length ? ` · ${chosen.length + 1} order` : '')} tone={pickup ? 'go' : 'ok'} onDone={() => { setFocus(null); if (pickup) onLoaded(st, chosen.map(r => r.st)); else onUnload(st, chosen.map(r => r.st)); }} />}
         {focus && !planned ? (
           <Pressable hitSlop={10} onPress={() => setFocus(null)} style={{alignSelf: 'center', marginTop: 12}}>
             <Text style={o.link}>Tillbaka till nästa i ordningen</Text>
@@ -565,6 +597,10 @@ const o = themed(() => StyleSheet.create({
   thenRow: {flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12, backgroundColor: C.panel2, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 10},
   thenLbl: {color: C.faint, fontSize: 11.5, fontWeight: '700'},
   thenWho: {color: C.ink, fontSize: 14.5, fontWeight: '700', marginTop: 1},
+  grp: {marginTop: 12, backgroundColor: C.panel2, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 12, gap: 8},
+  grpHead: {color: C.dim, fontSize: 12.5, fontWeight: '800'},
+  grpRow: {flexDirection: 'row', alignItems: 'center', gap: 10},
+  grpTxt: {color: C.ink, fontSize: 14, fontWeight: '600', flex: 1},
   thenMore: {color: C.accentInk, fontSize: 12, fontWeight: '700', marginTop: 3},
   thenNav: {width: 36, height: 36, borderRadius: 18, backgroundColor: C.panel, alignItems: 'center', justifyContent: 'center'},
   signBtn: {flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10, backgroundColor: C.peopleSoft, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 14},
