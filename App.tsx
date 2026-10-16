@@ -29,7 +29,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '16 okt · avsändare + mottagare';
+const BUILD = '16 okt · B ett ställe i taget';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -182,7 +182,7 @@ function AppInner(): React.JSX.Element {
 
   const [resources, setResources] = useState<{resId: number; name: string}[]>([]);
   const [query, setQuery] = useState('');
-  const [orders, setOrders] = useState<{cargo: any; stops: any[]}>({cargo: {}, stops: []});
+  const [orders, setOrders] = useState<{cargo: any; stops: any[]; perm?: any}>({cargo: {}, stops: []});
 
   const filtered = useMemo(
     () => (query ? resources.filter(r => r.name.toLowerCase().includes(query.toLowerCase())) : resources),
@@ -289,6 +289,7 @@ function AppInner(): React.JSX.Element {
   // Lastad: raden byter till LOSSA och sorteras in i körordningen.
   // ---- Skicka status till Opter: väntar tills "Ångra" gått ut, sen exakt en gång + kontroll ----
   const sendTimers = useRef<Record<string, any>>({});
+  const sendChain = useRef<Promise<any>>(Promise.resolve());
   const setSync = (cid: string, step: 'load' | 'unload', state: string) =>
     setOst(o => ({...o, [cid]: {...(o[cid] || {}), sync: {...((o[cid] && o[cid].sync) || {}), [step]: state}}}));
   function queueSend(cid: string, step: 'load' | 'unload', run: () => Promise<any>) {
@@ -297,11 +298,14 @@ function AppInner(): React.JSX.Element {
     sendTimers.current[cid + step] = setTimeout(async () => {
       delete sendTimers.current[cid + step];
       setSync(cid, step, 'sending');
-      try {
-        const r = await run();
-        setSync(cid, step, r.confirmed ? (r.imageDropped ? 'ok-noimg' : 'ok') : 'unconfirmed');
-        if (r.rutt && r.rutt.stops && r.rutt.stops.length) setOrders(r.rutt);
-      } catch (e) { setSync(cid, step, 'failed'); }
+      // En sändning i taget mot Opter – 14 order på en gång köas i stället för att skickas samtidigt.
+      sendChain.current = sendChain.current.catch(() => {}).then(async () => {
+        try {
+          const r = await run();
+          setSync(cid, step, r.confirmed ? (r.imageDropped ? 'ok-noimg' : 'ok') : 'unconfirmed');
+          if (r.rutt && r.rutt.stops && r.rutt.stops.length) setOrders(r.rutt);
+        } catch (e) { setSync(cid, step, 'failed'); }
+      });
     }, 8200);
   }
   const cancelSend = (cid: string, step: string) => { if (sendTimers.current[cid + step]) { clearTimeout(sendTimers.current[cid + step]); delete sendTimers.current[cid + step]; } };
@@ -623,7 +627,7 @@ function AppInner(): React.JSX.Element {
   }, [tab, msgs, step]);
 
   const hour = new Date().getHours();
-  const hej = hour < 10 ? 'God morgon' : hour < 18 ? 'Hej' : 'God kväll';
+  const hej = hour < 10 ? 'Godmorgon' : hour < 18 ? 'Hej' : 'Godkväll';
   const title = step === 'login' ? (driverName ? `Välkommen ${driverName}` : 'Logga in mot Opter') : step === 'pick' ? 'Välj ditt namn' : tab === 'chat' ? 'Kontoret' : tab === 'last' ? 'Lastplan' : tab === 'klart' ? 'Klart idag' : tab === 'nytt' ? 'Nya order' : (driverName ? `${hej} ${driverName.split(' ')[0]}` : demo ? 'Demo' : 'Dina jobb');
 
   return (
@@ -725,7 +729,7 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any, more: any[] = []) => setSignStop(more.length ? {...st, group: [st, ...more]} : st)} onExtra={onExtra} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any, more: any[] = []) => setSignStop(more.length ? {...st, group: [st, ...more]} : st)} onExtra={onExtra} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} />
           )}
           {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} />}
           {tab === 'chat' && <ChatView msgs={chatList} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} onRetry={deliver} />}

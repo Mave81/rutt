@@ -65,7 +65,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
   if (!stop) return null;
 
   const group: any[] = (stop.group && stop.group.length > 1) ? stop.group : [];
-  const officeSig = !!req.sig; // kontoret kräver signatur → bara signatur går
+  const officeSig = !!req.sig || group.some((g: any) => g.req && g.req.sig); // kontoret kräver signatur (på någon av orderna) → bara signatur går, som Opter
   const missing: string[] = [];
   if ((mode === 'sig' || officeSig) && !sig) missing.push(officeSig && mode !== 'sig' ? 'signatur (kontoret kräver)' : 'signatur');
   if ((req.name || mode === 'namn') && name.trim().length < 2) missing.push('namnförtydligande');
@@ -124,7 +124,10 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
           {group.length > 0 && (
             <View style={st.grp}>
               <Text style={st.grpHead}>Samma kvittens för {group.length} order</Text>
-              {group.map((g: any) => <Text key={g.drop} style={st.grpTxt} numberOfLines={1}>• {[g.orderNo && `Order ${g.orderNo}`, g.kolli && `${g.kolli} kolli`].filter(Boolean).join(' · ') || g.who}</Text>)}
+              {group.map((g: any) => <Text key={g.drop} style={st.grpTxt} numberOfLines={1}>• {[g.who, g.orderNo && `Order ${g.orderNo}`, g.kolli && `${g.kolli} kolli`].filter(Boolean).join(' · ') || g.who}</Text>)}
+              {new Set(group.map((g: any) => String(g.who || '').toLowerCase())).size > 1 ? (
+                <Text style={[st.grpTxt, {color: C.bad, marginTop: 6}]}>Orderna har olika mottagare ({[...new Set(group.map((g: any) => g.who))].join(', ')}). Samma signatur sparas på alla – som i Opter Driver. Lossa hellre en mottagare i taget.</Text>
+              ) : null}
             </View>
           )}
 

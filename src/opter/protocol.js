@@ -581,7 +581,13 @@ function toRutt(decoded) {
     stops.push({ ...common, verb: 'Hämta', adr: line(from), area: from && from.city ? from.city : '', zip: from && from.zip || '', lat: from && from.lat != null ? Number(from.lat) : null, lng: from && from.lng != null ? Number(from.lng) : null, pickup: cid, deadline: tLP && tLP.hhmm, dlDate: tLP && tLP.date, earliest: tEP && tEP.hhmm, openDate: tEP && tEP.date, tEarliest: tEP, tLatest: tLP, who: placeName(from) || c.customer || '', customer: c.customer || '', orderedBy: c.orderReceiver || '', contact: contact(from), tel: merge(phones(from, c, 'from'), textTel), code: from && from.entreCode || '', adrMsg: [from && from.driverMessage, from && from.info].filter(Boolean).join(' · '), ref: c.senderRef || '', note: [c.serviceType, kg ? kg + ' kg' : '', c.message].filter(Boolean).join(' · ') });
     stops.push({ ...common, verb: 'Lämna', adr: line(to), area: to && to.city ? to.city : '', zip: to && to.zip || '', lat: to && to.lat != null ? Number(to.lat) : null, lng: to && to.lng != null ? Number(to.lng) : null, drop: cid, deadline: tLD && tLD.hhmm, dlDate: tLD && tLD.date, earliest: tED && tED.hhmm, openDate: tED && tED.date, tEarliest: tED, tLatest: tLD, who: placeName(to) || c.customer || '', customer: c.customer || '', orderedBy: c.orderReceiver || '', contact: contact(to), tel: merge(phones(to, c, 'to'), textTel), avise: avisering(info), code: to && to.entreCode || '', adrMsg: [to && to.driverMessage, to && to.info].filter(Boolean).join(' · '), ref: c.receiverRef || '', req, pod, suggest: [...new Set(sugBy[shiId] || [])], note: [kg ? kg + ' kg' : '', c.driverMessage].filter(Boolean).join(' · ') });
   }
-  return { cargo, stops };
+  // Kontorets behörigheter för flera order samtidigt (Opter Driver: Setting.Permission + "Permission", standard true).
+  const perm = {
+    multi: sBool('SetMultipleStatusPermission', true),
+    pickup: sBool('ManualStatusChangePickUpPermission', true),
+    delivery: sBool('ManualStatusChangeDeliveryPermission', true),
+  };
+  return { cargo, stops, perm };
 }
 
 module.exports = {
