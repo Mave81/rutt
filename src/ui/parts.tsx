@@ -2,7 +2,7 @@
  * Delade byggstenar: bottenblad, tangentbordslyft, signaturruta, foto.
  */
 import React, {useEffect, useRef, useState} from 'react';
-import {Keyboard, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {Dimensions, Keyboard, Modal, PanResponder, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {launchCamera, launchImageLibrary} from 'react-native-image-picker';
 import {C, themed} from './theme';
@@ -120,6 +120,42 @@ export function SignaturePad({height, onChange, onDrawing, hint = 'Signera här'
   );
 }
 
+// Förhandsvisning av en signatur (skalad till rutan).
+export function SigPreview({data, height = 120}: {data: SigData; height?: number}) {
+  const [w, setW] = useState(0);
+  const sx = data.w ? w / data.w : 1, sy = data.h ? height / data.h : 1, k = Math.min(sx, sy) || 1;
+  const ox = (w - data.w * k) / 2, oy = (height - data.h * k) / 2;
+  return (
+    <View style={[p.pad, {height}]} onLayout={e => setW(e.nativeEvent.layout.width)} pointerEvents="none">
+      {w > 0 && data.strokes.map((st, i) => <Segments key={i} stroke={st.map(q => ({x: q.x * k + ox, y: q.y * k + oy}))} w={2.6} />)}
+    </View>
+  );
+}
+
+// Helskärm: ge telefonen till kunden – stor yta, inget som kan skrollas bort.
+export function SignFullscreen({open, who, onCancel, onDone}: {open: boolean; who?: string; onCancel: () => void; onDone: (d: SigData) => void}) {
+  const insets = useSafeAreaInsets();
+  const [d, setD] = useState<SigData | null>(null);
+  const [key, setKey] = useState(0);
+  useEffect(() => { if (open) { setD(null); setKey(k => k + 1); } }, [open]);
+  const h = Math.round(Dimensions.get('window').height - insets.top - insets.bottom - 190);
+  return (
+    <Modal visible={open} animationType="fade" onRequestClose={onCancel} statusBarTranslucent>
+      <View style={[p.fsRoot, {paddingTop: insets.top + 10, paddingBottom: insets.bottom + 12}]}>
+        <Text style={p.fsTitle}>Signera här{who ? ` – ${who}` : ''}</Text>
+        <Text style={p.fsSub}>Skriv din underskrift med fingret</Text>
+        <View style={{flex: 1, marginTop: 12}}>
+          <SignaturePad key={key} height={Math.max(260, h)} onChange={setD} hint="Signera på linjen" />
+        </View>
+        <View style={p.fsBtns}>
+          <Pressable style={p.fsCancel} onPress={onCancel}><Text style={p.fsCancelTxt}>Avbryt</Text></Pressable>
+          <Pressable style={[p.fsDone, !d && {opacity: 0.4}]} disabled={!d} onPress={() => d && onDone(d)}><Text style={p.fsDoneTxt}>Klar</Text></Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 // ---- Foto ----
 export const MAX_PHOTOS = 6;
 export async function pickPhoto(fromCamera: boolean) {
@@ -141,6 +177,14 @@ const p = themed(() => StyleSheet.create({
   sigX: {position: 'absolute', left: 24, color: C.accentInk, fontSize: 26, fontWeight: '800'},
   sigUnder: {position: 'absolute', left: 24, color: C.faint, fontSize: 12, fontWeight: '600', letterSpacing: 1},
   sigHint: {position: 'absolute', left: 0, right: 0, textAlign: 'center', color: C.dim, fontSize: 20, fontWeight: '700'},
+  fsRoot: {flex: 1, backgroundColor: C.bg, paddingHorizontal: 14},
+  fsTitle: {color: C.ink, fontSize: 22, fontWeight: '800'},
+  fsSub: {color: C.dim, fontSize: 14, marginTop: 2},
+  fsBtns: {flexDirection: 'row', gap: 10, marginTop: 10},
+  fsCancel: {flex: 1, backgroundColor: C.panel2, borderRadius: 12, paddingVertical: 16, alignItems: 'center'},
+  fsCancelTxt: {color: C.ink, fontSize: 16, fontWeight: '700'},
+  fsDone: {flex: 2, backgroundColor: C.accent2, borderRadius: 12, paddingVertical: 16, alignItems: 'center'},
+  fsDoneTxt: {color: '#FFFFFF', fontSize: 17, fontWeight: '800'},
   clear: {alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 4},
   clearTxt: {color: C.accentInk, fontSize: 14, fontWeight: '700'},
 }));

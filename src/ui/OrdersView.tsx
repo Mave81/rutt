@@ -14,6 +14,7 @@ import {Sheet} from './parts';
 import {MoreSheet} from './OrderExtras';
 import {Bi} from './Bi';
 import Slider from './Slider';
+import ReorderSheet from './Reorder';
 import {loadJSON, saveJSON} from '../store';
 
 type Row = {kind: 'pickup' | 'drop'; st: any; cid: string; plan: any; dropLater?: {eta: Date | null; area: string} | null};
@@ -139,19 +140,19 @@ function SmsSheet({to, onClose}: {to: {name: string; num: string; who: string} |
   );
 }
 
-export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onExtra, onAvised, onRetry, live, later = [], speed = 0}: {
+export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onExtra, onAvised, onRetry, live, later = [], onReorder}: {
   route: any; cargo: any; ost: Record<string, any>; allStops: any[];
   onLoaded: (st: any) => void; onUnload: (st: any) => void;
   onExtra: (cid: string, kind: 'extras' | 'damage' | 'kolli', data: any) => void;
   onAvised: (cid: string) => void;
-  onRetry: (cid: string) => void; live: boolean; later?: any[]; speed?: number;
+  onRetry: (cid: string) => void; live: boolean; later?: any[]; onReorder?: (keys: string[] | null) => void;
 }) {
   const [focus, setFocus] = useState<string | null>(null); // annat stopp än NÄSTA valt som "nu"
   const [callStop, setCallStop] = useState<any>(null);
   const [sms, setSms] = useState<any>(null);
   const [more, setMore] = useState<{st: any; cid: string} | null>(null);
   const [fullInfo, setFullInfo] = useState<Record<string, boolean>>({});
-  const [peek, setPeek] = useState(false);
+  const [reorder, setReorder] = useState(false);
   const [navFor, setNavFor] = useState<any>(null);
   const [planned, setPlanned] = useState<any>(null); // order för senare dag, visas som kort i ett blad // visa planen fast bilen rullar
   const now = Date.now();
@@ -175,57 +176,13 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   const heroIdx = Math.max(0, focus ? rows.findIndex(r => r.kind + r.cid === focus) : 0);
   const hero = rows[heroIdx];
   const rest = rows.filter((_, i) => i !== heroIdx);
-  const driving = speed >= 10 && !peek && !!hero;
+  // Hela körordningen (även lossningar som väntar på sin hämtning) för "Ändra ordning".
+  const orderItems = useMemo(() => (route.order || []).map((s: any, i: number) => ({key: s.pickup ? 'p' + s.pickup : 'd' + s.drop, kind: s.pickup ? 'pickup' : 'drop', cid: s.pickup || s.drop, st: s, plan: (route.plan.rows || [])[i]})), [route]);
 
   function callFor(st: any) {
     const tel = st.tel || [];
     if (tel.length === 1) dial(tel[0].num);
     else if (tel.length > 1) setCallStop(st);
-  }
-
-  // ---- Kör-läge ----
-  if (driving) {
-    const {st, kind, plan} = hero;
-    const today = new Date(); const ymd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    const lat = st.tLatest && st.tLatest.hhmm && !(st.tLatest.date && st.tLatest.date !== ymd) ? st.tLatest.hhmm : null;
-    let mins: number | null = null;
-    if (lat) { const [h, m] = lat.split(':').map(Number); const d = new Date(); d.setHours(h, m, 0, 0); mins = Math.round((d.getTime() - now) / 60000); }
-    const etaMin = plan && plan.eta ? Math.max(0, Math.round((new Date(plan.eta).getTime() - now) / 60000)) : null;
-    const tel = (st.tel || [])[0];
-    return (
-      <View style={[o.drive, {paddingBottom: bottom}]}>
-        <View style={o.driveTop}>
-          <View style={o.chip}><Bi n="speedometer2" size={13} color={C.ink} /><Text style={o.chipTxt}>KÖR · {Math.round(speed)} km/h</Text></View>
-          <Text style={o.driveSub}>{kind === 'pickup' ? 'Hämta' : 'Lossa'} · {rows.length} kvar</Text>
-        </View>
-        <Text style={o.driveWho} numberOfLines={2}>{st.who || '—'}</Text>
-        <Text style={o.driveAdr} numberOfLines={1}>{[st.adr, st.area].filter(Boolean).join(', ')}</Text>
-        <View style={{flex: 1}} />
-        {mins != null ? (
-          <View style={o.driveBigRow}>
-            <Text style={[o.driveBig, mins < 0 && {color: C.bad}]}>{Math.abs(mins)}</Text>
-            <Text style={o.driveBigTxt}>{mins < 0 ? 'min sen mot\n' : 'min till\n'}senast <Text style={{fontWeight: '900'}}>{lat}</Text></Text>
-          </View>
-        ) : etaMin != null ? (
-          <View style={o.driveBigRow}>
-            <Text style={o.driveBig}>{etaMin}</Text>
-            <Text style={o.driveBigTxt}>{'min dit\n'}framme ca <Text style={{fontWeight: '900'}}>{hhmm(plan.eta)}</Text></Text>
-          </View>
-        ) : null}
-        <View style={o.driveBtns}>
-          <Pressable style={[o.driveBtn, {backgroundColor: C.accent}]} onPress={() => navigate(st)}>
-            <Bi n="cursor-fill" size={24} color={C.onAccent} /><Text style={[o.driveBtnTxt, {color: C.onAccent}]}>Navigera</Text>
-          </Pressable>
-          <Pressable style={[o.driveBtn, o.driveBtnGhost, !tel && {opacity: 0.4}]} disabled={!tel} onPress={() => callFor(st)}>
-            <Bi n="telephone-fill" size={22} color={C.people} /><Text style={o.driveBtnTxt} numberOfLines={1}>{tel ? `Ring ${String(tel.label).split(' ')[0]}` : 'Inget nr'}</Text>
-          </Pressable>
-        </View>
-        <Pressable hitSlop={10} onPress={() => setPeek(true)} style={{alignSelf: 'center', marginTop: 14}}>
-          <Text style={o.link}>Visa hela planen</Text>
-        </Pressable>
-        <CallSheet st={callStop} onClose={() => setCallStop(null)} />
-      </View>
-    );
   }
 
   // Personerna på ett stopp: rund avatar, SMS (bara mobil) och Ring.
@@ -404,13 +361,28 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
           </Pressable>
         )}
         {(!!goods || !!orderLine) && <Text style={o.orderLine} numberOfLines={2}>{[goods, orderLine].filter(Boolean).join('  ·  ')}</Text>}
-        {pickup && item.dropLater && (
-          <Text style={o.meta}>Lossas sen i {item.dropLater.area}{item.dropLater.eta ? ` ca ${hhmm(item.dropLater.eta)}` : ''}</Text>
+        {pickup && dropStop && (
+          <View style={o.thenRow}>
+            <View style={[o.rowIco, {backgroundColor: C.okSoft, width: 30, height: 30}]}><Bi n="check-circle-fill" size={13} color={C.accent2} /></View>
+            <View style={{flex: 1, minWidth: 0}}>
+              <Text style={o.thenLbl}>Lämnas sen{item.dropLater && item.dropLater.eta ? ` ca ${hhmm(item.dropLater.eta)}` : dropStop.tLatest ? ` · senast ${whenText(dropStop.tLatest)}` : ''}</Text>
+              <Text style={o.thenWho} numberOfLines={1}>{dropStop.who || '—'}</Text>
+              <Text style={o.rowMeta} numberOfLines={1}>{[dropStop.adr, dropStop.area].filter(Boolean).join(', ')}</Text>
+            </View>
+            <Pressable hitSlop={8} style={o.thenNav} onPress={() => setNavFor(dropStop)}><Bi n="cursor-fill" size={15} color={C.ink} /></Pressable>
+          </View>
         )}
 
         {peopleRows(st)}
 
         <NavButton st={st} leg={plan && plan.leg} onMore={() => setNavFor(st)} />
+        {!planned && !pickup && (
+          <Pressable style={o.signBtn} onPress={() => { setFocus(null); onUnload(st); }}>
+            <Bi n="pen-fill" size={16} color={C.people} />
+            <Text style={o.signTxt}>Kunden signerar</Text>
+            <Text style={o.signSub}>{st.req && st.req.sig ? 'krävs' : 'valfritt'}</Text>
+          </Pressable>
+        )}
         {!planned && <Slider key={kind + cid} label={pickup ? 'Dra för Lastad' : 'Dra för Lossad'} tone={pickup ? 'go' : 'ok'} onDone={() => { setFocus(null); if (pickup) onLoaded(st); else onUnload(st); }} />}
         {focus && !planned ? (
           <Pressable hitSlop={10} onPress={() => setFocus(null)} style={{alignSelf: 'center', marginTop: 12}}>
@@ -450,14 +422,18 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         ListHeaderComponent={
           hero ? (
             <>
-              {speed >= 10 && peek ? (
-                <Pressable onPress={() => setPeek(false)} style={o.backDrive}><Bi n="speedometer2" size={14} color={C.dim} /><Text style={o.backDriveTxt}>Tillbaka till kör-läget</Text></Pressable>
-              ) : null}
               {heroCard(hero)}
               {rest.length > 0 && (
                 <View style={o.restHead}>
-                  <Text style={o.restTitle}>Sedan</Text>
-                  <Text style={o.restSum}>{rows.length} stopp · klar ca {p.end ? hhmm(p.end) : '–'} · {Math.round(p.totKm)} km</Text>
+                  <View style={{flex: 1}}>
+                    <Text style={o.restTitle}>Sedan{route.manual ? '  ·  din ordning' : ''}</Text>
+                    <Text style={[o.restSum, {marginTop: 2}]}>{rows.length} stopp · klar ca {p.end ? hhmm(p.end) : '–'} · {Math.round(p.totKm)} km</Text>
+                  </View>
+                  {onReorder && orderItems.length > 1 ? (
+                    <Pressable style={o.reBtn} hitSlop={6} onPress={() => setReorder(true)}>
+                      <Bi n="list-ul" size={14} color={C.ink} /><Text style={o.reTxt}>Ändra ordning</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
               )}
             </>
@@ -498,6 +474,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
       <CallSheet st={callStop} onClose={() => setCallStop(null)} />
       <SmsSheet to={sms} onClose={() => setSms(null)} />
       <NavSheet st={navFor} onClose={() => setNavFor(null)} />
+      {onReorder ? <ReorderSheet open={reorder} items={orderItems} manual={!!route.manual} onClose={() => setReorder(false)} onSave={keys => { setReorder(false); setFocus(null); onReorder(keys); }} /> : null}
       <Sheet open={!!planned} onClose={() => setPlanned(null)} scroll>
         {planned ? plannedCard(planned) : null}
         {planned ? <Text style={o.plannedNote}>Planerad {when(planned.pick || planned.drop) || 'senare'} – men det är du som bestämmer. Kan du lasta tidigare drar du bara Lastad.</Text> : null}
@@ -566,7 +543,7 @@ const o = themed(() => StyleSheet.create({
   navSub: {color: C.faint, fontSize: 12, marginTop: 1},
   navMore: {width: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: C.panel2},
   link: {color: C.accentInk, fontSize: 13.5, fontWeight: '700'},
-  restHead: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', paddingTop: 16, paddingBottom: 6, paddingHorizontal: 2},
+  restHead: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 16, paddingBottom: 6, paddingHorizontal: 2},
   restTitle: {color: C.ink, fontSize: 15, fontWeight: '800'},
   restSum: {color: C.faint, fontSize: 12, fontWeight: '600'},
   row: {flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.panel, borderRadius: 10, paddingVertical: 11, paddingHorizontal: 12, marginTop: 6},
@@ -582,6 +559,15 @@ const o = themed(() => StyleSheet.create({
   legWho: {color: C.ink, fontSize: 19, fontWeight: '800', marginTop: 8},
   codeChip: {flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', backgroundColor: C.accent, borderRadius: 6, paddingHorizontal: 9, paddingVertical: 5, marginTop: 8},
   codeTxt: {color: C.onAccent, fontSize: 13.5, fontWeight: '800', letterSpacing: 0.5},
+  reBtn: {flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.panel2, borderRadius: 8, paddingVertical: 7, paddingHorizontal: 10},
+  reTxt: {color: C.ink, fontSize: 12.5, fontWeight: '700'},
+  thenRow: {flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12, backgroundColor: C.panel2, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 10},
+  thenLbl: {color: C.faint, fontSize: 11.5, fontWeight: '700'},
+  thenWho: {color: C.ink, fontSize: 14.5, fontWeight: '700', marginTop: 1},
+  thenNav: {width: 36, height: 36, borderRadius: 18, backgroundColor: C.panel, alignItems: 'center', justifyContent: 'center'},
+  signBtn: {flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10, backgroundColor: C.peopleSoft, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 14},
+  signTxt: {color: C.people, fontSize: 15, fontWeight: '800', flex: 1},
+  signSub: {color: C.people, fontSize: 12, fontWeight: '600', opacity: 0.8},
   plannedNote: {color: C.faint, fontSize: 12, textAlign: 'center', marginTop: 4, marginBottom: 6, lineHeight: 17},
   backDrive: {flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'center', paddingVertical: 8, marginBottom: 4},
   backDriveTxt: {color: C.dim, fontSize: 13, fontWeight: '700'},

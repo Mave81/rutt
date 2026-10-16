@@ -240,6 +240,34 @@ function bestOrder(ctxIn) {
   return best;
 }
 
+// Din egen ordning (dragen med handen): stoppen i den ordning du lagt dem.
+// Lossning före sin egen hämtning flyttas till direkt efter hämtningen.
+// Stopp du inte placerat (nya order, lossningar som inte syns än) läggs in där de kostar minst.
+const stopKey = s => (s.pickup ? 'p' + s.pickup : 'd' + s.drop);
+function fixedOrder(keys) {
+  const list = activeStops();
+  const ctx = optCtx(list);
+  const idx = new Map(keys.map((k, i) => [k, i]));
+  const order = list.filter(s => idx.has(stopKey(s))).sort((a, b) => idx.get(stopKey(a)) - idx.get(stopKey(b)));
+  for (const s of [...order]) {
+    if (!s.drop) continue;
+    const di = order.indexOf(s), pi = order.findIndex(x => x.pickup === s.drop);
+    if (pi > di) { order.splice(di, 1); order.splice(pi, 0, s); }
+  }
+  for (const s of list.filter(x => !idx.has(stopKey(x)))) {
+    const pi = s.drop ? order.findIndex(x => x.pickup === s.drop) : -1;
+    let bj = order.length, bv = Infinity;
+    for (let j = pi + 1; j <= order.length; j++) {
+      const cand = [...order.slice(0, j), s, ...order.slice(j)];
+      if (!okOrder(cand, ctx.onboard)) continue;
+      const v = scoreOrder(cand, ctx);
+      if (v < bv) { bv = v; bj = j; }
+    }
+    order.splice(bj, 0, s);
+  }
+  return order;
+}
+
 function loadPlan(order) {
   const drops = order.filter(s => s.drop && CARGO[s.drop]).map(s => s.drop);
   const slots = Array(TOTAL_SLOTS).fill(null);
@@ -258,17 +286,17 @@ function slotWhere(idx) {
 }
 
 /* Entry: ta Opter-stoppen (toRutt) + cargo + start, ge optimerad plan. */
-function computeRoute(stops, cargo, start, now) {
+function computeRoute(stops, cargo, start, now, fixed) {
   CARGO = cargo || {};
   START = start || {};
   NOW = now || Date.now();
   // normalisera: id + open (Tidigast)
   STOPS = (stops || []).map((s, i) => ({...s, id: s.id != null ? s.id : i + 1, open: s.open || s.earliest || null}));
-  const order = bestOrder();
+  const order = fixed && fixed.length ? fixedOrder(fixed) : bestOrder();
   const p = plan(order);
   const load = loadPlan(order);
-  return {order, plan: p, load, slotWhere, TOTAL_SLOTS, SLOTS_LONG, SLOTS_WIDE, CAP_SLOTS};
+  return {order, plan: p, load, slotWhere, TOTAL_SLOTS, SLOTS_LONG, SLOTS_WIDE, CAP_SLOTS, manual: !!(fixed && fixed.length)};
 }
 
-export {computeRoute, slotWhere, TOTAL_SLOTS, SLOTS_LONG, CAP_SLOTS};
+export {computeRoute, slotWhere, stopKey, TOTAL_SLOTS, SLOTS_LONG, CAP_SLOTS};
 export default computeRoute;

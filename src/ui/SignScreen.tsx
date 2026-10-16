@@ -8,7 +8,8 @@ import React, {useEffect, useMemo, useState} from 'react';
 import {Dimensions, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, themed} from './theme';
-import {MAX_PHOTOS, SigData, SignaturePad, pickPhoto, useKeyboardLift} from './parts';
+import {MAX_PHOTOS, SigData, SignaturePad, SigPreview, SignFullscreen, pickPhoto, useKeyboardLift} from './parts';
+import {Bi} from './Bi';
 import {ExtrasEditor} from './OrderExtras';
 
 
@@ -17,6 +18,9 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
   const {kb, lift} = useKeyboardLift();
   const [sig, setSig] = useState<SigData | null>(null);
   const [drawing, setDrawing] = useState(false);
+  const [fs, setFs] = useState(false); // helskärm för kunden
+  const [fsSig, setFsSig] = useState(false); // signaturen kom från helskärm
+  const [padKey, setPadKey] = useState(0);
   const [name, setName] = useState('');
   const [photos, setPhotos] = useState<any[]>([]);
   const [extOpen, setExtOpen] = useState(false);
@@ -28,7 +32,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
   const [subId, setSubId] = useState(0);
 
   useEffect(() => {
-    setSig(null); setName(''); setPhotos([]); setComment(''); setComment2('');
+    setSig(null); setFsSig(false); setName(''); setPhotos([]); setComment(''); setComment2('');
     setTypeId((stop && stop.pod && stop.pod.defaultId) || 0); setSubId(0);
     setExtras((saved && saved.extras) || {}); setExtOpen(!!(saved && saved.extras && Object.keys(saved.extras).length));
     setKolli((saved && saved.kolli) || (stop && stop.kolli) || 0);
@@ -114,7 +118,20 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
             <Text style={st.sec}>Mottagarens underskrift</Text>
             {req.sig ? <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View> : null}
           </View>
-          <SignaturePad height={padH} onChange={setSig} onDrawing={setDrawing} hint="Signera på linjen" />
+          <Pressable style={st.fsBtn} onPress={() => setFs(true)}>
+            <Bi n="pen-fill" size={16} color={C.people} />
+            <Text style={st.fsTxt}>Ge telefonen till kunden – signera i helskärm</Text>
+          </Pressable>
+          {fsSig && sig ? (
+            <>
+              <SigPreview data={sig} height={140} />
+              <Pressable hitSlop={10} style={{alignSelf: 'flex-end', paddingVertical: 8}} onPress={() => { setSig(null); setFsSig(false); setPadKey(k => k + 1); }}>
+                <Text style={st.redo}>Signera om</Text>
+              </Pressable>
+            </>
+          ) : (
+            <SignaturePad key={padKey} height={padH} onChange={setSig} onDrawing={setDrawing} hint="Signera på linjen" />
+          )}
 
           <View style={st.secHead}>
             <Text style={st.sec}>Namnförtydligande</Text>
@@ -204,6 +221,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
           </Pressable>
         </View>
       </View>
+      <SignFullscreen open={fs} who={stop.who} onCancel={() => setFs(false)} onDone={d => { setSig(d); setFsSig(true); setFs(false); }} />
     </Modal>
   );
 }
@@ -245,6 +263,9 @@ const st = themed(() => StyleSheet.create({
   comment: {backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 12, color: C.ink, paddingHorizontal: 14, paddingVertical: 11, fontSize: 15, minHeight: 70, textAlignVertical: 'top'},
   bottom: {paddingHorizontal: 16, paddingTop: 10, backgroundColor: C.bg, borderTopColor: C.edge, borderTopWidth: StyleSheet.hairlineWidth},
   missing: {color: C.bad, fontSize: 13, fontWeight: '600', marginBottom: 8, textAlign: 'center'},
+  fsBtn: {flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.peopleSoft, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, marginBottom: 10},
+  fsTxt: {color: C.people, fontSize: 14.5, fontWeight: '800', flex: 1},
+  redo: {color: C.accentInk, fontSize: 14, fontWeight: '700'},
   doneBtn: {backgroundColor: C.accent2, borderRadius: 14, paddingVertical: 17, alignItems: 'center'},
   doneTxt: {color: '#FFFFFF', fontSize: 18, fontWeight: '800'},
 }));

@@ -29,7 +29,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '16 okt · rätt namn + chatt';
+const BUILD = '16 okt · egen ordning + signera';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -109,6 +109,7 @@ function AppInner(): React.JSX.Element {
   const [err, setErr] = useState('');
   const [status, setStatus] = useState('');
   const [demo, setDemo] = useState(false);
+  const [manual, setManual] = useState<{day: string; keys: string[]} | null>(null);
 
   // Arbetstid, stopp-status och POD
   const [work, setWork] = useState<'igång' | 'rast' | 'lunch' | 'slut'>('igång');
@@ -142,7 +143,6 @@ function AppInner(): React.JSX.Element {
   // Statusraden: inloggad mot Opter? GPS-tjänsten (med fast notis) igång? Hastighet för kör-läget.
   const [online, setOnline] = useState<'ja' | 'nej' | 'åter'>('nej');
   const [gpsStat, setGpsStat] = useState<{running: boolean; notif: boolean; locOn: boolean} | null>(null);
-  const [speed, setSpeed] = useState(0);
   const [kbOpen, setKbOpen] = useState(false);
   const reconnecting = useRef(false);
   useEffect(() => {
@@ -189,7 +189,7 @@ function AppInner(): React.JSX.Element {
     [resources, query],
   );
 
-  const fullSrc: any = orders.stops.length ? orders : demo ? DEMO : null;
+  const fullSrc: any = demo ? DEMO : orders.stops.length ? orders : null; // demo går att slå på när som helst (Inställningar)
   // ---- Var hör varje order hemma? Opters regler (live.tab) + dina tryck i RUTT ----
   const cidsAll: string[] = useMemo(() => (fullSrc ? [...new Set(fullSrc.stops.map((s: any) => String(s.pickup || s.drop)))] as string[] : []), [fullSrc]);
   const legs = (cid: string) => ({pick: fullSrc.stops.find((s: any) => String(s.pickup) === cid), drop: fullSrc.stops.find((s: any) => String(s.drop) === cid)});
@@ -245,11 +245,11 @@ function AppInner(): React.JSX.Element {
     const anyDone = Object.keys(ost).length > 0;
     const now = fullSrc === DEMO && !anyDone ? new Date(new Date().setHours(6, 0, 0, 0)).getTime() : Date.now();
     try {
-      return computeRoute(stops, src.cargo, {...START, cur}, now);
+      return computeRoute(stops, src.cargo, {...START, cur}, now, manual ? manual.keys : null);
     } catch (e: any) {
       return {error: String(e?.message || e)};
     }
-  }, [src, ost, gpsRoutePos]);
+  }, [src, ost, gpsRoutePos, manual]);
 
   // Lastplanen: allt som ska med i bilen – ombord, dagens hämtningar och kommande dagars order.
   const loadOrders = useMemo(() => {
@@ -263,6 +263,14 @@ function AppInner(): React.JSX.Element {
 
   // Ladda/spara orderstatus (per dag, demo separat) och sparade namn.
   const ostLoaded = useRef<string | null>(null);
+  // Din egen körordning (dragen med handen). Gäller dagen ut, demo separat. null = smart ordning.
+  const MANUAL_KEY = demo ? 'rutt.manual.demo' : 'rutt.manual.v1';
+  useEffect(() => { loadJSON(MANUAL_KEY, null).then((v: any) => setManual(v && v.day === new Date().toDateString() ? v : null)); }, [MANUAL_KEY]);
+  function saveManual(keys: string[] | null) {
+    const v = keys ? {day: new Date().toDateString(), keys} : null;
+    setManual(v); saveJSON(MANUAL_KEY, v);
+    flash(keys ? 'Din ordning sparad' : 'Smart ordning igen', null);
+  }
   useEffect(() => { loadJSON(NAMES_KEY, {}).then(n => setNames(n || {})); }, []);
   useEffect(() => {
     if (!src) return;
@@ -507,7 +515,6 @@ function AppInner(): React.JSX.Element {
       }
       if (!RL) return;
       try { const st = RL.status && (await RL.status()); if (alive && st) setGpsStat(st); } catch (e) {}
-      try { const l = await RL.getLast(); if (alive) setSpeed(l && Date.now() - l.time < 90000 ? l.speedKmh || 0 : 0); } catch (e) {}
     };
     tick();
     const iv = setInterval(tick, 4000);
@@ -663,6 +670,13 @@ function AppInner(): React.JSX.Element {
 
       {step === 'route' && !busy && (
         <View style={{flex: 1}} key={mode}>
+          {demo && (
+            <Pressable style={s.demoBar} onPress={() => setDemo(false)}>
+              <Bi n="info-circle" size={15} color={C.people} />
+              <Text style={s.demoTxt}>Demo – inget skickas till Opter</Text>
+              <Text style={s.demoGo}>Avsluta</Text>
+            </Pressable>
+          )}
           {newOrders.length > 0 && tab !== 'nytt' && (
             <Pressable style={s.banner} onPress={() => setTab('nytt')}>
               <Bi n="bell-fill" size={16} color={C.onAccent} />
@@ -690,7 +704,7 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any) => setSignStop(st)} onExtra={onExtra} onAvised={onAvised} onRetry={retrySync} live={live} later={later} speed={speed} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any) => setSignStop(st)} onExtra={onExtra} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} />
           )}
           {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} />}
           {tab === 'chat' && <ChatView msgs={chatList} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} onRetry={deliver} />}
@@ -744,6 +758,13 @@ function AppInner(): React.JSX.Element {
             <StatusLine ok={gps.state === 'ok'} warn={gps.state === 'söker' || gps.state === 'startar'} text={gps.state === 'ok' ? `Position skickad ${hhmm(new Date(gps.sentAt || Date.now()))}${gps.acc ? ` (±${Math.round(gps.acc)} m)` : ''}` : gps.state === 'söker' ? 'Söker position…' : gps.state === 'startar' ? 'Startar GPS…' : gps.state === 'nekad' ? 'Platsbehörighet saknas' : gps.state === 'fel' ? 'Kunde inte skicka position' : 'GPS avstängd'} onFix={gps.state === 'nekad' ? () => Linking.openSettings() : undefined} />
           </View>
         )}
+        <Pressable style={[s.sheetBtn, {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16}]} onPress={() => { setDemo(d => !d); setDiag(false); if (step !== 'route') setStep('route'); setTab('plan'); }}>
+          <View style={{flex: 1}}>
+            <Text style={s.sheetBtnTxt}>Demo-läge</Text>
+            <Text style={[s.sheetNote, {marginTop: 2}]}>Prova allt med påhittade order. Inget skickas till Opter.</Text>
+          </View>
+          <View style={[s.toggle, demo && {backgroundColor: C.accent2}]}><View style={[s.toggleKnob, demo && {alignSelf: 'flex-end'}]} /></View>
+        </Pressable>
         <Text style={s.podLabel}>Felsök</Text>
         <Text style={s.sheetNote}>Skickar Opters rådata för dina jobb (order, adresser, kolli, statustyper, kvittenstyper) så Claude kan läsa den. Den skickas direkt till din server, Claude läser den därifrån.</Text>
         <Pressable style={[s.primaryBtn, diagBusy && {opacity: 0.5}]} disabled={diagBusy} onPress={sendDump}>
@@ -901,6 +922,9 @@ const s = themed(() => StyleSheet.create({
   iconBtn: {width: 32, height: 32, borderRadius: 16, backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, alignItems: 'center', justifyContent: 'center'},
   errBox: {flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 14, marginBottom: 8, backgroundColor: C.badSoft, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 12},
   errTxt: {color: C.bad, fontSize: 13, fontWeight: '600', flex: 1},
+  demoBar: {flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 14, marginBottom: 8, backgroundColor: C.peopleSoft, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14},
+  demoTxt: {color: C.people, fontSize: 13.5, fontWeight: '700', flex: 1},
+  demoGo: {color: C.people, fontSize: 13.5, fontWeight: '800'},
   banner: {flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 14, marginBottom: 8, backgroundColor: C.accent, borderRadius: 10, paddingVertical: 11, paddingHorizontal: 14},
   bannerTxt: {color: C.onAccent, fontSize: 14.5, fontWeight: '800', flex: 1},
   bannerGo: {color: C.onAccent, fontSize: 13.5, fontWeight: '800'},
