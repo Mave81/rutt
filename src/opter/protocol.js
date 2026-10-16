@@ -55,7 +55,7 @@ const F = {
     18: 'earliestDelivery', 19: 'latestDelivery', 20: 'customer',
     24: 'serviceType', 43: 'weight', 51: 'packages', 53: 'message',
     55: 'driverMessage', 58: 'shipmentId', 59: 'orderId',
-    30: 'freightBill', 33: 'goodsType', 37: 'distanceKm', 52: 'extMessage', 54: 'senderInstr',
+    30: 'freightBill', 33: 'goodsType', 37: 'distanceKm', 40: 'volume', 41: 'area', 42: 'loadMeter', 52: 'extMessage', 54: 'senderInstr',
     21: 'customerId', 23: 'customerRef', 34: 'senderRef', 35: 'receiverRef', 36: 'timeMinutes',
     56: 'externalId', 101: 'customerDefaultPOT', 138: 'podLockMainType',
     61: 'podNameReq', 62: 'podSigReq', 63: 'podRemarkReq', 71: 'orderReceiver', 73: 'customerPhone1',
@@ -71,6 +71,15 @@ const F = {
   ShipmentPod: { 1: 'shiId', 2: 'sptId', 3: 'dptId', 4: 'date', 5: 'time', 6: 'name', 7: 'descr', 8: 'signature', 9: 'packageCount', 10: 'sptIdSub', 11: 'dptIdSub', 12: 'lat', 13: 'lng', 14: 'comment' },
   ShipmentPackagePod: { 1: 'spaId' },
   ShipmentPackage: { 1: 'shiId', 2: 'quantity', 3: 'weight', 14: 'text', 15: 'packageType' },
+  ShipmentAddServiceType: { 1: 'shiId', 2: 'name', 3: 'descr', 4: 'externalId', 5: 'revoked' },
+  ShipmentAddService: { 1: 'shiId', 2: 'satId', 3: 'number', 4: 'code', 5: 'descr', 6: 'externalId', 8: 'active' },
+  DefaultDamageType: { 1: 'name', 2: 'descr', 3: 'externalId', 4: 'order', 5: 'active', 6: 'id', 7: 'forceComment', 8: 'isDefault', 9: 'forceEvent', 10: 'forcePicture', 11: 'inMobile' },
+  DamageEvent: { 1: 'name', 2: 'descr', 3: 'order', 4: 'active', 5: 'id', 6: 'forceReason' },
+  DamageReason: { 1: 'id', 2: 'name', 3: 'descr', 4: 'order', 5: 'active' },
+  DamageTypeEvent: { 1: 'id', 2: 'datId', 3: 'daeId' },
+  DamageEventReason: { 1: 'id', 2: 'daeId', 3: 'darId' },
+  ShipmentDamage: { 1: 'shiId', 2: 'spaId', 4: 'ddtId', 9: 'comment', 13: 'active', 16: 'daeId', 17: 'darId' },
+  Attachment: { 1: 'delId', 2: 'filename', 3: 'comment', 4: 'revoked', 6: 'fftId' },
   FreeTextMessage: { 1: 'resId', 2: 'vhcId', 3: 'shiId', 4: 'outgoing', 5: 'confirmed', 6: 'text', 7: 'created', 8: 'externalId', 9: 'fromName' },
 };
 
@@ -265,6 +274,181 @@ function encodeShipmentStatus({ live, statusId, pod }) {
   wEndTable(w, 'Shipment');
   wEndData(w, null, null);
   return w.build();
+}
+
+/* ---- Ändra en order i efterhand – exakt som Opter Driver (ShipmentDetailViewPager) ----
+ * Allt läggs som nya underrader i orderns Shipment-block och skickas i en synk, i Opters ordning:
+ *   ShipmentAddService → ShipmentDamage → ShipmentStatusLog → ShipmentChange → ShipmentPod → Attachment
+ *  - status:    SHI_SHS_Id (11) + ShipmentStatusLog (Välj status)
+ *  - pod:       SHI_ExternalId (56) + ShipmentPod (Kvittens)
+ *  - addServices [{satId, number, descr}]                     (Tilläggstjänster: SHA_SAT_Id 2, SHA_Number 3, SHA_Descr 5)
+ *  - damages    [{ddtId, daeId, darId, comment, images:[{name, bytes}]}]  (Avvikelse: DamageAttachment-barn först, sen SDA 4/16/17/9)
+ *  - changes    [{cet, kind:'dec'|'int'|'str', value}]       (Ändringar: en ShipmentChange med ett ShipmentChangeValue per fält)
+ *  - images     [{bytes, comment, orderId}]                   (Lägg till bild: Attachment DEA 1,2,3,6,5)
+ * Nya rader: OFF_Id 0 i huvudet + fält 250 = 0, XXX_Id 0 – som Opter gör för rader skapade i telefonen.
+ */
+function wDecExact(w, prop, value) {
+  // BigDecimal utan avrundning (SCV_Value / SHA_Number): skala = antal decimaler som skrivits.
+  let s = String(value).trim().replace(',', '.');
+  if (!/^-?\d+(\.\d+)?$/.test(s)) throw new Error('ogiltigt tal: ' + value);
+  if (s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, '');
+  const neg = s.startsWith('-'); if (neg) s = s.slice(1);
+  const dot = s.indexOf('.');
+  const scale = dot < 0 ? 0 : s.length - dot - 1;
+  const unscaled = BigInt(s.replace('.', '')) * (neg ? -1n : 1n);
+  const n = Number(unscaled);
+  if (n >= -32768 && n <= 32767) {
+    if (scale > 0) { wB(w, DT.DecimalInt16Decimals); wB(w, prop); wB(w, scale); wI16(w, n); }
+    else { wB(w, DT.DecimalInt16NoDecimals); wB(w, prop); wI16(w, n); }
+  } else if (n >= -2147483648 && n <= 2147483647) {
+    if (scale > 0) { wB(w, DT.DecimalInt32Decimals); wB(w, prop); wB(w, scale); wI32(w, n); }
+    else { wB(w, DT.DecimalInt32NoDecimals); wB(w, prop); wI32(w, n); }
+  } else {
+    if (scale > 0) { wB(w, DT.DecimalInt64Decimals); wB(w, prop); wB(w, scale); wI64(w, unscaled); }
+    else { wB(w, DT.DecimalInt64NoDecimals); wB(w, prop); wI64(w, unscaled); }
+  }
+}
+function wStrAlways(w, prop, val) { const b = Buffer.from(String(val == null ? '' : val), CHARSET); wB(w, DT.String); wB(w, prop); wI16(w, b.length); if (b.length) w.push(b); }
+const CET = {
+  SHI_CustomerReference: 23, SHI_FreightBill: 30, SHI_GoodsType: 33, SHI_TimeMinutes: 34, SHI_DistanceKM: 35, SHI_Volume: 36,
+  SHI_Area: 37, SHI_LoadMeter: 38, SHI_Weight: 39, SHI_Packages: 40, SHI_ExternalMessage: 41, SHI_Message: 42, SHI_DriverMessage: 43,
+  SHI_SenderReference: 69, SHI_ReceiverReference: 70, SHI_TimeFailureComment: 106, SHI_TFR_Id: 107,
+};
+function encodeShipmentEdit({ live, statusId, pod, addServices, damages, changes, images }) {
+  const w = W();
+  const k = live.key;
+  wB(w, DT.StartTable); wB(w, TableOrd.Shipment); wB(w, 14);
+  wI32(w, k.identityId || 0); wI32(w, k.offId || 0); wI32(w, k.xxxId || 0);
+  wB(w, (live.hdr && live.hdr.extra) || 0); wB(w, (live.hdr && live.hdr.conf) || 0);
+  if (statusId) wInt(w, 11, statusId);                                   // SHI_SHS_Id
+  if (pod) wStrAlways(w, 56, live.externalId || '');                    // SHI_ExternalId (följer med en kvittens)
+  for (const a of addServices || []) {
+    wNewRow(w, 'ShipmentAddService', 0);
+    wInt(w, 2, a.satId);                                                 // SHA_SAT_Id
+    if (a.number != null && String(a.number) !== '' && Number(String(a.number).replace(',', '.')) !== 0) wDecExact(w, 3, a.number); // SHA_Number (0 = standard → skrivs inte)
+    if (a.descr) wStr(w, 5, a.descr);                                    // SHA_Descr
+    wEndTable(w, 'ShipmentAddService');
+  }
+  for (const d of damages || []) {
+    wNewRow(w, 'ShipmentDamage', 0);
+    for (const im of d.images || []) {                                    // DamageAttachment: filnamn + bild
+      wNewRow(w, 'DamageAttachment', 0);
+      if (im.name) wStr(w, 3, im.name);
+      wBytes(w, 4, im.bytes);
+      wEndTable(w, 'DamageAttachment');
+    }
+    if (d.ddtId) wInt(w, 4, d.ddtId);                                    // SDA_DDT_Id
+    if (d.daeId) wInt(w, 16, d.daeId);                                   // SDA_DAE_Id
+    if (d.darId) wInt(w, 17, d.darId);                                   // SDA_DAR_Id
+    if (d.comment) wStr(w, 9, d.comment);                                // SDA_Comment
+    wEndTable(w, 'ShipmentDamage');
+  }
+  if (statusId) {
+    wNewRow(w, 'ShipmentStatusLog', 0);
+    wInt(w, 1, live.shiId);
+    wInt(w, 2, statusId);
+    wDate(w, 4, new Date());
+    wEndTable(w, 'ShipmentStatusLog');
+  }
+  if (changes && changes.length) {
+    wNewRow(w, 'ShipmentChange', 0);
+    for (const c of changes) {
+      wNewRow(w, 'ShipmentChangeValue', 0);
+      wInt(w, 2, c.cet);                                                 // SCV_CET_Id
+      if (c.kind === 'int') wInt(w, 5, parseInt(c.value, 10) || 0);      // SCV_Value (Integer, skrivs alltid)
+      else if (c.kind === 'dec') wDecExact(w, 5, c.value === '' || c.value == null ? '0' : c.value);
+      else wStrAlways(w, 5, c.value);
+      wEndTable(w, 'ShipmentChangeValue');
+    }
+    wEndTable(w, 'ShipmentChange');
+  }
+  if (pod) {
+    const now = new Date();
+    wNewRow(w, 'ShipmentPod', 0);
+    for (const spaId of (live.packageIds || [])) { wNewRow(w, 'ShipmentPackagePod', 0); wInt(w, 1, spaId); wEndTable(w, 'ShipmentPackagePod'); }
+    if (pod.sptId) wInt(w, 2, pod.sptId);
+    if (pod.dptId) wInt(w, 3, pod.dptId);
+    wDate(w, 4, now); wDate(w, 5, now);
+    if (pod.name) wStr(w, 6, pod.name);
+    if (pod.remark) wStr(w, 7, pod.remark);
+    if (pod.comment) wStr(w, 14, pod.comment);
+    if (pod.signature) wStr(w, 8, pod.signature);
+    if (pod.packageCount != null) wInt(w, 9, pod.packageCount);
+    if (pod.sptIdSub) wInt(w, 10, pod.sptIdSub);
+    if (pod.dptIdSub) wInt(w, 11, pod.dptIdSub);
+    if (pod.lng != null) wDec(w, 13, pod.lng);
+    if (pod.lat != null) wDec(w, 12, pod.lat);
+    if (pod.image) wBytes(w, 15, pod.image);
+    wEndTable(w, 'ShipmentPod');
+  }
+  for (const im of images || []) {
+    wNewRow(w, 'Attachment', 0);
+    const del = parseInt(im.orderId, 10);
+    if (del) wInt(w, 1, del);                                            // DEA_DEL_Id = orderns nummer
+    wStr(w, 2, 'image');                                                 // DEA_Filename
+    if (im.comment) wStr(w, 3, im.comment);                              // DEA_Comment
+    wInt(w, 6, 7);                                                       // DEA_FFT_Id = Image
+    wBytes(w, 5, im.bytes);                                              // DEA_AttachmentData
+    wEndTable(w, 'Attachment');
+  }
+  wEndTable(w, 'Shipment');
+  wEndData(w, null, null);
+  return w.build();
+}
+
+/* Vad kontoret låter dig göra i efterhand + valen (läst ur synken, som Opter Driver). */
+const CHANGE_FIELDS = [
+  // [CET-namn, typ, standard när kontoret inte satt några SHI-behörigheter, fältnamn i ordern, svensk etikett]
+  ['SHI_Packages', 'int', 'z', 'packages', 'Kolli'],
+  ['SHI_Weight', 'dec', 'z', 'weight', 'Vikt (kg)'],
+  ['SHI_Volume', 'dec', 'z', 'volume', 'Volym'],
+  ['SHI_LoadMeter', 'dec', 'z', 'loadMeter', 'Flakmeter'],
+  ['SHI_Area', 'dec', 'z', 'area', 'Yta'],
+  ['SHI_TimeMinutes', 'dec', 'z', 'timeMinutes', 'Tid (min)'],
+  ['SHI_DistanceKM', 'dec', 'z', 'distanceKm', 'Sträcka (km)'],
+  ['SHI_FreightBill', 'str', 'z', 'freightBill', 'Fraktsedel'],
+  ['SHI_SenderReference', 'str', 'z', 'senderRef', 'Avsändarens referens'],
+  ['SHI_ReceiverReference', 'str', 'z', 'receiverRef', 'Mottagarens referens'],
+  ['SHI_Message', 'str', 'z', 'message', 'Internt meddelande'],
+  ['SHI_ExternalMessage', 'str', 'z', 'extMessage', 'Externt meddelande'],
+  ['SHI_GoodsType', 'str', true, 'goodsType', 'Godstyp'],
+  ['SHI_DriverMessage', 'str', false, 'driverMessage', 'Förarmeddelande'],
+];
+function editOptions(decoded) {
+  const rows = (decoded && decoded.rows) || [];
+  const truthy = (v) => /^(true|1|ja|yes)$/i.test(String(v));
+  const sGet = (name) => { const r = rows.find(x => x.table === 'Setting' && String(x.columns.name || '').toLowerCase() === name.toLowerCase()); return r ? r.columns.value : undefined; };
+  const sBool = (name, def) => { const v = sGet(name); return v == null || v === '' ? def : truthy(v); };
+  const anySHI = rows.some(x => x.table === 'Setting' && /^SHI_.+Permission$/i.test(String(x.columns.name || '')));
+  const fields = CHANGE_FIELDS.map(([cetName, kind, def, col, label]) => ({
+    cet: CET[cetName], cetName, kind, col,
+    label: String(sGet(cetName + 'Name') || label),
+    order: parseInt(sGet(cetName + 'Order'), 10) || 99,
+    on: sBool(cetName + 'Permission', def === 'z' ? !anySHI : def),
+  })).filter(f => f.on).sort((a, b) => a.order - b.order);
+  const byOrder = (a, b) => (Number(a.order) || 0) - (Number(b.order) || 0) || String(a.name).localeCompare(String(b.name), 'sv');
+  const evs = rows.filter(r => r.table === 'DamageEvent').map(r => ({id: r.key.xxxId, name: String(r.columns.name || ''), order: r.columns.order, forceReason: !!r.columns.forceReason}));
+  const rsn = rows.filter(r => r.table === 'DamageReason').map(r => ({id: r.key.xxxId, name: String(r.columns.name || ''), order: r.columns.order}));
+  const dte = rows.filter(r => r.table === 'DamageTypeEvent').map(r => r.columns);
+  const der = rows.filter(r => r.table === 'DamageEventReason').map(r => r.columns);
+  const evPerm = sBool('DAM_DAE_IdPermission', true), rsPerm = sBool('DAM_DAR_IdPermission', true);
+  const damageTypes = rows.filter(r => r.table === 'DefaultDamageType' && r.columns.active !== false).map(r => {
+    const id = r.key.xxxId, c = r.columns;
+    const events = evPerm ? dte.filter(x => x.datId === id).map(x => evs.find(e => e.id === x.daeId)).filter(Boolean).sort(byOrder).map(e => ({
+      ...e, reasons: rsPerm ? der.filter(x => x.daeId === e.id).map(x => rsn.find(q => q.id === x.darId)).filter(Boolean).sort(byOrder) : [],
+    })) : [];
+    return {id, name: String(c.name || 'Avvikelse'), order: c.order, isDefault: !!c.isDefault, forceComment: !!c.forceComment, forceEvent: !!c.forceEvent && events.length > 0, forcePicture: !!c.forcePicture, events};
+  }).sort(byOrder);
+  return {
+    perm: {
+      pod: sBool('ProofOfDeliveryPermission', true), addService: sBool('AddServicePermission', true),
+      changes: sBool('ChangesPermission', true), damages: sBool('DamagesPermission', true),
+      addImage: sBool('AddImagePermission', true), status: sBool('SetArbitraryStatusPermission', true),
+      statusDone: sBool('SetArbitraryStatusDoneTabPermission', true),
+      pickup: sBool('ManualStatusChangePickUpPermission', true), delivery: sBool('ManualStatusChangeDeliveryPermission', true),
+    },
+    fields, damageTypes,
+  };
 }
 
 /* Decimaltal som Opter: avrundat till 6 värdesiffror (BigDecimal.round(MathContext(6))),
@@ -549,7 +733,20 @@ function toRutt(decoded) {
     const podTypes = pts.main.map(mk), podSubTypes = pts.sub.map(mk);
     const defPod = podTypes.find(t => c.customerDefaultPOT && t.id === c.customerDefaultPOT) || podTypes.find((t, i) => pts.main[i].isDefault) || podTypes[0] || null;
     const podType = defPod;
-    const live = { key: r.key, hdr: r.hdr, shiId, offId: r.key.offId, statuses: statuses.map(s => ({id: s.id, name: s.name})), cur: curSt ? curSt.name : null, curId: c.shsId || 0,
+    // Det som går att ändra i efterhand (Opter Driver: menyn på ordern, så länge den inte är klarmarkerad).
+    const addTypes = decoded.rows.filter(x => x.table === 'ShipmentAddServiceType' && belongs(x, shiId) && !x.columns.revoked)
+      .map(x => ({id: x.key.xxxId, name: String(x.columns.name || 'Tillägg'), descr: x.columns.descr || ''})).filter(t => t.id);
+    const nameOfSat = (id) => { const t = addTypes.find(a => a.id === id); return t ? t.name : 'Tillägg'; };
+    const addDone = decoded.rows.filter(x => x.table === 'ShipmentAddService' && belongs(x, shiId) && x.columns.active !== false)
+      .map(x => ({id: x.key.xxxId, name: nameOfSat(x.columns.satId), number: x.columns.number != null ? x.columns.number : null, descr: x.columns.descr || ''}));
+    const ddtName = (id) => { const t = decoded.rows.find(x => x.table === 'DefaultDamageType' && x.key.xxxId === id); return t ? String(t.columns.name || 'Avvikelse') : 'Avvikelse'; };
+    const dmgDone = decoded.rows.filter(x => x.table === 'ShipmentDamage' && belongs(x, shiId) && x.columns.active !== false)
+      .map(x => ({id: x.key.xxxId, name: ddtName(x.columns.ddtId), comment: x.columns.comment || ''}));
+    const attDone = decoded.rows.filter(x => x.table === 'Attachment' && x.parent && x.parent.table === 'Shipment' && x.parent.key.xxxId === shiId && !x.columns.revoked).length;
+    const values = {}; for (const f of CHANGE_FIELDS) values[f[3]] = c[f[3]] != null ? c[f[3]] : null;
+    const edit = { addTypes, addDone, dmgDone, attDone, values, orderId: c.orderId || null, completed: !!(curSt && curSt.completed),
+      statuses: statuses.map(s => ({id: s.id, name: String(s.name || ''), userOption: !!s.userOption, accepted: !!s.accepted, pickup: !!s.pickup, delivery: !!s.delivery, completed: !!s.completed, pod: !!s.pod, rejected: !!s.rejected})) };
+    const live = { key: r.key, hdr: r.hdr, shiId, offId: r.key.offId, edit, statuses: statuses.map(s => ({id: s.id, name: s.name})), cur: curSt ? curSt.name : null, curId: c.shsId || 0,
       isNew: isNew && !consHidden, tab: tabF, revoked: revokedOpen, consignment: !!c.isConsignment || !!c.consignmentParent, locked: !!c.locked,
       shipDate: (c.shipmentDate instanceof Date && c.shipmentDate.getFullYear() > 2001) ? ymd(c.shipmentDate) : (c.orderDate instanceof Date && c.orderDate.getFullYear() > 2001 ? ymd(c.orderDate) : null),
       doneAt: (() => { const logs = decoded.rows.filter(x => x.table === 'ShipmentStatusLog' && belongs(x, shiId) && x.columns.shsId === c.shsId && x.columns.logTime instanceof Date); return logs.length ? Math.max(...logs.map(x => x.columns.logTime.getTime())) : null; })(),
@@ -587,11 +784,11 @@ function toRutt(decoded) {
     pickup: sBool('ManualStatusChangePickUpPermission', true),
     delivery: sBool('ManualStatusChangeDeliveryPermission', true),
   };
-  return { cargo, stops, perm };
+  return { cargo, stops, perm, opts: editOptions(decoded) };
 }
 
 module.exports = {
   MessageType, Table, DT, RST, F, frame, unframe, decodeSync, ticksToDate,
   logonPayload, parseLogon, resourceList, encodeStartWork, encodeWorkStatus, toRutt,
-  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering, encodeShipmentStatus, signatureString, encodePosition, setting,
+  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering, encodeShipmentStatus, encodeShipmentEdit, editOptions, CET, CHANGE_FIELDS, signatureString, encodePosition, setting,
 };

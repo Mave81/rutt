@@ -10,7 +10,6 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, themed} from './theme';
 import {MAX_PHOTOS, SigData, SignaturePad, SigPreview, SignFullscreen, pickPhoto, useKeyboardLift} from './parts';
 import {Bi} from './Bi';
-import {ExtrasEditor} from './OrderExtras';
 
 
 export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: {stop: any; savedNames: string[]; saved?: any; onCancel: () => void; onDone: (pod: any) => void}) {
@@ -26,7 +25,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
   const [name, setName] = useState('');
   const [photos, setPhotos] = useState<any[]>([]);
   const [extOpen, setExtOpen] = useState(false);
-  const [extras, setExtras] = useState<Record<string, number>>({});
+  const [adds, setAdds] = useState<Record<number, string>>({}); // valda tillägg (orderns egna från kontoret) → antal
   const [kolli, setKolli] = useState(0);
   const [comment, setComment] = useState('');
   const [comment2, setComment2] = useState('');
@@ -36,13 +35,15 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
   useEffect(() => {
     setSig(null); setFsSig(false); setMode('sig'); setName(''); setPhotos([]); setComment(''); setComment2('');
     setTypeId((stop && stop.pod && stop.pod.defaultId) || 0); setSubId(0);
-    setExtras((saved && saved.extras) || {}); setExtOpen(!!(saved && saved.extras && Object.keys(saved.extras).length));
+    setAdds({}); setExtOpen(false);
     setKolli((saved && saved.kolli) || (stop && stop.kolli) || 0);
   }, [stop, saved]);
 
   const padH = Math.max(230, Math.min(400, Math.round(Dimensions.get('window').height * 0.36)));
   // Kvittenstyp väljer du själv (som i Opter). Krav = orderns krav OCH typens krav.
   const P = (stop && stop.pod) || null;
+  // Tilläggen som kontoret lagt på ordern (Opter: ShipmentAddServiceType). Demo: exempel.
+  const addTypes: any[] = stop && stop.live && stop.live.edit ? stop.live.edit.addTypes : stop && !stop.live ? [{id: 1, name: 'Väntetid'}, {id: 2, name: 'Inbärning'}, {id: 3, name: 'Bomkörning'}] : [];
   const types: any[] = (P && P.types) || [];
   const type = types.find(t => t.id === typeId) || null;
   const subs: any[] = type && P ? P.subTypes.filter((x: any) => x.mainId === type.id) : [];
@@ -83,7 +84,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
     if (!ok) return;
     const autoNote = mode === 'foto' ? `Kund ej på plats – foto taget på begäran av ${name.trim()}` : '';
     const cm = comment.trim() || autoNote;
-    onDone({mode, name: name.trim(), sig: mode === 'sig' || officeSig ? sig : null, photos, extras, kolli: group.length ? null : kolli, comment: cm, comment2: comment2.trim(), typeId: type ? type.id : 0, subId: sub ? sub.id : 0, typeName: eff ? eff.name : '', at: Date.now()});
+    onDone({mode, name: name.trim(), sig: mode === 'sig' || officeSig ? sig : null, photos, adds: Object.entries(adds).map(([id, n]) => ({satId: Number(id), number: String(n || '').trim(), name: (addTypes.find((t: any) => String(t.id) === id) || {}).name || 'Tillägg'})), kolli: group.length ? null : kolli, comment: cm, comment2: comment2.trim(), typeId: type ? type.id : 0, subId: sub ? sub.id : 0, typeName: eff ? eff.name : '', at: Date.now()});
   }
 
   return (
@@ -91,7 +92,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
       <View style={[st.root, {paddingTop: insets.top + 6, paddingBottom: lift}]}>
         <View style={st.top}>
           <Pressable onPress={onCancel} hitSlop={12}><Text style={st.cancel}>Avbryt</Text></Pressable>
-          <Text style={st.topTitle}>Kvittens</Text>
+          <Text style={st.topTitle}>{stop.repod ? 'Ny kvittens' : 'Kvittens'}</Text>
           <View style={{width: 60}} />
         </View>
 
@@ -240,17 +241,28 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
             <Pressable style={st.kBtn} onPress={() => setKolli(k => k + 1)}><Text style={st.kBtnTxt}>+</Text></Pressable>
           </View></>}
 
-          {!extOpen ? (
+          {!stop.repod && addTypes.length > 0 && (!extOpen ? (
             <Pressable style={st.devToggle} onPress={() => setExtOpen(true)}>
-              <Text style={st.devToggleTxt}>Drog något ut? Lägg till lossningstid, inbärning…</Text>
+              <Text style={st.devToggleTxt}>Drog något ut? Lägg till {addTypes.slice(0, 2).map((t: any) => t.name.toLowerCase()).join(', ')}…</Text>
               <Text style={st.devPlus}>＋</Text>
             </Pressable>
           ) : (
             <>
-              <View style={st.secHead}><Text style={st.sec}>Tillägg</Text></View>
-              <ExtrasEditor value={extras} onChange={setExtras} only={['Lossningstid', 'Inbärning', 'Bomkörning', 'Lastningstid']} />
+              <View style={st.secHead}><Text style={st.sec}>Tillägg</Text><Text style={st.hint}>skickas till Opter</Text></View>
+              {addTypes.map((t: any) => {
+                const on = adds[t.id] != null;
+                return (
+                  <View key={t.id} style={[st.addRow, on && {borderColor: C.accent}]}>
+                    <Pressable style={{flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12}} onPress={() => setAdds(a => { const n = {...a}; if (on) delete n[t.id]; else n[t.id] = ''; return n; })}>
+                      <View style={[st.addCk, on && {backgroundColor: C.accent2, borderColor: C.accent2}]}>{on ? <Bi n="check2" size={14} color="#FFFFFF" /> : null}</View>
+                      <Text style={st.addName}>{t.name}</Text>
+                    </Pressable>
+                    {on ? <TextInput style={st.addNum} value={adds[t.id]} onChangeText={x => setAdds(a => ({...a, [t.id]: x}))} keyboardType="decimal-pad" placeholder="Antal" placeholderTextColor={C.faint} /> : null}
+                  </View>
+                );
+              })}
             </>
-          )}
+          ))}
 
           <View style={st.secHead}>
             <Text style={st.sec}>Anmärkning</Text>
@@ -271,7 +283,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
         <View style={[st.bottom, {paddingBottom: kb > 0 ? 10 : 12 + insets.bottom}]}>
           {!ok && <Text style={st.missing}>Saknas: {missing.join(', ')}</Text>}
           <Pressable style={[st.doneBtn, !ok && {opacity: 0.4}]} disabled={!ok} onPress={done}>
-            <Text style={st.doneTxt}>Klar – Lossad ✓</Text>
+            <Text style={st.doneTxt}>{stop.repod ? 'Skicka kvittens' : 'Klar – Lossad ✓'}</Text>
           </Pressable>
         </View>
       </View>
@@ -332,4 +344,8 @@ const st = themed(() => StyleSheet.create({
   redo: {color: C.accentInk, fontSize: 14, fontWeight: '700'},
   doneBtn: {backgroundColor: C.accent2, borderRadius: 14, paddingVertical: 17, alignItems: 'center'},
   doneTxt: {color: '#FFFFFF', fontSize: 18, fontWeight: '800'},
+  addRow: {flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.panel2, borderRadius: 12, borderWidth: 2, borderColor: 'transparent', paddingVertical: 10, paddingHorizontal: 12, marginTop: 8},
+  addCk: {width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: C.edge, alignItems: 'center', justifyContent: 'center', backgroundColor: C.panel},
+  addName: {color: C.ink, fontSize: 15.5, fontWeight: '700', flexShrink: 1},
+  addNum: {width: 90, height: 42, borderRadius: 10, backgroundColor: C.panel, color: C.ink, fontSize: 17, fontWeight: '800', textAlign: 'center'},
 }));

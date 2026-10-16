@@ -272,6 +272,43 @@ export default class OpterClient {
     return {confirmed, imageDropped, rutt: P.toRutt(this.lastDecoded)};
   }
 
+  /*
+   * Ändra en order i efterhand (status, kvittens, tillägg, avvikelse, ändring, bild) – en synk, exakt en gång.
+   * Kontroll efteråt mot Opters egen data: status = ordern står på den nya statusen; tillägg/avvikelse =
+   * fler sådana rader på ordern än innan. Ändringar och bilder: Opter skickar dem inte tillbaka till föraren,
+   * så där räcker det att servern tog emot synken utan fel.
+   * Skickas aldrig om automatiskt (ett tillägg ska inte bli två) – appen visar "försök igen".
+   */
+  _count(table, shiId) {
+    return (this.lastDecoded && this.lastDecoded.rows || []).filter(x => x.table === table && (x.columns.shiId === shiId || (x.parent && x.parent.table === 'Shipment' && x.parent.key.xxxId === shiId))).length;
+  }
+  async editShipment(live, edit) {
+    if (!this.logon) throw new Error('inte inloggad');
+    const before = {sa: this._count('ShipmentAddService', live.shiId), sd: this._count('ShipmentDamage', live.shiId)};
+    const send = async (e) => {
+      const res = await this.send(P.MessageType.Synchronize, P.encodeShipmentEdit({live, ...e}), {once: true});
+      if (res.type === P.MessageType.Corrupt) throw new Error('Opter kunde inte läsa ändringen');
+      this._take(P.decodeSync(res.payload));
+    };
+    let sent = false, err = null, imageDropped = false;
+    try { await send(edit); sent = true; } catch (e) { err = e; try { await this.relogin(); } catch (e2) {} }
+    try { await this._fullSync(); } catch (e) {}
+    const nSa = (edit.addServices || []).length, nSd = (edit.damages || []).length;
+    const okStatus = !edit.statusId || this._statusOf(live.shiId) === edit.statusId || this._statusOf(live.shiId) === null;
+    const okSa = !nSa || this._count('ShipmentAddService', live.shiId) >= before.sa + nSa;
+    const okSd = !nSd || this._count('ShipmentDamage', live.shiId) >= before.sd + nSd;
+    // Tillägg och avvikelser skickas tillbaka av Opter först när kontoret tagit emot dem – kom synken fram räknas det som skickat.
+    const confirmed = okStatus && (sent || (okSa && okSd && (nSa || nSd || edit.statusId)));
+    // En stor bild i en kvittens kan stoppa sändningen → samma kvittens utan bild, en gång (bara när inget kom fram).
+    if (!sent && !confirmed && edit.pod && edit.pod.image && !nSa && !nSd && !(edit.images || []).length && !(edit.changes || []).length) {
+      imageDropped = true;
+      try { await send({...edit, pod: {...edit.pod, image: null}}); sent = true; } catch (e) { err = e; }
+      try { await this._fullSync(); } catch (e) {}
+    }
+    const ok2 = !edit.statusId || this._statusOf(live.shiId) === edit.statusId || this._statusOf(live.shiId) === null;
+    return {confirmed: (sent || confirmed) && ok2, sent, imageDropped, error: err ? String(err.message || err) : null, rutt: P.toRutt(this.lastDecoded)};
+  }
+
   // GPS-position → Opter (som Opter Driver). Skickas utan full synk tillbaka (lätt anrop).
   async sendPosition(loc) {
     if (!this.logon) return false;

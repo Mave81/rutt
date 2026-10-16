@@ -23,7 +23,7 @@ export const LIGHT: typeof DARK = {
   bad: '#d93a2b', badSoft: '#fdeceb',
   people: '#1f7fd1', peopleSoft: '#e6f1fb',
   noteBg: '#f5f6f8', noteInk: '#465361',
-  toast: '#1B1B1B', sigBg: '#f5f6f8', overlay: 'rgba(11,15,20,0.45)',
+  toast: '#FFFFFF', sigBg: '#f5f6f8', overlay: 'rgba(11,15,20,0.45)',
   bubbleIn: '#FFFFFF', bubbleOut: '#fff1e2',
 };
 // C är ett levande objekt: applyTheme() byter värdena och bygger om alla stilar som registrerats via themed().

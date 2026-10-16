@@ -7,7 +7,7 @@ import {Bi} from './Bi';
 
 const KNOB = 58, PAD = 5;
 
-export default function Slider({label, tone, onDone}: {label: string; tone: 'go' | 'ok'; onDone: () => void}) {
+export default function Slider({label, tone, onDone, style}: {label: string; tone: 'go' | 'ok'; onDone: () => void; style?: any}) {
   const x = useRef(new Animated.Value(0)).current;
   const [w, setW] = useState(0);
   const max = Math.max(1, w - KNOB - PAD * 2);
@@ -34,7 +34,7 @@ export default function Slider({label, tone, onDone}: {label: string; tone: 'go'
   const fade = x.interpolate({inputRange: [0, max * 0.6], outputRange: [1, 0], extrapolate: 'clamp'});
   const grow = x.interpolate({inputRange: [0, max], outputRange: [KNOB, max + KNOB], extrapolate: 'clamp'});
   return (
-    <View style={sl.track} onLayout={e => setW(e.nativeEvent.layout.width)}>
+    <View style={[sl.track, style]} onLayout={e => setW(e.nativeEvent.layout.width)}>
       <Animated.View style={[sl.fill, {backgroundColor: fill, width: grow}]} />
       <Animated.Text style={[sl.label, {opacity: fade}]} numberOfLines={1}>{label}</Animated.Text>
       <Animated.View {...pr.panHandlers} style={[sl.knob, {backgroundColor: fill, transform: [{translateX: x}]}]}>

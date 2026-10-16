@@ -1,17 +1,18 @@
 /**
- * Plan (förslag B, godkänt 16 okt): ett STÄLLE i taget.
- *  - Överst stället du ska till: namn, adress och GPS-knappen direkt bredvid (håll inne = välj kartapp).
- *  - Under: "Lossa här" och "Hämta här" med orderna bockade. Många order grupperas på vart de ska.
- *    Varje order visar → mottagare; tryck för mottagaren med allt. En dragknapp per sort.
- *  - Sedan: ett ställe per rad med egen GPS. Markera: bocka valfria order → Lastad och/eller Lossad.
- *  - Flera order samtidigt följer kontorets behörighet (SetMultipleStatusPermission), som Opter Driver.
+ * Plan – förslag A "Fokus" (valt 16 okt): EN skärm per ställe.
+ *  - Stort: stället du ska till, adress, tid, portkod. Inga lådor runt allt.
+ *  - Orderna som en bocklista (alla bockade). Många order grupperas på vart de ska.
+ *    Varje order: tryck för mottagaren/avsändaren med allt, ⋯ = tillägg, bild, avvikelse, ändring.
+ *  - Allt du trycker på sitter längst ner vid tummen: GPS · Ring · SMS och dragknappen.
+ *  - ‹ › (eller "Ställe 2 av 5") byter ställe. Klart = nästa ställe av sig själv.
+ *  - Markera: bocka valfria order → Lastad och/eller Lossad. Flera order samtidigt följer
+ *    kontorets behörighet (SetMultipleStatusPermission), som Opter Driver.
  */
 import React, {useMemo, useState} from 'react';
-import {FlatList, Linking, Pressable, StyleSheet, Text, View} from 'react-native';
+import {FlatList, Linking, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, themed, hhmm, prettyPhone, whenText} from './theme';
 import {Sheet} from './parts';
-import {MoreSheet} from './OrderExtras';
 import {Bi} from './Bi';
 import Slider from './Slider';
 import ReorderSheet from './Reorder';
@@ -149,17 +150,17 @@ function SmsSheet({to, onClose}: {to: {name: string; num: string; who: string} |
   );
 }
 
-export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onExtra, onAvised, onRetry, live, later = [], onReorder, perm}: {
+export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm}: {
   route: any; cargo: any; ost: Record<string, any>; allStops: any[];
   onLoaded: (st: any, more?: any[]) => void; onUnload: (st: any, more?: any[]) => void;
-  onExtra: (cid: string, kind: 'extras' | 'damage' | 'kolli', data: any) => void;
+  onEdit: (cid: string, st: any) => void;
   onAvised: (cid: string) => void;
   onRetry: (cid: string) => void; live: boolean; later?: any[]; onReorder?: (keys: string[] | null) => void; perm?: any;
 }) {
   const [focus, setFocus] = useState<string | null>(null); // annat stopp än NÄSTA valt som "nu"
   const [callStop, setCallStop] = useState<any>(null);
   const [sms, setSms] = useState<any>(null);
-  const [more, setMore] = useState<{st: any; cid: string} | null>(null);
+  const [listOpen, setListOpen] = useState(false);
   const [fullInfo, setFullInfo] = useState<Record<string, boolean>>({});
   const [reorder, setReorder] = useState(false);
   const [unsel, setUnsel] = useState<Record<string, boolean>>({}); // order på samma ställe som du bockat ur
@@ -188,9 +189,6 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   }, [route, ost]);
 
   const p = route.plan;
-  const heroIdx = Math.max(0, focus ? rows.findIndex(r => r.kind + r.cid === focus) : 0);
-  const hero = rows[heroIdx];
-  const rest = rows.filter((_, i) => i !== heroIdx);
   // Hela körordningen (även lossningar som väntar på sin hämtning) för "Ändra ordning".
   const orderItems = useMemo(() => (route.order || []).map((s: any, i: number) => ({key: s.pickup ? 'p' + s.pickup : 'd' + s.drop, kind: s.pickup ? 'pickup' : 'drop', cid: s.pickup || s.drop, st: s, plan: (route.plan.rows || [])[i]})), [route]);
 
@@ -298,7 +296,6 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     return out;
   }, [rows]);
   const heroPl = places.find(pl => pl.key === focus) || places[0];
-  const restPl = places.filter(pl => pl !== heroPl);
   const multi = !perm || perm.multi !== false; // kontoret kan stänga av flera order samtidigt
   const otherOf = (r: Row) => r.kind === 'pickup'
     ? (allStops.find((s: any) => s.drop === r.cid) || later.find((s: any) => s.drop === r.cid))
@@ -313,13 +310,17 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
 
   const ordRow = (list: Row[], r: Row) => {
     const on = isOn(list, r), other = otherOf(r);
+    const nEd = ((ost[r.cid] || {}).edits || []).length;
     return (
-      <View key={k(r)} style={[o.ord, !on && {opacity: 0.5}]}>
-        <Pressable hitSlop={10} onPress={() => toggle(list, r)}><View style={[o.ck, on && o.ckOn]}>{on ? <Bi n="check2" size={14} color="#FFFFFF" /> : null}</View></Pressable>
-        <Pressable style={{flex: 1, minWidth: 0}} onPress={() => other && setPlaceSheet({st: other, role: r.kind === 'pickup' ? 'MOTTAGARE · dit godset ska' : 'AVSÄNDARE · där det hämtades'})}>
-          <Text style={o.ordT} numberOfLines={1}>{goodsOf(r)}<Text style={o.ordNo}>{r.st.orderNo ? `  ·  ${r.st.orderNo}` : ''}</Text></Text>
-          {other ? <Text style={o.ordS} numberOfLines={1}>{r.kind === 'pickup' ? '→ ' : '← '}<Text style={o.ordSB}>{placeName(other)}</Text>{other.area ? ` · ${other.area}` : ''}  ›</Text> : null}
+      <View key={k(r)} style={o.li}>
+        <Pressable hitSlop={12} onPress={() => toggle(list, r)} style={{paddingVertical: 4}}><View style={[o.ck, on && o.ckOn]}>{on ? <Bi n="check2" size={14} color="#FFFFFF" /> : null}</View></Pressable>
+        <Pressable style={[{flex: 1, minWidth: 0}, !on && {opacity: 0.5}]} onPress={() => other && setPlaceSheet({st: other, role: r.kind === 'pickup' ? 'MOTTAGARE · dit godset ska' : 'AVSÄNDARE · där det hämtades'})}>
+          <Text style={o.liT} numberOfLines={1}>{goodsOf(r)}</Text>
+          <Text style={o.ordS} numberOfLines={1}>{other ? <>{r.kind === 'pickup' ? '→ ' : 'från '}<Text style={o.ordSB}>{placeName(other)}</Text>{other.area ? ` · ${other.area}` : ''}</> : null}{r.st.orderNo ? `  ·  ${r.st.orderNo}` : ''}</Text>
           {syncBad(r) ? <Text style={[o.ordS, {color: C.bad}]} onPress={() => onRetry(r.cid)}>Inte bekräftad i Opter – tryck för att skicka igen</Text> : null}
+        </Pressable>
+        <Pressable hitSlop={8} style={o.liMore} onPress={() => onEdit(r.cid, r.st)}>
+          <Bi n="three-dots" size={18} color={nEd ? C.accentInk : C.dim} />
         </Pressable>
       </View>
     );
@@ -362,57 +363,41 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   const doLoad = (list: Row[]) => { const ch = list.filter(r => isOn(list, r)); if (!ch.length) return; resetSel(); onLoaded(ch[0].st, ch.slice(1).map(r => r.st)); };
   const doUnload = (list: Row[]) => { const ch = list.filter(r => isOn(list, r)); if (!ch.length) return; resetSel(); onUnload(ch[0].st, ch.slice(1).map(r => r.st)); };
 
-  const heroPlace = (pl: Place) => {
+  // ---- A · Fokus: ett ställe, stort ----
+  const heroIdx = Math.max(0, places.indexOf(heroPl));
+  const goTo = (i: number) => { const pl = places[Math.max(0, Math.min(places.length - 1, i))]; if (!pl) return; setUnsel({}); setRadio({}); setOpenG({}); setFocus(i === 0 ? null : pl.key); };
+  const focusView = (pl: Place) => {
     const st = pl.st;
     const all = [...pl.drops, ...pl.picks];
     const latest = all.map(r => r.st.tLatest).filter(Boolean)[0];
     const notes = uniqNotes(all.flatMap(r => [r.st.adrMsg, r.st.info]), '');
-    const tel = st.tel || [];
-    const mob = tel.find((t: any) => isMobile(t.num));
     // Avisering: närmaste som inte är gjord.
     const av = pl.drops.map(r => ({r, a: r.st.avise})).find(x => x.a && !(ost[x.r.cid] || {}).avisedAt);
     const avAt = av && av.r.plan && av.r.plan.eta ? new Date(new Date(av.r.plan.eta).getTime() - av.a.min * 60000) : null;
     const avDue = avAt && now >= avAt.getTime();
-    const nDrop = pl.drops.filter(r => isOn(pl.drops, r)).length, nPick = pl.picks.filter(r => isOn(pl.picks, r)).length;
+    const next = places[heroIdx + 1];
     return (
-      <View style={o.hero}>
-        <View style={o.heroTop}>
-          <View style={{flex: 1, minWidth: 0}}>
-            <View style={o.headRow}>
-              <View style={o.nextBdg}><Text style={o.nextTxt}>{focus ? 'VALT' : 'NÄSTA'}</Text></View>
-              <Text style={o.num}>{pl.eta ? `ca ${hhmm(pl.eta)}` : ''}{latest ? `  ·  senast ${whenText(latest)}` : ''}</Text>
-              {pl.late ? <View style={o.lateTag}><Text style={o.lateTxt}>{pl.late} min sen</Text></View> : null}
-            </View>
-            <Text style={o.pn} numberOfLines={2}>{placeName(st)}</Text>
-            <Text style={o.pa} numberOfLines={2}>{[st.adr, st.area].filter(Boolean).join(', ')}</Text>
-          </View>
-          <Pressable style={o.gpsBig} onPress={() => navigate(st)} onLongPress={() => setNavFor(st)} hitSlop={6}>
-            <Bi n="cursor-fill" size={22} color={C.onAccent} />
-          </Pressable>
+      <View>
+        <View style={o.fTags}>
+          {pl.drops.length ? <View style={[o.verb, {backgroundColor: C.okSoft}]}><Text style={[o.verbTxt, {color: C.accent2}]}>LOSSA {pl.drops.length}</Text></View> : null}
+          {pl.picks.length ? <View style={[o.verb, {backgroundColor: C.accentSoft}]}><Text style={[o.verbTxt, {color: C.accentInk}]}>HÄMTA {pl.picks.length}</Text></View> : null}
+          {pl.late ? <View style={o.lateTag}><Text style={o.lateTxt}>{pl.late} min sen</Text></View> : null}
         </View>
-
-        <View style={o.step}>
-          {!!st.code && <View style={o.code}><Bi n="key-fill" size={13} color={C.accentInk} /><Text style={o.codeT}>{st.code}</Text></View>}
-          {tel.length > 0 && (
-            <Pressable style={o.chipBtn} onPress={() => (tel.length === 1 ? dial(tel[0].num) : setCallStop(st))}>
-              <Bi n="telephone-fill" size={13} color={C.people} /><Text style={o.chipTxt} numberOfLines={1}>{tel.length === 1 ? String(tel[0].label).replace(/\s*\(.*?\)/g, '').split(' ')[0] : 'Ring'}</Text>
-            </Pressable>
-          )}
-          {mob && (
-            <Pressable style={o.chipBtn} onPress={() => setSms({name: String(mob.label).replace(/\s*\(mobil\)/i, ''), num: mob.num, who: st.who})}>
-              <Bi n="chat-dots-fill" size={13} color={C.people} /><Text style={o.chipTxt}>SMS</Text>
-            </Pressable>
-          )}
-          <View style={{flex: 1}} />
-          <Pressable style={o.chipBtn} onPress={() => setPlaceSheet({st, role: pl.picks.length && !pl.drops.length ? 'AVSÄNDARE' : 'MOTTAGARE', rows: all})}>
-            <Text style={o.chipTxt}>Mer</Text><Bi n="chevron-right" size={12} color={C.dim} />
-          </Pressable>
+        <Pressable onPress={() => setPlaceSheet({st, role: pl.picks.length && !pl.drops.length ? 'AVSÄNDARE' : 'MOTTAGARE', rows: all})}>
+          <Text style={o.fName}>{placeName(st)}</Text>
+          <Text style={o.fAdr}>{[st.adr, st.area].filter(Boolean).join(', ')}</Text>
+        </Pressable>
+        <View style={o.fMeta}>
+          <Bi n="clock" size={13} color={C.dim} />
+          <Text style={o.fMetaTxt}>{[pl.eta ? `ca ${hhmm(pl.eta)}` : '', latest ? `senast ${whenText(latest)}` : ''].filter(Boolean).join('  ·  ') || 'Ingen tid angiven'}</Text>
         </View>
-
+        {!!st.code && (
+          <View style={o.fCode}><Bi n="key-fill" size={18} color={C.accentInk} /><Text style={o.fCodeT}>{st.code}</Text><Text style={o.fCodeL}>PORTKOD</Text></View>
+        )}
         {notes.length > 0 && (
           <Pressable style={o.info} onPress={() => setPlaceSheet({st, role: 'INFO', rows: all})}>
             <Bi n="info-circle" size={15} color={C.dim} style={{marginTop: 1}} />
-            <Text style={o.infoTxt} numberOfLines={2}>{notes.join(' · ')}</Text>
+            <Text style={o.infoTxt} numberOfLines={3}>{notes.join(' · ')}</Text>
           </Pressable>
         )}
         {avAt && (
@@ -422,21 +407,47 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
             <Text style={[o.aviseCall, avDue && {color: C.onAccent}]}>{av!.a.who ? 'Ring' : 'Klar'}</Text>
           </Pressable>
         )}
-
         {section(pl.drops)}
         {section(pl.picks)}
-
-        {pl.drops.length > 0 && (
-          <Slider key={'d' + pl.key + nDrop} label={`Dra för Lossad${nDrop > 1 ? ` · ${nDrop} order` : ''}`} tone="ok" onDone={() => doUnload(pl.drops)} />
-        )}
-        {pl.picks.length > 0 && (
-          <Slider key={'p' + pl.key + nPick} label={`Dra för Lastad${nPick > 1 ? ` · ${nPick} order` : ''}`} tone="go" onDone={() => doLoad(pl.picks)} />
-        )}
+        {next ? (
+          <Pressable style={o.fNext} onPress={() => goTo(heroIdx + 1)}>
+            <Text style={o.fNextTxt} numberOfLines={1}>Sedan: <Text style={{color: C.ink, fontWeight: '800'}}>{placeName(next.st)}</Text>{next.eta ? `  ·  ${hhmm(next.eta)}` : ''}</Text>
+            <Bi n="chevron-right" size={13} color={C.faint} />
+          </Pressable>
+        ) : null}
         {focus ? (
-          <Pressable hitSlop={10} onPress={() => setFocus(null)} style={{alignSelf: 'center', marginTop: 12}}>
+          <Pressable hitSlop={10} onPress={() => setFocus(null)} style={{alignSelf: 'center', marginTop: 10}}>
             <Text style={o.link}>Tillbaka till nästa i ordningen</Text>
           </Pressable>
         ) : null}
+      </View>
+    );
+  };
+  // Tummzonen: GPS · Ring · SMS + dragknappen för stället som visas.
+  const dock = (pl: Place) => {
+    const st = pl.st;
+    const tel = st.tel || [];
+    const mob = tel.find((t: any) => isMobile(t.num));
+    const nDrop = pl.drops.filter(r => isOn(pl.drops, r)).length, nPick = pl.picks.filter(r => isOn(pl.picks, r)).length;
+    return (
+      <View style={o.dock}>
+        <View style={o.dockRow}>
+          <Pressable style={[o.round, {backgroundColor: C.accent}]} onPress={() => navigate(st)} onLongPress={() => setNavFor(st)} android_ripple={{color: C.edge}}>
+            <Bi n="cursor-fill" size={18} color={C.onAccent} /><Text style={[o.roundTxt, {color: C.onAccent}]}>GPS</Text>
+          </Pressable>
+          <Pressable disabled={!tel.length} style={[o.round, !tel.length && {opacity: 0.35}]} onPress={() => (tel.length === 1 ? dial(tel[0].num) : setCallStop(st))} android_ripple={{color: C.edge}}>
+            <Bi n="telephone-fill" size={18} color={C.people} /><Text style={[o.roundTxt, {color: C.people}]}>Ring</Text>
+          </Pressable>
+          <Pressable disabled={!mob} style={[o.round, !mob && {opacity: 0.35}]} onPress={() => mob && setSms({name: String(mob.label).replace(/\s*\(mobil\)/i, ''), num: mob.num, who: st.who})} android_ripple={{color: C.edge}}>
+            <Bi n="chat-dots-fill" size={18} color={C.people} /><Text style={[o.roundTxt, {color: C.people}]}>SMS</Text>
+          </Pressable>
+        </View>
+        {pl.drops.length > 0 && (
+          <Slider style={{marginTop: 8}} key={'d' + pl.key + nDrop} label={`Dra för Lossad${nDrop > 1 ? ` · ${nDrop}` : ''}`} tone="ok" onDone={() => doUnload(pl.drops)} />
+        )}
+        {pl.picks.length > 0 && (
+          <Slider style={{marginTop: 8}} key={'p' + pl.key + nPick} label={`Dra för Lastad${nPick > 1 ? ` · ${nPick}` : ''}`} tone="go" onDone={() => doLoad(pl.picks)} />
+        )}
       </View>
     );
   };
@@ -468,9 +479,9 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         {peopleRows(st)}
         {ps.rows && ps.rows.length ? (
           <View style={{marginTop: 14}}>
-            <Text style={o.secLbl}>ORDER HÄR · tillägg och avvikelse</Text>
+            <Text style={o.secLbl}>ORDER HÄR · tryck för tillägg, bild, avvikelse</Text>
             {ps.rows.map((r: Row) => (
-              <Pressable key={k(r)} style={o.ord} onPress={() => { setPlaceSheet(null); setMore({st: r.st, cid: r.cid}); }}>
+              <Pressable key={k(r)} style={o.ord} onPress={() => { setPlaceSheet(null); onEdit(r.cid, r.st); }}>
                 <Bi n={r.kind === 'pickup' ? 'box-seam-fill' : 'check-circle-fill'} size={14} color={r.kind === 'pickup' ? C.accentInk : C.accent2} />
                 <Text style={[o.ordT, {flex: 1}]} numberOfLines={1}>{goodsOf(r)}<Text style={o.ordNo}>{r.st.orderNo ? `  ·  ${r.st.orderNo}` : ''}</Text></Text>
                 <Bi n="three-dots" size={16} color={C.dim} />
@@ -546,61 +557,41 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     );
   };
 
-  const restRow = ({item: pl}: {item: Place}) => (
-    <Pressable style={o.row} onPress={() => { resetSel(); setFocus(pl.key); }}>
-      <Text style={[o.rowEta, {width: 44}, pl.late ? {color: C.bad} : null]}>{pl.eta ? hhmm(pl.eta) : ''}</Text>
-      <View style={{flex: 1, minWidth: 0}}>
-        <Text style={o.rowWho} numberOfLines={1}>{placeName(pl.st)}</Text>
-        <Text style={o.rowMeta} numberOfLines={1}>{[pl.drops.length ? `Lossa ${pl.drops.length}` : '', pl.picks.length ? `Hämta ${pl.picks.length}` : '', pl.st.area || ''].filter(Boolean).join(' · ')}</Text>
-      </View>
-      <Pressable style={o.gpsSm} hitSlop={6} onPress={() => navigate(pl.st)} onLongPress={() => setNavFor(pl.st)}><Bi n="cursor-fill" size={14} color={C.ink} /></Pressable>
-    </Pressable>
-  );
-
   return (
     <View style={{flex: 1}}>
       {mark ? markView() : (
-      <FlatList
-        data={restPl}
-        keyExtractor={pl => pl.key}
-        renderItem={restRow}
-        style={{flex: 1}}
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={{paddingHorizontal: 14, paddingBottom: bottom}}
-        ListHeaderComponent={
-          heroPl ? (
-            <>
-              {heroPlace(heroPl)}
-              {(restPl.length > 0 || (multi && rows.length > 1)) && (
-                <View style={o.restHead}>
-                  <View style={{flex: 1}}>
-                    <Text style={o.restTitle}>Sedan{route.manual ? '  ·  din ordning' : ''}</Text>
-                    <Text style={[o.restSum, {marginTop: 2}]}>{places.length} ställen · klar {p.end ? hhmm(p.end) : '–'} · {Math.round(p.totKm)} km</Text>
-                  </View>
-                  {multi && rows.length > 1 ? (
-                    <Pressable style={o.reBtn} hitSlop={6} onPress={() => { setSel({}); setMark(true); }}>
-                      <Bi n="check-square-fill" size={13} color={C.ink} /><Text style={o.reTxt}>Markera</Text>
-                    </Pressable>
-                  ) : null}
-                  {onReorder && orderItems.length > 1 ? (
-                    <Pressable style={[o.reBtn, {marginLeft: 6}]} hitSlop={6} onPress={() => setReorder(true)}>
-                      <Bi n="list-ul" size={14} color={C.ink} /><Text style={o.reTxt}>Ordning</Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              )}
-            </>
-          ) : undefined
-        }
-        ListEmptyComponent={heroPl ? undefined : (
-          <View style={o.allDoneBox}>
-            <Bi n="check2-all" size={34} color={C.accent2} />
-            <Text style={o.allDone}>Allt är klart för idag. Snyggt jobbat!</Text>
+      <>
+        {heroPl ? (
+          <View style={o.fBar}>
+            <Pressable hitSlop={8} disabled={heroIdx === 0} style={[o.fArrow, heroIdx === 0 && {opacity: 0.3}]} onPress={() => goTo(heroIdx - 1)}><Bi n="chevron-left" size={16} color={C.ink} /></Pressable>
+            <Pressable style={o.fCount} onPress={() => setListOpen(true)} hitSlop={6}>
+              <View style={o.dots}>{places.slice(0, 9).map((pl, i) => <View key={pl.key} style={[o.dot, i === heroIdx && o.dotOn]} />)}</View>
+              <Text style={o.fCountTxt}>Ställe {heroIdx + 1} av {places.length}</Text>
+            </Pressable>
+            <Pressable hitSlop={8} disabled={heroIdx >= places.length - 1} style={[o.fArrow, heroIdx >= places.length - 1 && {opacity: 0.3}]} onPress={() => goTo(heroIdx + 1)}><Bi n="chevron-right" size={16} color={C.ink} /></Pressable>
+            <View style={{flex: 1}} />
+            {multi && rows.length > 1 ? (
+              <Pressable style={o.reBtn} hitSlop={6} onPress={() => { setSel({}); setMark(true); }}>
+                <Bi n="check-square-fill" size={13} color={C.ink} /><Text style={o.reTxt}>Markera</Text>
+              </Pressable>
+            ) : null}
+            {onReorder && orderItems.length > 1 ? (
+              <Pressable style={[o.reBtn, {marginLeft: 6}]} hitSlop={6} onPress={() => setReorder(true)}>
+                <Bi n="list-ul" size={14} color={C.ink} />
+              </Pressable>
+            ) : null}
           </View>
-        )}
-        ListFooterComponent={
-          later.length ? (
-            <View style={{marginTop: 18}}>
+        ) : null}
+        <ScrollView style={{flex: 1}} contentContainerStyle={{paddingHorizontal: 18, paddingBottom: 24}} keyboardShouldPersistTaps="handled">
+          {heroPl ? focusView(heroPl) : (
+            <View style={o.allDoneBox}>
+              <Bi n="check2-all" size={40} color={C.accent2} />
+              <Text style={o.allDoneBig}>Allt klart</Text>
+              <Text style={o.allDone}>Snyggt jobbat! Det du gjort finns under Klart – där kan du ändra i efterhand.</Text>
+            </View>
+          )}
+          {later.length ? (
+            <View style={{marginTop: 22}}>
               <View style={o.restHead}><Text style={o.restTitle}>Senare dagar</Text><Text style={o.restSum}>{laterOrders.length} order</Text></View>
               {laterOrders.map((g: any) => (
                 <Pressable key={g.cid} style={o.row} onPress={() => setPlanned(g)}>
@@ -613,17 +604,23 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
                 </Pressable>
               ))}
             </View>
-          ) : undefined
-        }
-      />)}
+          ) : null}
+        </ScrollView>
+        {heroPl ? dock(heroPl) : null}
+      </>)}
 
-      <MoreSheet
-        stop={more && more.st}
-        cargo={cargo}
-        saved={more ? ost[more.cid] : null}
-        onClose={() => setMore(null)}
-        onSave={(kind, data) => { if (more) onExtra(more.cid, kind, data); setMore(null); }}
-      />
+      <Sheet open={listOpen} onClose={() => setListOpen(false)} title="Alla ställen idag" sub={`${places.length} ställen · klar ${p.end ? hhmm(p.end) : '–'} · ${Math.round(p.totKm || 0)} km${route.manual ? ' · din ordning' : ''}`} scroll>
+        {places.map((pl, i) => (
+          <Pressable key={pl.key} style={[o.row, i === heroIdx && {borderColor: C.accent, borderWidth: 2}]} onPress={() => { setListOpen(false); goTo(i); }}>
+            <Text style={[o.rowEta, {width: 44}, pl.late ? {color: C.bad} : null]}>{pl.eta ? hhmm(pl.eta) : ''}</Text>
+            <View style={{flex: 1, minWidth: 0}}>
+              <Text style={o.rowWho} numberOfLines={1}>{placeName(pl.st)}</Text>
+              <Text style={o.rowMeta} numberOfLines={1}>{[pl.drops.length ? `Lossa ${pl.drops.length}` : '', pl.picks.length ? `Hämta ${pl.picks.length}` : '', pl.st.area || ''].filter(Boolean).join(' · ')}</Text>
+            </View>
+            <Pressable style={o.gpsSm} hitSlop={6} onPress={() => navigate(pl.st)} onLongPress={() => setNavFor(pl.st)}><Bi n="cursor-fill" size={14} color={C.ink} /></Pressable>
+          </Pressable>
+        ))}
+      </Sheet>
       {placeSheetView()}
       <CallSheet st={callStop} onClose={() => setCallStop(null)} />
       <SmsSheet to={sms} onClose={() => setSms(null)} />
@@ -761,6 +758,32 @@ const o = themed(() => StyleSheet.create({
   plannedNote: {color: C.faint, fontSize: 12, textAlign: 'center', marginTop: 4, marginBottom: 6, lineHeight: 17},
   backDrive: {flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'center', paddingVertical: 8, marginBottom: 4},
   backDriveTxt: {color: C.dim, fontSize: 13, fontWeight: '700'},
+  // A · Fokus
+  fBar: {flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingTop: 2, paddingBottom: 6},
+  fArrow: {width: 38, height: 38, borderRadius: 19, backgroundColor: C.panel, alignItems: 'center', justifyContent: 'center'},
+  fCount: {alignItems: 'center', gap: 4, paddingHorizontal: 4},
+  fCountTxt: {color: C.dim, fontSize: 12, fontWeight: '700'},
+  dots: {flexDirection: 'row', gap: 4},
+  dot: {width: 6, height: 6, borderRadius: 3, backgroundColor: C.edge},
+  dotOn: {width: 16, backgroundColor: C.ink},
+  fTags: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12},
+  fName: {color: C.ink, fontSize: 32, fontWeight: '900', lineHeight: 36, letterSpacing: -0.6, marginTop: 10},
+  fAdr: {color: C.dim, fontSize: 17, marginTop: 4},
+  fMeta: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8},
+  fMetaTxt: {color: C.dim, fontSize: 13, fontWeight: '700'},
+  fCode: {flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14},
+  fCodeT: {color: C.ink, fontSize: 28, fontWeight: '900', letterSpacing: 3},
+  fCodeL: {color: C.faint, fontSize: 11, fontWeight: '800', letterSpacing: 1},
+  fNext: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 16, paddingVertical: 6},
+  fNextTxt: {color: C.dim, fontSize: 13, flex: 1},
+  li: {flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomColor: C.edge, borderBottomWidth: StyleSheet.hairlineWidth},
+  liT: {color: C.ink, fontSize: 15.5, fontWeight: '800'},
+  liMore: {width: 38, height: 38, borderRadius: 19, backgroundColor: C.panel, alignItems: 'center', justifyContent: 'center'},
+  dock: {paddingHorizontal: 12, paddingTop: 8, paddingBottom: 10, backgroundColor: C.bg},
+  dockRow: {flexDirection: 'row', gap: 8},
+  round: {flex: 1, height: 54, borderRadius: 14, backgroundColor: C.panel, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8},
+  roundTxt: {fontSize: 14.5, fontWeight: '800'},
+  allDoneBig: {color: C.ink, fontSize: 26, fontWeight: '900'},
   // SMS
   sheetLbl: {color: C.dim, fontSize: 12, fontWeight: '600', marginTop: 6},
   minRow: {flexDirection: 'row', gap: 6, marginTop: 8, marginBottom: 6},
@@ -796,11 +819,14 @@ const o = themed(() => StyleSheet.create({
   doneTime: {color: C.dim, fontSize: 14, fontWeight: '800'},
   doneWho2: {color: C.ink, fontSize: 17, fontWeight: '800', marginTop: 8},
   doneMeta: {color: C.faint, fontSize: 12, marginTop: 2},
+  doneHint: {color: C.faint, fontSize: 12.5, lineHeight: 18, marginBottom: 10, marginTop: 2},
+  doneEdit: {flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.panel2, borderRadius: 14, paddingHorizontal: 10, height: 28},
+  doneEditTxt: {color: C.ink, fontSize: 12.5, fontWeight: '800'},
 }));
 
 
-/* ---- Klart: allt som är lossat (i RUTT eller i Opter) ---- */
-export function DoneView({done, onRetry}: {done: any[]; onRetry: (cid: string) => void}) {
+/* ---- Klart: allt som är lossat (i RUTT eller i Opter). Tryck på en order = ändra i efterhand (som Opter). ---- */
+export function DoneView({done, onRetry, onOpen}: {done: any[]; onRetry: (cid: string) => void; onOpen: (d: any) => void}) {
   const bottom = useSafeAreaInsets().bottom + 24;
   return (
     <FlatList
@@ -808,24 +834,30 @@ export function DoneView({done, onRetry}: {done: any[]; onRetry: (cid: string) =
       style={{flex: 1}}
       keyExtractor={d => String(d.cid)}
       contentContainerStyle={{paddingHorizontal: 14, paddingBottom: bottom}}
+      ListHeaderComponent={done.length ? <Text style={o.doneHint}>Tryck på en order för att ändra status, lägga till bild, tillägg, ändring eller avvikelse.</Text> : undefined}
       ListEmptyComponent={<View style={o.allDoneBox}><Bi n="inbox-fill" size={30} color={C.faint} /><Text style={o.allDone}>Inget klart än idag.</Text></View>}
-      renderItem={({item: d}) => (
-        <View style={o.doneCard}>
-          <View style={o.doneTop}>
-            <Bi n={d.rejected ? 'x-circle-fill' : 'check-circle-fill'} size={16} color={d.rejected ? C.bad : C.accent2} />
-            <Text style={[o.doneTag, {color: d.rejected ? C.bad : C.accent2}]}>{d.rejected ? 'NEKAD' : 'LOSSAD'}</Text>
-            <View style={{flex: 1}} />
-            <Text style={o.doneTime}>{d.doneAt ? hhmm(new Date(d.doneAt)) : ''}</Text>
-          </View>
-          <Text style={o.doneWho2} numberOfLines={1}>{d.who || '—'}</Text>
-          <Text style={o.doneMeta} numberOfLines={1}>{[d.adr, d.area].filter(Boolean).join(', ')}{d.orderNo ? `  ·  Order ${d.orderNo}` : ''}</Text>
-          {(d.pod && (d.pod.name || (d.pod.photos && d.pod.photos.length))) ? (
-            <Text style={o.doneMeta}>{d.pod.name ? `Mottagare: ${d.pod.name}` : ''}{d.pod.photos && d.pod.photos.length ? `  ·  ${d.pod.photos.length} foto` : ''}{d.damages ? '  ·  avvikelse' : ''}</Text>
-          ) : null}
-          {d.byOpter && <Text style={o.doneMeta}>Klarmarkerad i Opter</Text>}
-          <SyncLine state={d.sync} label="Lossad" onRetry={() => onRetry(d.cid)} />
-        </View>
-      )}
+      renderItem={({item: d}) => {
+        const last = (d.edits || [])[d.edits.length - 1];
+        return (
+          <Pressable style={o.doneCard} onPress={() => onOpen(d)} android_ripple={{color: C.edge}}>
+            <View style={o.doneTop}>
+              <Bi n={d.rejected ? 'x-circle-fill' : 'check-circle-fill'} size={16} color={d.rejected ? C.bad : C.accent2} />
+              <Text style={[o.doneTag, {color: d.rejected ? C.bad : C.accent2}]}>{d.rejected ? 'NEKAD' : 'LOSSAD'}</Text>
+              <Text style={o.doneTime}>{d.doneAt ? hhmm(new Date(d.doneAt)) : ''}</Text>
+              <View style={{flex: 1}} />
+              {d.locked ? <Bi n="lock-fill" size={14} color={C.faint} /> : <View style={o.doneEdit}><Bi n="pencil-square" size={13} color={C.ink} /><Text style={o.doneEditTxt}>Ändra</Text></View>}
+            </View>
+            <Text style={o.doneWho2} numberOfLines={1}>{d.who || '—'}</Text>
+            <Text style={o.doneMeta} numberOfLines={1}>{[d.adr, d.area].filter(Boolean).join(', ')}{d.orderNo ? `  ·  Order ${d.orderNo}` : ''}</Text>
+            {(d.pod && (d.pod.name || (d.pod.photos && d.pod.photos.length))) ? (
+              <Text style={o.doneMeta}>{d.pod.name ? `Mottagare: ${d.pod.name}` : ''}{d.pod.photos && d.pod.photos.length ? `  ·  ${d.pod.photos.length} foto` : ''}</Text>
+            ) : null}
+            {last ? <Text style={[o.doneMeta, {color: last.state === 'ok' ? C.accent2 : last.state === 'failed' || last.state === 'unconfirmed' ? C.bad : C.dim}]} numberOfLines={1}>{last.state === 'ok' ? '✓ ' : ''}{last.label}{d.edits.length > 1 ? `  +${d.edits.length - 1}` : ''}</Text> : null}
+            {d.locked ? <Text style={o.doneMeta}>Klarmarkerad av kontoret – låst</Text> : d.byOpter ? <Text style={o.doneMeta}>Lossad i Opter</Text> : null}
+            <SyncLine state={d.sync} label="Lossad" onRetry={() => onRetry(d.cid)} />
+          </Pressable>
+        );
+      }}
     />
   );
 }

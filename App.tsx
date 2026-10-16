@@ -14,6 +14,7 @@ import {Bi} from './src/ui/Bi';
 import {Sheet} from './src/ui/parts';
 import OrdersView, {DoneView, setNavApp, NavApp} from './src/ui/OrdersView';
 import SignScreen from './src/ui/SignScreen';
+import EditSheet, {DEMO_OPTS} from './src/ui/EditOrder';
 import NewOrdersView from './src/ui/NewOrdersView';
 import LoadView from './src/ui/LoadView';
 import {loadJSON, saveJSON, ORDERS_KEY, NAMES_KEY, companyKey, rememberName} from './src/store';
@@ -29,7 +30,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '16 okt · B ett ställe i taget';
+const BUILD = '16 okt · A Fokus + ändra i efterhand';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -119,6 +120,8 @@ function AppInner(): React.JSX.Element {
   const [newState, setNewState] = useState<Record<string, 'sending' | 'failed'>>({});
   const [names, setNames] = useState<Record<string, string[]>>({}); // sparade mottagarnamn per företag
   const [signStop, setSignStop] = useState<any>(null); // stopp som signeras just nu
+  const [editFor, setEditFor] = useState<{cid: string; st: any; done: boolean} | null>(null); // order som ändras (Klart eller planen)
+  const addTimers = useRef<Record<string, any>>({}); // tillägg valda vid lossning – skickas när Ångra gått ut
   const [toast, setToast] = useState<{text: string; undo: (() => void) | null} | null>(null);
   const toastTimer = useRef<any>(null);
   const [diag, setDiag] = useState(false);
@@ -182,7 +185,7 @@ function AppInner(): React.JSX.Element {
 
   const [resources, setResources] = useState<{resId: number; name: string}[]>([]);
   const [query, setQuery] = useState('');
-  const [orders, setOrders] = useState<{cargo: any; stops: any[]; perm?: any}>({cargo: {}, stops: []});
+  const [orders, setOrders] = useState<{cargo: any; stops: any[]; perm?: any; opts?: any}>({cargo: {}, stops: []});
 
   const filtered = useMemo(
     () => (query ? resources.filter(r => r.name.toLowerCase().includes(query.toLowerCase())) : resources),
@@ -207,8 +210,8 @@ function AppInner(): React.JSX.Element {
   const newOrders = useMemo(() => cidsAll.filter(c => cls[c] === 'new').map(cid => ({cid, ...legs(cid), state: newState[cid]})), [cidsAll, cls, newState]);
   const doneOrders = useMemo(() => cidsAll.filter(c => cls[c] === 'done').map(cid => {
     const {pick, drop} = legs(cid); const st = drop || pick || {}; const o = ost[cid] || {}; const L = st.live || {};
-    return {cid, who: st.who, adr: st.adr, area: st.area, orderNo: st.orderNo, doneAt: o.doneAt || L.doneAt || null, pod: o.pod, damages: o.damages && o.damages.length,
-      sync: o.sync && o.sync.unload, byOpter: !o.doneAt, rejected: /nekad/i.test(String(L.cur || ''))};
+    return {cid, st, who: st.who, adr: st.adr, area: st.area, orderNo: st.orderNo, doneAt: o.doneAt || L.doneAt || null, pod: o.pod, edits: o.edits || [],
+      sync: o.sync && o.sync.unload, byOpter: !o.doneAt, rejected: /nekad/i.test(String(L.cur || '')), locked: !!(L.locked || (L.edit && L.edit.completed))};
   }).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)), [cidsAll, cls, ost]);
   // Dagens plan: "att göra"-ordrar. Steg som ska göras en senare dag läggs under "Senare dagar".
   const {src, later} = useMemo(() => {
@@ -318,24 +321,7 @@ function AppInner(): React.JSX.Element {
   async function sendUnload(st: any, pod: any) {
     const L = st.live;
     if (!live || !L || !L.unloadSt) return;
-    const scale = PixelRatio.get();
-    const first = (pod.photos || [])[0];
-    const typeId = pod.typeId || (L.podType && L.podType.id) || 0;
-    // Position bara om den är färsk (< 10 min), som Opter.
-    let pos: any = null;
-    try { const l = NativeModules.RuttLocation && (await NativeModules.RuttLocation.getLast()); if (l && l.lat && Date.now() - l.time < 10 * 60000) pos = l; } catch (e) {}
-    const podData = typeId ? {
-      // Ordern utan egna kvittenstyper: Opter skickar SPT_Id = −DPT_Id. Annars DPT_Id.
-      sptId: L.hasSpt ? 0 : -typeId,
-      dptId: L.hasSpt ? typeId : 0,
-      sptIdSub: !L.hasSpt && pod.subId ? pod.subId : 0,
-      dptIdSub: L.hasSpt && pod.subId ? pod.subId : 0,
-      name: pod.name || '', remark: pod.comment || '', comment: pod.comment2 || '',
-      signature: pod.sig ? P.signatureString(pod.sig.strokes, scale) : '',
-      packageCount: pod.kolli != null ? pod.kolli : null,
-      lat: pos ? pos.lat : null, lng: pos ? pos.lng : null,
-      image: first && first.b64 ? Buffer.from(first.b64, 'base64') : null,
-    } : null;
+    const podData = await podPayload(L, pod);
     queueSend(st.drop, 'unload', () => client.setStatus(L, L.unloadSt.id, podData));
   }
   function retrySync(cid: string) {
@@ -376,21 +362,81 @@ function AppInner(): React.JSX.Element {
       setOst(o => { const n = {...o}; for (const x of list) { if (prev[x.pickup]) n[x.pickup] = prev[x.pickup]; else delete n[x.pickup]; } return n; });
     });
   }
-  // Tillägg / avvikelse / ändrat kolliantal från "Mer".
-  function onExtra(cid: string, kind: 'extras' | 'damage' | 'kolli', data: any) {
+  // ---- Ändra en order (Klart eller planen): status, tillägg, ändring, avvikelse, bild, ny kvittens → Opter ----
+  // Ett tryck på "Skicka till Opter" = en sändning, köad efter övriga. Historiken syns på ordern.
+  const b64buf = (x: any) => (x && x.b64 ? Buffer.from(x.b64, 'base64') : null);
+  function setEditState(cid: string, id: string, state: string) {
+    setOst(o => { const cur = o[cid] || {}; return {...o, [cid]: {...cur, edits: (cur.edits || []).map((h: any) => (h.id === id ? {...h, state, at: state === 'ok' ? Date.now() : h.at} : h))}}; });
+  }
+  function sendEdit(cid: string, st: any, edit: any, label: string) {
+    const id = String(Date.now()) + Math.random().toString(36).slice(2, 6);
+    const L = st && st.live;
+    const s0 = edit._status;
     setOst(o => {
-      const cur = o[cid] || {};
-      if (kind === 'extras') return {...o, [cid]: {...cur, extras: data}};
-      if (kind === 'damage') return {...o, [cid]: {...cur, damages: [...(cur.damages || []), data]}};
-      return {...o, [cid]: {...cur, kolli: data.kolli, kg: data.kg}};
+      const cur = {...(o[cid] || {})};
+      cur.edits = [...(cur.edits || []), {id, label, at: Date.now(), state: live && L ? 'sending' : 'demo'}];
+      // Ny status gäller direkt i RUTT: tillbaka till Lastad = in i planen igen, Lossad = till Klart.
+      if (s0) {
+        if (s0.delivery && !s0.pickup) { cur.doneAt = Date.now(); cur.loadedAt = cur.loadedAt || Date.now(); }
+        else if (s0.pickup) { delete cur.doneAt; cur.loadedAt = Date.now(); }
+        else { delete cur.doneAt; delete cur.loadedAt; }
+        cur.sync = {};
+      }
+      return {...o, [cid]: cur};
     });
-    flash(kind === 'extras' ? 'Tillägg sparat' : kind === 'damage' ? 'Avvikelse sparad' : 'Kollin sparat', null);
+    if (!live || !L) { flash(`Demo · ${label} (skickas inte)`, null); return; }
+    const payload: any = {
+      statusId: edit.statusId || 0,
+      addServices: edit.addServices || [],
+      changes: edit.changes || [],
+      damages: (edit.damages || []).map((d: any) => ({...d, images: (d.images || []).map((im: any) => ({name: im.name, bytes: b64buf(im)})).filter((im: any) => im.bytes)})),
+      images: (edit.images || []).map((im: any) => ({comment: im.comment, orderId: im.orderId, bytes: b64buf(im)})).filter((im: any) => im.bytes),
+      pod: edit.pod || null,
+    };
+    flash(`Skickar till Opter · ${label}`, null);
+    sendChain.current = sendChain.current.catch(() => {}).then(async () => {
+      try {
+        const r = await client.editShipment(L, payload);
+        setEditState(cid, id, r.confirmed ? 'ok' : 'unconfirmed');
+        if (r.rutt && r.rutt.stops && r.rutt.stops.length) setOrders(r.rutt);
+        flash(r.confirmed ? `Klart i Opter · ${label}` : `Opter bekräftade inte · ${label}`, null);
+      } catch (e) { setEditState(cid, id, 'failed'); flash(`Kunde inte nå Opter · ${label}`, null); }
+    });
+  }
+  // Kvittensen som Opter vill ha den (samma som vid Lossad).
+  async function podPayload(L: any, pod: any) {
+    const scale = PixelRatio.get();
+    const first = (pod.photos || [])[0];
+    const typeId = pod.typeId || (L.podType && L.podType.id) || 0;
+    let pos: any = null;
+    try { const l = NativeModules.RuttLocation && (await NativeModules.RuttLocation.getLast()); if (l && l.lat && Date.now() - l.time < 10 * 60000) pos = l; } catch (e) {}
+    return typeId ? {
+      sptId: L.hasSpt ? 0 : -typeId, dptId: L.hasSpt ? typeId : 0,
+      sptIdSub: !L.hasSpt && pod.subId ? pod.subId : 0, dptIdSub: L.hasSpt && pod.subId ? pod.subId : 0,
+      name: pod.name || '', remark: pod.comment || '', comment: pod.comment2 || '',
+      signature: pod.sig ? P.signatureString(pod.sig.strokes, scale) : '',
+      packageCount: pod.kolli != null ? pod.kolli : null,
+      lat: pos ? pos.lat : null, lng: pos ? pos.lng : null,
+      image: first && first.b64 ? Buffer.from(first.b64, 'base64') : null,
+    } : null;
   }
   function onAvised(cid: string) { setOst(o => ({...o, [cid]: {...(o[cid] || {}), avisedAt: Date.now()}})); }
 
   // Lossad: kvittensen sparas, ordern flyttar till Klart, namnet minns till nästa gång.
   // Lossad – samma kvittens (signatur/namn/foto) gäller alla order som lossas på stället. Kollin räknas per order.
-  function onSigned(st0: any, pod0: any) {
+  async function onSigned(st0: any, pod0: any) {
+    // Ny kvittens på en order som redan är lossad: bara kvittensen, statusen rörs inte (som Opter).
+    if (st0.repod) {
+      setSignStop(null);
+      const cid = st0.drop;
+      setOst(o => ({...o, [cid]: {...(o[cid] || {}), pod: {...pod0, photos: (pod0.photos || []).map((x: any) => ({uri: x.uri}))}}}));
+      podMem.current[cid] = pod0;
+      const L = st0.live;
+      const pd = live && L ? await podPayload(L, pod0) : null;
+      if (live && L && !pd) { flash('Ordern saknar kvittenstyp i Opter', null); return; }
+      sendEdit(cid, st0, {pod: pd}, `Ny kvittens${pod0.name ? ' · ' + pod0.name : ''}`);
+      return;
+    }
     const list = st0.group && st0.group.length ? st0.group : [st0];
     const many = list.length > 1;
     const prev: Record<string, any> = {};
@@ -408,10 +454,20 @@ function AppInner(): React.JSX.Element {
       const pod = many ? {...pod0, kolli: st.kolli != null ? st.kolli : null} : pod0;
       podMem.current[st.drop] = pod;
       sendUnload(st, pod);
+      // Tillägg valda i kvittensen skickas när Ångra gått ut (samma väntan som Lossad).
+      const adds = (pod0.adds || []).filter((a: any) => a.satId);
+      // Gäller hela stoppet → läggs på första ordern (en väntetid debiteras en gång), som när man gör det i Opter.
+      if (adds.length && st === list[0]) {
+        const mine = adds;
+        {
+          if (addTimers.current[st.drop]) clearTimeout(addTimers.current[st.drop]);
+          addTimers.current[st.drop] = setTimeout(() => { delete addTimers.current[st.drop]; sendEdit(st.drop, st, {addServices: mine.map((a: any) => ({satId: a.satId, number: a.number, descr: ''}))}, 'Tillägg: ' + mine.map((a: any) => a.name + (a.number ? ' ' + a.number : '')).join(', ')); }, 8400);
+        }
+      }
     }
     if (pod0.name) setNames(n => { const nn = rememberName(n, st0.who, pod0.name); saveJSON(NAMES_KEY, nn); return nn; });
     flash(many ? `Lossad · ${list.length} order hos ${st0.who || ''}` : `Lossad · ${st0.who || 'order'}`, () => {
-      list.forEach((x: any) => cancelSend(x.drop, 'unload'));
+      list.forEach((x: any) => { cancelSend(x.drop, 'unload'); if (addTimers.current[x.drop]) { clearTimeout(addTimers.current[x.drop]); delete addTimers.current[x.drop]; } });
       setOst(o => { const n = {...o}; for (const x of list) { if (prev[x.drop]) n[x.drop] = prev[x.drop]; else delete n[x.drop]; } return n; });
     });
   }
@@ -717,7 +773,7 @@ function AppInner(): React.JSX.Element {
             </Pressable>
           )}
 
-          {tab === 'klart' && <DoneView done={doneOrders} onRetry={retrySync} />}
+          {tab === 'klart' && <DoneView done={doneOrders} onRetry={retrySync} onOpen={(d: any) => setEditFor({cid: d.cid, st: d.st, done: true})} />}
           {tab === 'nytt' && <NewOrdersView orders={newOrders} onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={(o: any) => setOrderStatus(o, 'reject')} />}
 
           {tab === 'plan' && !orders.stops.length && !demo && (
@@ -729,7 +785,7 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any, more: any[] = []) => setSignStop(more.length ? {...st, group: [st, ...more]} : st)} onExtra={onExtra} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any, more: any[] = []) => setSignStop(more.length ? {...st, group: [st, ...more]} : st)} onEdit={(cid: string, st: any) => setEditFor({cid, st, done: false})} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} />
           )}
           {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} />}
           {tab === 'chat' && <ChatView msgs={chatList} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} onRetry={deliver} />}
@@ -817,6 +873,14 @@ function AppInner(): React.JSX.Element {
       </Sheet>
 
       <WorkSheet open={workSheet} work={work} live={live} onClose={() => setWorkSheet(false)} onPick={doWork} />
+      <EditSheet
+        item={editFor}
+        opts={demo ? DEMO_OPTS : orders.opts}
+        history={editFor ? ((ost[editFor.cid] || {}).edits || []) : []}
+        onClose={() => setEditFor(null)}
+        onSend={(edit: any, label: string) => editFor && sendEdit(editFor.cid, editFor.st, edit, label)}
+        onRepod={editFor && editFor.done && editFor.st && editFor.st.drop ? () => { const st = editFor.st; setEditFor(null); setSignStop({...st, repod: true}); } : undefined}
+      />
       {signStop && (
         <SignScreen
           stop={signStop}
@@ -933,9 +997,9 @@ function WorkSheet({open, work, live, onClose, onPick}: any) {
 }
 
 const s = themed(() => StyleSheet.create({
-  toast: {position: 'absolute', left: 14, right: 14, bottom: 28, backgroundColor: C.toast, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 12, elevation: 8, shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: {width: 0, height: 4}},
-  toastTxt: {color: '#FFFFFF', fontSize: 15, fontWeight: '700', flex: 1},
-  toastUndo: {color: C.accent, fontSize: 15, fontWeight: '900'},
+  toast: {position: 'absolute', left: 14, right: 14, top: 60, backgroundColor: C.toast, borderColor: C.edge, borderWidth: 1, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 12, elevation: 8, shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: {width: 0, height: 4}},
+  toastTxt: {color: C.ink, fontSize: 15, fontWeight: '700', flex: 1},
+  toastUndo: {color: C.accentInk, fontSize: 15, fontWeight: '900'},
   safe: {flex: 1, backgroundColor: C.bg},
   head: {paddingHorizontal: 18, paddingTop: 14, paddingBottom: 10},
   headTop: {flexDirection: 'row', alignItems: 'center', gap: 6},
