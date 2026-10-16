@@ -13,6 +13,8 @@ const REST_MIN = 45, REST_BY_H = 12;
 const OVER_COST = 2.0, SPEED_KMH = 30, ROUTE_FACTOR = 1.35;
 const SLOTS_WIDE = 3, SLOTS_LONG = 6, TOTAL_SLOTS = SLOTS_WIDE * SLOTS_LONG, CAP_SLOTS = TOTAL_SLOTS - 1;
 const OPT_MS = 140, TIGHT_MIN = 15, GRACE_MIN = 5, NICK_COST = 4, WAIT_COST = 0.8, MAX_WAIT = 240;
+// Omlastning: varje pall som står i vägen (lastad senare, närmare lyften) när en order ska av kostar så här många minuter.
+const BLOCK_MIN = 4;
 
 let CARGO = {}, START = {}, NOW = Date.now(), STOPS = [];
 
@@ -32,7 +34,8 @@ const driveInfo = (a, b) => {
 const activeStops = () => STOPS.filter(s => !s.done);
 function preOnboard() {
   const set = new Set();
-  for (const cid of Object.keys(CARGO)) if (!STOPS.some(s => s.pickup === cid && !s.done)) set.add(cid);
+  // Ombord = det som ska lossas men redan är hämtat. (Inte allt i CARGO – där ligger även klara order och kommande dagars.)
+  for (const s of STOPS) if (s.drop && !s.done && !STOPS.some(x => x.pickup === s.drop && !x.done)) set.add(s.drop);
   return set;
 }
 function servOf(s) {
@@ -136,7 +139,40 @@ function scoreOrder(order, ctx) {
   if (order.length && ctx.homePos) { const h = driveInfo(pos, ctx.homePos).min; drive += h; t += h; }
   if (ctx.endMin != null && t > ctx.endMin) over = t - ctx.endMin;
   if (late > 1000) late = 1000;
-  return broken * 1e6 + late * 3 + nick * NICK_COST + drive + wait * WAIT_COST + tight * 0.3 + over * OVER_COST;
+  // Ordning som tvingar fram omlastning kostar (hämta det som ska av sist först, så hamnar det längst in).
+  const blk = simulateLoad(order, ctx.onboard).blockPal;
+  return blk * BLOCK_MIN + broken * 1e6 + late * 3 + nick * NICK_COST + drive + wait * WAIT_COST + tight * 0.3 + over * OVER_COST;
+}
+
+/*
+ * Lastsimulering – bilen är 3 bred × 6 lång, du lastar alltid mot hytten (lägsta lediga plats först)
+ * och lossar via bakgavellyften. Gods som står i en rad närmare lyften än det som ska av står I VÄGEN.
+ * Det som redan är ombord antas stå bäst möjligt: det som lossas sist längst in.
+ * Returnerar var varje order står, hur bilen ser ut när den är fullast och vad som blockerar vad.
+ */
+function simulateLoad(order, onboardIds, cargo) {
+  const C0 = cargo || CARGO;
+  const palOf = cid => Math.max(1, Math.round((C0[cid] && C0[cid].pal) || 0) || 1);
+  const slots = Array(TOTAL_SLOTS).fill(null);
+  const at = {}; let over = 0, peak = null, peakN = -1, blockPal = 0; const blocks = [];
+  const put = cid => { at[cid] = []; for (let i = 0; i < palOf(cid); i++) { const f = slots.indexOf(null); if (f < 0) { over++; continue; } slots[f] = cid; at[cid].push(f); } };
+  const dropIdx = new Map(); order.forEach((s, i) => { if (s.drop) dropIdx.set(String(s.drop), i); });
+  [...onboardIds].map(String).sort((a, b) => (dropIdx.get(b) ?? 1e9) - (dropIdx.get(a) ?? 1e9)).forEach(put);
+  const snap = () => { const n = slots.filter(Boolean).length; if (n > peakN) { peakN = n; peak = [...slots]; } };
+  snap();
+  for (const s of order) {
+    if (s.pickup) { put(String(s.pickup)); snap(); }
+    else if (s.drop) {
+      const cid = String(s.drop), mine = at[cid] || [];
+      if (!mine.length) continue;
+      const myRow = Math.max(...mine.map(i => Math.floor(i / SLOTS_WIDE)));
+      const by = new Set(); let n = 0;
+      slots.forEach((c, i) => { if (c && c !== cid && Math.floor(i / SLOTS_WIDE) > myRow) { by.add(c); n++; } });
+      if (n) { blocks.push({cid, by: [...by], pal: n}); blockPal += n; }
+      mine.forEach(i => { if (slots[i] === cid) slots[i] = null; });
+    }
+  }
+  return {at, peak: peak || [...slots], over, blocks, blockPal};
 }
 
 function okOrder(order, onboard) {
@@ -298,5 +334,5 @@ function computeRoute(stops, cargo, start, now, fixed) {
   return {order, plan: p, load, slotWhere, TOTAL_SLOTS, SLOTS_LONG, SLOTS_WIDE, CAP_SLOTS, manual: !!(fixed && fixed.length)};
 }
 
-export {computeRoute, slotWhere, stopKey, TOTAL_SLOTS, SLOTS_LONG, CAP_SLOTS};
+export {computeRoute, simulateLoad, slotWhere, stopKey, TOTAL_SLOTS, SLOTS_LONG, CAP_SLOTS};
 export default computeRoute;

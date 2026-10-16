@@ -30,7 +30,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '16 okt · pall ur ordertexten + färg per ställe';
+const BUILD = '16 okt · lastning i hämtordning, inget i vägen';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -253,6 +253,16 @@ function AppInner(): React.JSX.Element {
       return {error: String(e?.message || e)};
     }
   }, [src, ost, gpsRoutePos, manual]);
+
+  // Kommande dagars order planeras också (från startadressen, första dagens morgon) – så lastplanen vet i vilken
+  // ordning du hämtar och kan ställa godset rätt. Samma optimerare som idag, med omlastning inräknad.
+  const laterRoute = useMemo(() => {
+    if (!later.length) return null;
+    const days = later.map((s: any) => (s.tEarliest && s.tEarliest.date) || (s.tLatest && s.tLatest.date)).filter(Boolean).sort();
+    const t0 = days.length ? new Date(days[0] + 'T06:00').getTime() : Date.now() + 86400000;
+    const stops = later.map((s: any) => { const o = ost[s.pickup || s.drop] || {}; return {...s, done: s.pickup ? !!(o.loadedAt || serverLoaded(s)) : !!o.doneAt}; });
+    try { return computeRoute(stops, fullSrc.cargo, {...START, cur: null}, t0, null); } catch (e) { return null; }
+  }, [later, ost, fullSrc]);
 
   // Lastplanen: allt som ska med i bilen – ombord, dagens hämtningar och kommande dagars order.
   const loadOrders = useMemo(() => {
@@ -787,7 +797,7 @@ function AppInner(): React.JSX.Element {
           {tab === 'plan' && route && !(route as any).error && (
             <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any, more: any[] = []) => setSignStop(more.length ? {...st, group: [st, ...more]} : st)} onEdit={(cid: string, st: any) => setEditFor({cid, st, done: false})} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} />
           )}
-          {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} />}
+          {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} laterRoute={laterRoute} />}
           {tab === 'chat' && <ChatView msgs={chatList} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} onRetry={deliver} />}
           {(tab === 'plan' || tab === 'last') && route && (route as any).error && <Text style={s.errTxt}>Optimeringsfel: {(route as any).error}</Text>}
 

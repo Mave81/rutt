@@ -4,6 +4,8 @@
  * Siffran i rutan = vilket ställe godset lossas på (1 = först ut). Varje ställe har sin egen orange nyans,
  * så allt som ska av på samma ställe syns direkt – oavsett hur många order det är.
  * Med kommer allt som ska med: det som redan är ombord, dagens hämtningar och kommande dagars order.
+ * Platserna räknas fram i den ordning du hämtar (rutten), inte tvärtom: det som hämtas först står längst in.
+ * Rutten väljer hämtordning så att inget står i vägen när det ska av; går det inte syns en varning.
  */
 import React, {useMemo} from 'react';
 import {ScrollView, StyleSheet, Text, View} from 'react-native';
@@ -11,6 +13,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, themed, hhmm, whenText, todayYmd} from './theme';
 import {Bi} from './Bi';
 import {samePlace} from './OrdersView';
+import {simulateLoad} from '../opter/optimizer';
 
 // Orange nyanser, en per ställe i lossordning: 1 = starkast. Mörk text på ljusa, vit på mörka.
 const SHADES: {bg: string; ink: string}[] = [
@@ -24,40 +27,37 @@ const WIDE = 3, LONG = 6, TOTAL = WIDE * LONG;
 
 type LoadOrder = {cid: string; pick: any; drop: any; onboard: boolean};
 
-export default function LoadView({orders, cargo, route}: {orders: LoadOrder[]; cargo: any; route: any}) {
+export default function LoadView({orders, cargo, route, laterRoute}: {orders: LoadOrder[]; cargo: any; route: any; laterRoute?: any}) {
   const bottom = useSafeAreaInsets().bottom + 24;
 
   const plan = useMemo(() => {
-    // När lossas varje order? Dagens körordning först (med beräknad tid), sen datum + tid från Opter.
-    const order = (route && route.order) || [], rows = (route && route.plan && route.plan.rows) || [];
-    const idxDrop: Record<string, number> = {}, etaDrop: Record<string, any> = {}, etaPick: Record<string, any> = {};
-    order.forEach((s: any, i: number) => {
-      if (s.drop) { idxDrop[s.drop] = i; etaDrop[s.drop] = rows[i] && rows[i].eta; }
-      if (s.pickup) etaPick[s.pickup] = rows[i] && rows[i].eta;
+    // Hela körningen i ordning: dagens rutt, sen kommande dagars (också optimerad). Samma simulering som optimeraren använder:
+    // godset ställs där det faktiskt hamnar när du hämtar i den ordningen, och det som står i vägen syns.
+    const want = new Set(orders.filter(o => o.drop).map(o => o.cid));
+    const seq = [...((route && route.order) || []), ...((laterRoute && laterRoute.order) || [])].filter((s: any) => want.has(String(s.pickup || s.drop)));
+    const onboard = new Set(orders.filter(o => o.onboard && o.drop).map(o => o.cid));
+    const sim: any = simulateLoad(seq, onboard, cargo);
+    const etaDrop: Record<string, any> = {}, etaPick: Record<string, any> = {};
+    for (const R of [route, laterRoute]) ((R && R.order) || []).forEach((s: any, i: number) => {
+      const eta = R.plan && R.plan.rows && R.plan.rows[i] && R.plan.rows[i].eta;
+      if (s.drop) etaDrop[s.drop] = eta; if (s.pickup) etaPick[s.pickup] = eta;
     });
-    const key = (o: LoadOrder) => {
-      if (idxDrop[o.cid] != null) return `0 ${String(idxDrop[o.cid]).padStart(4, '0')}`;
-      const t = o.drop && (o.drop.tLatest || o.drop.tEarliest);
-      return `1 ${(t && t.date) || todayYmd()} ${(t && t.hhmm) || '23:59'}`;
-    };
-    const list = orders.filter(o => o.drop).sort((a, b) => (key(a) < key(b) ? -1 : 1));
-    // Fyll från hytten: sist ut först in.
-    const slots: Array<{cid: string; loose?: boolean} | null> = Array(TOTAL).fill(null);
-    let at = 0, over = 0;
-    const rowsOf: Record<string, number[]> = {};
-    [...list].reverse().forEach(o => {
-      const pal = Math.max(0, Number((cargo[o.cid] || {}).pal) || 0);
-      const need = pal || 1;
-      for (let i = 0; i < need; i++) {
-        if (at < TOTAL) { slots[at] = {cid: o.cid, loose: !pal}; (rowsOf[o.cid] = rowsOf[o.cid] || []).push(Math.floor(at / WIDE) + 1); at++; } else over++;
-      }
-    });
+    const dropSeq: string[] = []; seq.forEach((s: any) => { if (s.drop && !dropSeq.includes(String(s.drop))) dropSeq.push(String(s.drop)); });
+    for (const o of orders) if (o.drop && !dropSeq.includes(o.cid)) dropSeq.push(o.cid);
+    const byCid: Record<string, LoadOrder> = {}; orders.forEach(o => { byCid[o.cid] = o; });
+    const list = dropSeq.map(c => byCid[c]).filter(Boolean);
+    const pickNo: Record<string, number> = {}; let pn = 0;
+    seq.forEach((s: any) => { if (s.pickup && !onboard.has(String(s.pickup))) pickNo[String(s.pickup)] = ++pn; });
     // Samma ställe = samma nummer och färg (t.ex. 14 order till samma mottagare).
     const num: Record<string, number> = {}; const heads: any[] = [];
     list.forEach(o => { let i = heads.findIndex(h => samePlace(h, o.drop)); if (i < 0) { heads.push(o.drop); i = heads.length - 1; } num[o.cid] = i + 1; });
-    const pallets = list.reduce((n, o) => n + (Math.max(0, Number((cargo[o.cid] || {}).pal) || 0) || 1), 0);
-    return {list, slots, num, over, pallets, rowsOf, etaDrop, etaPick};
-  }, [orders, cargo, route]);
+    const rowsOf: Record<string, number[]> = {};
+    for (const c of Object.keys(sim.at)) rowsOf[c] = sim.at[c].map((i: number) => Math.floor(i / WIDE) + 1);
+    const slots = sim.peak.map((c: any) => (c ? {cid: c, loose: !(Number((cargo[c] || {}).pal) > 0)} : null));
+    const pallets = sim.peak.filter(Boolean).length;
+    const blockOf: Record<string, any> = {}; sim.blocks.forEach((b: any) => { blockOf[b.cid] = b; });
+    return {list, slots, num, over: sim.over, pallets, rowsOf, etaDrop, etaPick, pickNo, blockOf, multiPick: pn > 1};
+  }, [orders, cargo, route, laterRoute]);
 
   if (!plan.list.length) {
     return (
@@ -79,7 +79,7 @@ export default function LoadView({orders, cargo, route}: {orders: LoadOrder[]; c
   return (
     <ScrollView contentContainerStyle={{paddingHorizontal: 14, paddingBottom: bottom}}>
       <View style={l.sumRow}>
-        <Text style={l.sum}><Text style={l.sumB}>{Math.min(plan.pallets, TOTAL)}</Text> av {TOTAL} pallplatser</Text>
+        <Text style={l.sum}><Text style={l.sumB}>{Math.min(plan.pallets, TOTAL)}</Text> av {TOTAL} pallplatser{plan.multiPick ? ' när bilen är fullast' : ''}</Text>
         <Text style={l.sumDim}>1 = första stället · en färg per ställe</Text>
       </View>
       {plan.over > 0 && (
@@ -126,8 +126,11 @@ export default function LoadView({orders, cargo, route}: {orders: LoadOrder[]; c
               <View style={l.stRow}>
                 {o.onboard
                   ? <><Bi n="check-circle-fill" size={12} color={C.accent2} /><Text style={[l.st, {color: C.accent2}]}>Ombord</Text></>
-                  : <><Bi n="box-seam" size={12} color={C.faint} /><Text style={l.st}>Hämtas {when(plan.etaPick[o.cid], o.pick)}{o.pick && o.pick.who ? ` hos ${o.pick.who}` : ''}</Text></>}
+                  : <><Bi n="box-seam" size={12} color={C.faint} /><Text style={l.st}>{plan.multiPick && plan.pickNo[o.cid] ? <Text style={{color: C.ink, fontWeight: '800'}}>Hämta {plan.pickNo[o.cid] === 1 ? 'först' : `som nr ${plan.pickNo[o.cid]}`} · </Text> : null}{when(plan.etaPick[o.cid], o.pick)}{o.pick && o.pick.who ? ` hos ${o.pick.who}` : ''}</Text></>}
               </View>
+              {plan.blockOf[o.cid] ? (
+                <View style={l.stRow}><Bi n="exclamation-triangle-fill" size={12} color={C.bad} /><Text style={[l.st, {color: C.bad}]}>{plan.blockOf[o.cid].pal} pall står i vägen – lasta om här</Text></View>
+              ) : null}
             </View>
             <View style={{alignItems: 'flex-end'}}>
               <Text style={l.pal}>{pal ? `${pal} pl` : 'lös'}</Text>
