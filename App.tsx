@@ -29,7 +29,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '15 okt · orderdata direkt';
+const BUILD = '16 okt · rätt namn + chatt';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -144,6 +144,7 @@ function AppInner(): React.JSX.Element {
   const [gpsStat, setGpsStat] = useState<{running: boolean; notif: boolean; locOn: boolean} | null>(null);
   const [speed, setSpeed] = useState(0);
   const [kbOpen, setKbOpen] = useState(false);
+  const reconnecting = useRef(false);
   useEffect(() => {
     const a = Keyboard.addListener('keyboardDidShow', () => setKbOpen(true));
     const b = Keyboard.addListener('keyboardDidHide', () => setKbOpen(false));
@@ -498,6 +499,12 @@ function AppInner(): React.JSX.Element {
       const ok = !!(client.logon && (client.logon as any).ok);
       const up = ok && client._alive && client._alive();
       if (alive) setOnline(!ok ? 'nej' : up ? 'ja' : 'åter');
+      // Tappad kontakt (t.ex. efter att telefonen sovit): anslut igen direkt i stället för att vänta på nästa hämtning.
+      if (ok && !up && !reconnecting.current) {
+        reconnecting.current = true;
+        try { await client.relogin(); const {rutt, msgs: fresh} = await client.poll(); if (alive) { if (rutt && rutt.stops && rutt.stops.length) setOrders(rutt); setMsgs(fresh); setOnline('ja'); } } catch (e) {}
+        reconnecting.current = false;
+      }
       if (!RL) return;
       try { const st = RL.status && (await RL.status()); if (alive && st) setGpsStat(st); } catch (e) {}
       try { const l = await RL.getLast(); if (alive) setSpeed(l && Date.now() - l.time < 90000 ? l.speedKmh || 0 : 0); } catch (e) {}
@@ -827,7 +834,8 @@ function ChatView({msgs, msgText, setMsgText, onSend, onRetry}: any) {
             return (
               <Pressable disabled={!failed} onPress={() => onRetry && onRetry(item)} style={[s.bubbleWrap, item.received ? s.bwL : s.bwR]}>
                 <View style={[s.bubble, item.received ? s.bubbleIn : s.bubbleOut, item.local && item.state === 'sending' && {opacity: 0.6}, failed && {borderWidth: 1, borderColor: C.bad}]}>
-                  <Text style={s.bubbleTxt}>{item.text}</Text>
+                  {/* textBreakStrategy="simple": Samsung-typsnitt mäts olika mot hur de ritas → sista ordet ("07.00") klipptes bort. */}
+                  <Text style={s.bubbleTxt} textBreakStrategy="simple" android_hyphenationFrequency="none">{item.text}</Text>
                 </View>
                 <Text style={[s.bubbleStamp, item.received ? s.stampL : s.stampR, failed && {color: C.bad}]}>
                   {stamp(item)}{status}

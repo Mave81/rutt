@@ -37,6 +37,11 @@ export default function NewOrdersView({orders, onAccept, onReject}: {orders: New
                 <View style={n.badgeBox}><Text style={n.badge}>NY ORDER</Text></View>
                 <Text style={n.meta}>{[p.orderNo && `#${p.orderNo}`, p.service, (p.kolli || d.kolli) ? `${p.kolli || d.kolli} kollin` : ''].filter(Boolean).join('  ·  ')}</Text>
               </View>
+              {(p.customer || p.orderedBy) ? (
+                <Text style={[n.meta, {marginTop: 8}]} numberOfLines={2}>
+                  {[p.customer && `Kund: ${p.customer}`, p.orderedBy && p.orderedBy !== p.customer && `Beställare: ${p.orderedBy}`].filter(Boolean).join('  ·  ')}
+                </Text>
+              ) : null}
               <View style={n.leg}>
                 <Text style={[n.verb, {color: C.accentInk}]}>HÄMTA</Text>
                 <View style={{flex: 1}}>
