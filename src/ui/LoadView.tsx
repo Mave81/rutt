@@ -1,7 +1,8 @@
 /**
  * Last: bilen sedd ovanifrån. Hytten överst, bakgavellyften nederst, 3 platser i bredd × 6 på längden.
  * Du lastar alltid mot hytten: det som lossas SIST står längst fram, det som lossas FÖRST står vid lyften.
- * Siffran i rutan = i vilken ordning godset lossas (1 = först ut).
+ * Siffran i rutan = vilket ställe godset lossas på (1 = först ut). Varje ställe har sin egen orange nyans,
+ * så allt som ska av på samma ställe syns direkt – oavsett hur många order det är.
  * Med kommer allt som ska med: det som redan är ombord, dagens hämtningar och kommande dagars order.
  */
 import React, {useMemo} from 'react';
@@ -9,6 +10,15 @@ import {ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, themed, hhmm, whenText, todayYmd} from './theme';
 import {Bi} from './Bi';
+import {samePlace} from './OrdersView';
+
+// Orange nyanser, en per ställe i lossordning: 1 = starkast. Mörk text på ljusa, vit på mörka.
+const SHADES: {bg: string; ink: string}[] = [
+  {bg: '#FF9117', ink: '#000000'}, {bg: '#FFC27A', ink: '#000000'}, {bg: '#B85F00', ink: '#FFFFFF'},
+  {bg: '#FFE0B8', ink: '#000000'}, {bg: '#7A3F00', ink: '#FFFFFF'}, {bg: '#E87A00', ink: '#000000'},
+  {bg: '#FFAA45', ink: '#000000'}, {bg: '#4F2900', ink: '#FFFFFF'},
+];
+const shade = (n: number) => SHADES[(n - 1) % SHADES.length];
 
 const WIDE = 3, LONG = 6, TOTAL = WIDE * LONG;
 
@@ -42,8 +52,9 @@ export default function LoadView({orders, cargo, route}: {orders: LoadOrder[]; c
         if (at < TOTAL) { slots[at] = {cid: o.cid, loose: !pal}; (rowsOf[o.cid] = rowsOf[o.cid] || []).push(Math.floor(at / WIDE) + 1); at++; } else over++;
       }
     });
-    const num: Record<string, number> = {};
-    list.forEach((o, i) => { num[o.cid] = i + 1; });
+    // Samma ställe = samma nummer och färg (t.ex. 14 order till samma mottagare).
+    const num: Record<string, number> = {}; const heads: any[] = [];
+    list.forEach(o => { let i = heads.findIndex(h => samePlace(h, o.drop)); if (i < 0) { heads.push(o.drop); i = heads.length - 1; } num[o.cid] = i + 1; });
     const pallets = list.reduce((n, o) => n + (Math.max(0, Number((cargo[o.cid] || {}).pal) || 0) || 1), 0);
     return {list, slots, num, over, pallets, rowsOf, etaDrop, etaPick};
   }, [orders, cargo, route]);
@@ -69,7 +80,7 @@ export default function LoadView({orders, cargo, route}: {orders: LoadOrder[]; c
     <ScrollView contentContainerStyle={{paddingHorizontal: 14, paddingBottom: bottom}}>
       <View style={l.sumRow}>
         <Text style={l.sum}><Text style={l.sumB}>{Math.min(plan.pallets, TOTAL)}</Text> av {TOTAL} pallplatser</Text>
-        <Text style={l.sumDim}>1 = lossas först</Text>
+        <Text style={l.sumDim}>1 = första stället · en färg per ställe</Text>
       </View>
       {plan.over > 0 && (
         <View style={l.warn}><Bi n="exclamation-triangle-fill" size={15} color={C.bad} /><Text style={l.warnTxt}>{plan.over} pall får inte plats – prata med kontoret.</Text></View>
@@ -85,11 +96,11 @@ export default function LoadView({orders, cargo, route}: {orders: LoadOrder[]; c
                 const sl = plan.slots[r * WIDE + c];
                 if (!sl) return <View key={c} style={[l.cell, l.cellEmpty]} />;
                 const n = plan.num[sl.cid];
-                const first = n === 1;
+                const sh = shade(n);
                 return (
-                  <View key={c} style={[l.cell, first ? {backgroundColor: C.accent} : {backgroundColor: C.accentSoft}]}>
-                    {sl.loose ? <Bi n="box-seam-fill" size={13} color={first ? C.onAccent : C.accentInk} /> : null}
-                    <Text style={[l.cellNo, {color: first ? C.onAccent : C.accentInk}]}>{n}</Text>
+                  <View key={c} style={[l.cell, {backgroundColor: sh.bg}]}>
+                    {sl.loose ? <Bi n="box-seam-fill" size={13} color={sh.ink} /> : null}
+                    <Text style={[l.cellNo, {color: sh.ink}]}>{n}</Text>
                   </View>
                 );
               })}
@@ -106,8 +117,8 @@ export default function LoadView({orders, cargo, route}: {orders: LoadOrder[]; c
         const pal = Math.max(0, Number(c.pal) || 0);
         return (
           <View key={o.cid} style={l.item}>
-            <View style={[l.badge, n === 1 ? {backgroundColor: C.accent} : {backgroundColor: C.accentSoft}]}>
-              <Text style={[l.badgeTxt, {color: n === 1 ? C.onAccent : C.accentInk}]}>{n}</Text>
+            <View style={[l.badge, {backgroundColor: shade(n).bg}]}>
+              <Text style={[l.badgeTxt, {color: shade(n).ink}]}>{n}</Text>
             </View>
             <View style={{flex: 1, minWidth: 0}}>
               <Text style={l.who} numberOfLines={1}>{o.drop.who || '—'}</Text>

@@ -655,6 +655,12 @@ function optTime(dt, dateTTY, timeTTY) {
   return {hhmm: hasTime ? hhmm(dt) : null, date: ymd(dt), hasDate, ms: dt.getTime()};
 }
 
+/* Antal pallar som står i fritext: "4 pall", "2 st pallar", "3 helpall", "1 halvpall", "2 EUR-pall". Största talet gäller. */
+function palFromText(text) {
+  let best = 0; const re = /(\d{1,2})\s*(?:st\.?\s*)?(?:hel|halv|eur?o?|eng[åa]ngs|eng)?[-\s]?pall(?:ar|en|arna)?\b/gi; let m;
+  while ((m = re.exec(String(text || '')))) { const n = parseInt(m[1], 10); if (n > best && n <= 36) best = n; }
+  return best;
+}
 /* ---- Opter-rader → rutt {cargo, stops} ---- */
 const hhmm = (d) => d ? new Intl.DateTimeFormat('sv-SE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Stockholm' }).format(d) : null;
 function toRutt(decoded) {
@@ -702,7 +708,10 @@ function toRutt(decoded) {
     const from = addresses[c.adrFrom] || null, to = addresses[c.adrTo] || null;
     const cid = String(c.orderId || c.shipmentId || r.key.xxxId || ++n);
     const pkgs = pkgBy[r.key.xxxId] || pkgBy[c.shipmentId] || [];
-    const pal = pkgs.reduce((s, p) => s + (Number(p.quantity) || 0), 0) || 1;
+    // Pallar: kollinas antal i Opter, men står det fler i ordertexten ("4 pall 2265 kg") gäller texten –
+    // kontoret lägger ofta in en kollirad med antal 1 och skriver det riktiga antalet i meddelandet.
+    const pkgPal = pkgs.reduce((s, p) => s + (Number(p.quantity) || 0), 0);
+    const pal = Math.max(pkgPal, palFromText([c.message, c.extMessage, c.driverMessage, c.senderInstr, c.goodsType, ...pkgs.map(p => [p.quantity, p.packageType, p.text].filter(Boolean).join(' '))].join('\n'))) || 1;
     const kg = Number(c.weight) || pkgs.reduce((s, p) => s + (Number(p.weight) || 0), 0) || 0;
     const shiId = r.key.xxxId;
     const statuses = decoded.rows.filter(x => x.table === 'ShipmentStatus' && belongs(x, shiId))
@@ -790,5 +799,5 @@ function toRutt(decoded) {
 module.exports = {
   MessageType, Table, DT, RST, F, frame, unframe, decodeSync, ticksToDate,
   logonPayload, parseLogon, resourceList, encodeStartWork, encodeWorkStatus, toRutt,
-  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering, encodeShipmentStatus, encodeShipmentEdit, editOptions, CET, CHANGE_FIELDS, signatureString, encodePosition, setting,
+  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering, palFromText, encodeShipmentStatus, encodeShipmentEdit, editOptions, CET, CHANGE_FIELDS, signatureString, encodePosition, setting,
 };
