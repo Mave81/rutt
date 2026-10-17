@@ -49,3 +49,15 @@ test('editOptions läser kontorets val', () => {
   expect(o.damageTypes[0]).toMatchObject({id: 3, name: 'Godsskada', forceComment: true, forceEvent: true});
   expect(o.damageTypes[0].events[0].name).toBe('Krossad');
 });
+test('folket på jobbet: aktiva förare + trafikledningens nummer', () => {
+  const rows = [
+    {table: 'Resource', key: {xxxId: 1}, columns: {name: 'Joel Henriksson'}},
+    {table: 'Resource', key: {xxxId: 2}, columns: {name: 'Tony Rösth'}},
+    {table: 'Resource', key: {xxxId: 3}, columns: {name: 'Slutat', active: false}},
+    {table: 'Resource', key: {xxxId: 4}, columns: {name: 'Kontorist', driver: false}},
+    {table: 'Office', key: {xxxId: 1}, columns: {phoneDispatch: '08-123 456'}},
+  ];
+  const t = P.team({rows});
+  expect(t.drivers.map(d => d.name)).toEqual(['Joel Henriksson', 'Tony Rösth']);
+  expect(t.dispatchPhone).toBe('08-123 456');
+});

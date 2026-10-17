@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
-import {Text, Pressable} from 'react-native';
+import {Text, Pressable, TextInput} from 'react-native';
 jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);
 jest.mock('react-native-image-picker', () => ({launchCamera: jest.fn(), launchImageLibrary: jest.fn()}));
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
@@ -45,7 +45,9 @@ test('logga in → tryck Nytt → acceptera', async () => {
   let r: any;
   await ReactTestRenderer.act(async () => { r = ReactTestRenderer.create(<App />); });
   console.log('START:', texts(r).slice(0, 500), '| JSON:', JSON.stringify(r.toJSON()).slice(0, 300));
-  await press(r, /Logga in & hämta/);
+  const ins = r.root.findAllByType(TextInput);
+  await ReactTestRenderer.act(async () => { ins[0].props.onChangeText('3111'); ins[1].props.onChangeText('hemligt'); });
+  await press(r, /^Logga in$/);
   await ReactTestRenderer.act(async () => { jest.advanceTimersByTime(50); });
   console.log('EFTER LOGIN:', texts(r).slice(0, 400));
   await press(r, /väntar på svar/);
@@ -56,7 +58,9 @@ test('logga in → tryck Nytt → acceptera', async () => {
   console.log('KLART-FLIKEN:', texts(r).slice(0, 300));
   await press(r, /^Plan$/);
   await press(r, /^Last$/);
-  await press(r, /^Kontoret/);
+  await press(r, /^Jobbet/);
+  console.log('JOBBET:', texts(r).slice(0, 400));
+  await press(r, /^Kontoret$/);
   await press(r, /^Plan$/);
   console.log('PLAN:', texts(r).slice(0, 700));
 });

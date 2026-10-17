@@ -15,6 +15,7 @@ import {Sheet} from './src/ui/parts';
 import OrdersView, {DoneView, setNavApp, NavApp} from './src/ui/OrdersView';
 import SignScreen from './src/ui/SignScreen';
 import EditSheet, {DEMO_OPTS} from './src/ui/EditOrder';
+import JobbetView, {useJobbet} from './src/ui/JobbetView';
 import NewOrdersView from './src/ui/NewOrdersView';
 import LoadView from './src/ui/LoadView';
 import {loadJSON, saveJSON, ORDERS_KEY, NAMES_KEY, companyKey, rememberName} from './src/store';
@@ -30,7 +31,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '16 okt · lastning i hämtordning, inget i vägen';
+const BUILD = '17 okt · Jobbet: folk + SMS, ny inloggning';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -186,6 +187,17 @@ function AppInner(): React.JSX.Element {
   const [resources, setResources] = useState<{resId: number; name: string}[]>([]);
   const [query, setQuery] = useState('');
   const [orders, setOrders] = useState<{cargo: any; stops: any[]; perm?: any; opts?: any}>({cargo: {}, stops: []});
+  // Folket på jobbet: aktiva förare + trafikledningens nummer ur Opter (sparas så listan finns även offline).
+  const [team, setTeam] = useState<{drivers: {resId: number; name: string}[]; dispatchPhone: string}>({drivers: [], dispatchPhone: ''});
+  useEffect(() => { loadJSON('rutt.team.v1', null).then((v: any) => { if (v && v.drivers) setTeam(v); }); }, []);
+  useEffect(() => {
+    const d = client.lastDecoded; if (!d) return;
+    try { const t = P.team(d); if (t.drivers.length) { setTeam(t); saveJSON('rutt.team.v1', t); } } catch (e) {}
+  }, [orders]);
+  const [remember, setRemember] = useState(true);
+  const [showPw, setShowPw] = useState(false);
+  const [loginGear, setLoginGear] = useState(false);
+  useEffect(() => { loadJSON('rutt.remember', true).then((v: any) => setRemember(v !== false)); }, []);
 
   const filtered = useMemo(
     () => (query ? resources.filter(r => r.name.toLowerCase().includes(query.toLowerCase())) : resources),
@@ -539,7 +551,8 @@ function AppInner(): React.JSX.Element {
       const nm = name || (savedLogin.current && savedLogin.current.name) || '';
       setDriverName(nm);
       savedLogin.current = {...(savedLogin.current || {}), resId, name: nm};
-      saveJSON(LOGIN_KEY, savedLogin.current);
+      // Kom ihåg mig (som Opter Driver): annars sparas inget på telefonen.
+      saveJSON(LOGIN_KEY, remember ? savedLogin.current : null);
     }
     catch (e: any) { setErr(String(e?.message || e)); }
     finally { setBusy(false); }
@@ -620,10 +633,11 @@ function AppInner(): React.JSX.Element {
   }, [newOrders.length, step]);
 
   const unread = msgs.filter(m => m.received && !m.confirmed).length;
+  const jobbet = useJobbet({team, me: driverName, enabled: step === 'route'});
   const navInset = useSafeAreaInsets().bottom;
 
-  async function openChat() {
-    setTab('chat');
+  async function openChat() { setTab('chat'); }
+  async function markOpterRead() {
     const toRead = msgs.filter(m => m.received && !m.confirmed).map(m => m.key);
     if (toRead.length) { try { await client.markRead(toRead); setMsgs(client.messages()); } catch (e) {} }
   }
@@ -694,7 +708,7 @@ function AppInner(): React.JSX.Element {
 
   const hour = new Date().getHours();
   const hej = hour < 10 ? 'Godmorgon' : hour < 18 ? 'Hej' : 'Godkväll';
-  const title = step === 'login' ? (driverName ? `Välkommen ${driverName}` : 'Logga in mot Opter') : step === 'pick' ? 'Välj ditt namn' : tab === 'chat' ? 'Kontoret' : tab === 'last' ? 'Lastplan' : tab === 'klart' ? 'Klart idag' : tab === 'nytt' ? 'Nya order' : (driverName ? `${hej} ${driverName.split(' ')[0]}` : demo ? 'Demo' : 'Dina jobb');
+  const title = step === 'login' ? (driverName ? `Välkommen ${driverName}` : 'Logga in mot Opter') : step === 'pick' ? 'Välj ditt namn' : tab === 'chat' ? 'Jobbet' : tab === 'last' ? 'Lastplan' : tab === 'klart' ? 'Klart idag' : tab === 'nytt' ? 'Nya order' : (driverName ? `${hej} ${driverName.split(' ')[0]}` : demo ? 'Demo' : 'Dina jobb');
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -734,22 +748,35 @@ function AppInner(): React.JSX.Element {
       {!!err && <View style={s.errBox}><Bi n="exclamation-circle-fill" size={15} color={C.bad} /><Text style={s.errTxt}>{err}</Text></View>}
 
       {step === 'login' && !busy && (
-        <ScrollView contentContainerStyle={s.wrap} keyboardShouldPersistTaps="handled">
-          <View style={s.card}>
-            <Text style={s.label}>Serveradress</Text>
-            <TextInput style={s.input} value={server} onChangeText={setServer} autoCapitalize="none" />
-            <View style={s.row}>
-              <View style={{width: 90}}><Text style={s.label}>Port</Text><TextInput style={s.input} value={port} onChangeText={setPort} keyboardType="numeric" /></View>
-              <View style={{flex: 1}}><Text style={s.label}>Sökväg</Text><TextInput style={s.input} value={path} onChangeText={setPath} autoCapitalize="none" /></View>
-            </View>
-            <Text style={s.label}>Användarnamn</Text>
-            <TextInput style={s.input} value={user} onChangeText={setUser} autoCapitalize="none" autoCorrect={false} />
-            <Text style={s.label}>Lösenord</Text>
-            <TextInput style={s.input} value={pass} onChangeText={setPass} secureTextEntry />
-            <Pressable style={s.btn} onPress={() => login()}><Text style={s.btnTxt}>Logga in &amp; hämta</Text></Pressable>
+        <ScrollView contentContainerStyle={[s.wrap, {paddingTop: 18}]} keyboardShouldPersistTaps="handled">
+          {/* Som Opter Driver: nummer, lösenord, Kom ihåg mig. Server och demo bakom kugghjulet uppe till höger. */}
+          <Text style={s.loginSub}>Logga in med samma uppgifter som i Opter Driver</Text>
+          <Text style={s.label}>Användarnummer</Text>
+          <TextInput style={[s.input, s.loginIn]} value={user} onChangeText={setUser} autoCapitalize="none" autoCorrect={false} keyboardType="default" placeholder="T.ex. 3111" placeholderTextColor={C.faint} />
+          <Text style={s.label}>Lösenord</Text>
+          <View style={{justifyContent: 'center'}}>
+            <TextInput style={[s.input, s.loginIn, {paddingRight: 52}]} value={pass} onChangeText={setPass} secureTextEntry={!showPw} autoCapitalize="none" autoCorrect={false} onSubmitEditing={() => login()} />
+            <Pressable hitSlop={10} style={s.eye} onPress={() => setShowPw(v => !v)}><Bi n={showPw ? 'eye-slash' : 'eye'} size={20} color={C.dim} /></Pressable>
           </View>
+          <Pressable style={s.remRow} onPress={() => { const v = !remember; setRemember(v); saveJSON('rutt.remember', v); }}>
+            <View style={[s.remBox, remember && {backgroundColor: C.accent2, borderColor: C.accent2}]}>{remember ? <Bi n="check2" size={15} color="#FFFFFF" /> : null}</View>
+            <Text style={s.remTxt}>Kom ihåg mig</Text>
+          </Pressable>
+          <Pressable style={[s.btn, s.loginBtn, !(user.trim() && pass) && {opacity: 0.45}]} disabled={!(user.trim() && pass)} onPress={() => login()}><Text style={s.btnTxt}>Logga in</Text></Pressable>
+          <Pressable style={{alignSelf: 'center', padding: 14}} onPress={() => setLoginGear(true)}><Text style={s.loginLink}>Server och demo</Text></Pressable>
         </ScrollView>
       )}
+      <Sheet open={loginGear} onClose={() => setLoginGear(false)} title="Server" sub="Behöver bara ändras om kontoret byter Opter-server.">
+        <Text style={s.label}>Adress</Text>
+        <TextInput style={s.input} value={server} onChangeText={setServer} autoCapitalize="none" autoCorrect={false} />
+        <View style={s.row}>
+          <View style={{width: 90}}><Text style={s.label}>Port</Text><TextInput style={s.input} value={port} onChangeText={setPort} keyboardType="numeric" /></View>
+          <View style={{flex: 1}}><Text style={s.label}>Sökväg</Text><TextInput style={s.input} value={path} onChangeText={setPath} autoCapitalize="none" /></View>
+        </View>
+        <Pressable style={[s.sheetBtn, {marginTop: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8}]} onPress={() => { setLoginGear(false); setDemo(true); setStep('route'); setTab('plan'); }}>
+          <Bi n="play-circle" size={16} color={C.ink} /><Text style={s.sheetBtnTxt}>Prova demo utan inloggning</Text>
+        </Pressable>
+      </Sheet>
 
       {step === 'pick' && !busy && (
         <View style={s.wrap}>
@@ -798,19 +825,20 @@ function AppInner(): React.JSX.Element {
             <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any, more: any[] = []) => setSignStop(more.length ? {...st, group: [st, ...more]} : st)} onEdit={(cid: string, st: any) => setEditFor({cid, st, done: false})} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} />
           )}
           {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} laterRoute={laterRoute} />}
-          {tab === 'chat' && <ChatView msgs={chatList} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} onRetry={deliver} />}
+          {tab === 'chat' && <JobbetView j={jobbet} live={live} opterUnread={unread} opterLast={chatList[chatList.length - 1]} onOpenOpter={markOpterRead}
+            opterView={<ChatView msgs={chatList} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} onRetry={deliver} />} />}
           {(tab === 'plan' || tab === 'last') && route && (route as any).error && <Text style={s.errTxt}>Optimeringsfel: {(route as any).error}</Text>}
 
           {!kbOpen && (
             <View style={[s.nav, {paddingBottom: 8 + navInset}]}>
-              {([['plan', 'Plan', 'signpost-2-fill'], ['chat', 'Kontoret', 'chat-left-text-fill'], ['last', 'Last', 'grid-3x3-gap-fill'], ['klart', 'Klart', 'check2-all']] as const).map(([k, label, icon]) => {
+              {([['plan', 'Plan', 'signpost-2-fill'], ['chat', 'Jobbet', 'people-fill'], ['last', 'Last', 'grid-3x3-gap-fill'], ['klart', 'Klart', 'check2-all']] as const).map(([k, label, icon]) => {
                 const on = tab === k;
                 const col = on ? C.accentInk : C.faint;
                 return (
                   <Pressable key={k} style={s.navBtn} onPress={() => (k === 'chat' ? openChat() : setTab(k as any))}>
                     <View>
                       <Bi n={icon as any} size={21} color={col} />
-                      {k === 'chat' && unread > 0 && <View style={s.navDot} />}
+                      {k === 'chat' && unread + jobbet.smsUnread > 0 && <View style={s.navDot} />}
                     </View>
                     <Text style={[s.navTxt, {color: col}, on && {fontWeight: '800'}]}>{label}{k === 'klart' && doneOrders.length ? ` ${doneOrders.length}` : ''}</Text>
                   </Pressable>
@@ -1092,6 +1120,14 @@ const s = themed(() => StyleSheet.create({
   stampR: {textAlign: 'right', marginRight: 6},
   sendRow: {flexDirection: 'row', gap: 8, padding: 12, borderTopColor: C.edge, borderTopWidth: StyleSheet.hairlineWidth, alignItems: 'flex-end'},
   sendInput: {flex: 1, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 10, color: C.ink, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, maxHeight: 120},
+  loginSub: {color: C.dim, fontSize: 14, marginBottom: 6},
+  loginIn: {height: 54, fontSize: 18, fontWeight: '700'},
+  eye: {position: 'absolute', right: 14, top: 0, bottom: 0, justifyContent: 'center'},
+  remRow: {flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16, alignSelf: 'flex-start', paddingVertical: 4},
+  remBox: {width: 26, height: 26, borderRadius: 7, borderWidth: 2, borderColor: C.edge, alignItems: 'center', justifyContent: 'center'},
+  remTxt: {color: C.ink, fontSize: 15.5, fontWeight: '700'},
+  loginBtn: {height: 56, justifyContent: 'center', marginTop: 18},
+  loginLink: {color: C.accentInk, fontSize: 14, fontWeight: '700'},
   sendBtn: {backgroundColor: C.accent, borderRadius: 22, width: 44, height: 44, alignItems: 'center', justifyContent: 'center'},
   sendBtnTxt: {color: C.onAccent, fontSize: 15, fontWeight: '700'},
 

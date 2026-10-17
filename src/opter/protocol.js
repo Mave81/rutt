@@ -46,7 +46,8 @@ const RST = { None: 0, StartWork: 1, EndWork: 2, StartLunch: 3, EndLunch: 4, Sta
 /* Fältnummer (ordinal i varje entitets PropertyNumber-enum) */
 const F = {
   Address: { 2: 'line1', 3: 'line2', 4: 'line3', 5: 'company', 6: 'street', 7: 'streetNo', 8: 'zip', 9: 'city', 11: 'entreCode', 12: 'phone', 16: 'driverMessage', 17: 'info', 18: 'lng', 19: 'lat' },
-  Resource: { 1: 'name', 2: 'shortId', 3: 'externalId' },
+  Resource: { 1: 'name', 2: 'shortId', 3: 'externalId', 4: 'supplierId', 5: 'active', 8: 'driver' },
+  Office: { 1: 'emailDispatch', 2: 'phoneDispatch' },
   Shipment: {
     1: 'consignmentParent', 14: 'orderDate', 15: 'shipmentDate', 60: 'locked', 66: 'revoked', 67: 'revokedConfirmed', 80: 'isConsignment',
     124: 'latestDelDT', 125: 'latestDelDateTTY', 126: 'latestDelTimeTTY', 127: 'earliestDelDT', 128: 'earliestDelDateTTY', 129: 'earliestDelTimeTTY',
@@ -584,6 +585,23 @@ function resourceList(decoded) {
   return out;
 }
 
+/* Folket på jobbet (Opter: samma lista som "Ge bort" – aktiva förare, Resources.giveAwayShipmentChooser)
+ * + trafikledningens nummer om kontoret lagt in det (Office.OFF_PhoneNoDispatch). Inga telefonnummer finns för förarna. */
+function team(decoded) {
+  const rows = (decoded && decoded.rows) || [];
+  const seen = new Set(), drivers = [];
+  for (const r of rows) {
+    if (r.table !== 'Resource') continue;
+    const c = r.columns, id = r.key.xxxId;
+    // Standard i Opter: aktiv = sant, förare = sant (skickas bara när det är falskt) → hoppa över de som är avstängda / inte förare.
+    if (!id || seen.has(id) || c.active === false || c.driver === false || !c.name) continue;
+    seen.add(id); drivers.push({resId: id, name: String(c.name).trim()});
+  }
+  drivers.sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+  const off = rows.find(r => r.table === 'Office' && (r.columns.phoneDispatch || r.columns.emailDispatch));
+  return {drivers, dispatchPhone: off ? String(off.columns.phoneDispatch || '').trim() : '', dispatchEmail: off ? String(off.columns.emailDispatch || '').trim() : ''};
+}
+
 /* ---- Smart läsning av fritext ----
  * Telefonnummer i texten ("Ring Katta på stena 010 445 72 71", "Johannes 08 518 332 62")
  * plockas ut med namnet framför och ev. företag efter "på".
@@ -799,5 +817,5 @@ function toRutt(decoded) {
 module.exports = {
   MessageType, Table, DT, RST, F, frame, unframe, decodeSync, ticksToDate,
   logonPayload, parseLogon, resourceList, encodeStartWork, encodeWorkStatus, toRutt,
-  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering, palFromText, encodeShipmentStatus, encodeShipmentEdit, editOptions, CET, CHANGE_FIELDS, signatureString, encodePosition, setting,
+  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering, palFromText, team, encodeShipmentStatus, encodeShipmentEdit, editOptions, CET, CHANGE_FIELDS, signatureString, encodePosition, setting,
 };
