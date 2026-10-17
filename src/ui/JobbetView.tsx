@@ -23,7 +23,7 @@ const KINDS = ['Verkstad', 'Lager', 'Kund', 'Kollega', 'Annat'];
 const KIND_ICON: Record<string, any> = {Verkstad: 'wrench', Lager: 'box-seam', Kund: 'building', Kollega: 'person-fill', Annat: 'person-fill'};
 const QUICK = ['Var är du?', 'Ring mig när du kan', 'Kan du ta en order åt mig?'];
 
-type Book = {nums: Record<string, string>; own: {id: string; name: string; kind: string; num: string}[]; chef: string | null; tl: string; seen: Record<string, number>; smsAsked?: boolean};
+type Book = {nums: Record<string, string>; own: {id: string; name: string; kind: string; num: string}[]; chef: string | null; tl: string; seen: Record<string, number>; smsAsked?: boolean; smsOpened?: number};
 const EMPTY: Book = {nums: {}, own: [], chef: null, tl: '', seen: {}};
 export type Contact = {name: string; num: string; kind: 'driver' | 'own' | 'tl'; sub?: string; ownId?: string};
 
@@ -66,9 +66,6 @@ export function useJobbet({team, me, enabled}: {team: {drivers: {name: string}[]
       const r = await PermissionsAndroid.requestMultiple([PermissionsAndroid.PERMISSIONS.SEND_SMS, PermissionsAndroid.PERMISSIONS.READ_SMS, PermissionsAndroid.PERMISSIONS.RECEIVE_SMS]);
       const ok = r[PermissionsAndroid.PERMISSIONS.SEND_SMS] === 'granted' && r[PermissionsAndroid.PERMISSIONS.READ_SMS] === 'granted';
       setPerm(ok ? 'ja' : 'nej');
-      // Android 15 spärrar SMS för appar som inte kommer från Play Store ("begränsade inställningar"),
-      // då visas ingen fråga alls. Gå direkt till RUTT:s sida i inställningarna.
-      if (!ok) Linking.openSettings().catch(() => {});
       return ok;
     } catch (e) { setPerm('nej'); return false; }
   };
@@ -131,6 +128,7 @@ export default function JobbetView({j, opterView, opterUnread, opterLast, onOpen
   const [numFor, setNumFor] = useState<Contact | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [menu, setMenu] = useState<Contact | null>(null);
+  const [setup, setSetup] = useState(false);
   const dial = (n: string) => Linking.openURL(`tel:${n}`).catch(() => {});
   const chefC = j.contacts.find(c => c.name === j.chef) || null;
   const tlC: Contact = {name: 'Trafikledningen', num: j.tl, kind: 'tl'};
@@ -161,6 +159,12 @@ export default function JobbetView({j, opterView, opterUnread, opterLast, onOpen
       </View>
     );
   }
+  if (setup && j.perm !== 'ja') return (
+    <View style={{flex: 1}}>
+      <View style={x.chd}><Pressable hitSlop={12} onPress={() => setSetup(false)}><Bi n="chevron-left" size={18} color={C.dim} /></Pressable><Text style={x.pn}>SMS i RUTT</Text></View>
+      <SmsSetup j={j} />
+    </View>
+  );
   if (open) return <SmsThread j={j} c={open} onBack={() => setOpen(null)} onDial={dial} />;
 
   const tagRow = (c: Contact, onPress: () => void) => {
@@ -193,7 +197,7 @@ export default function JobbetView({j, opterView, opterUnread, opterLast, onOpen
         <Text style={x.secl}>SMS med förare och egna kontakter</Text>
         {list.length ? list.map(({c}) => tagRow(c, () => { j.markSeen(numKey(c.num)); setOpen(c); }))
           : <View style={x.note}><Text style={x.noteT}>Här hamnar SMS med de du har nummer till. Lägg till nummer under Folk.</Text><Pressable onPress={() => setSeg('folk')}><Text style={x.link}>Till Folk</Text></Pressable></View>}
-        {j.perm === 'nej' ? <Pressable onPress={() => Linking.openSettings().catch(() => {})}><Text style={x.hint}>RUTT får inte läsa SMS än. <Text style={x.link}>Öppna inställningar</Text> → ⋮ → Tillåt begränsade inställningar → Behörigheter → SMS.</Text></Pressable> : null}
+        {j.perm !== 'ja' && j.withNum.length ? <Pressable style={x.note} onPress={() => setSetup(true)}><Text style={x.noteT}>SMS är inte påslaget i RUTT än.</Text><Text style={x.link}>Slå på SMS – 3 steg</Text></Pressable> : null}
       </>
     );
   };
@@ -339,21 +343,7 @@ function SmsThread({j, c, onBack, onDial}: {j: ReturnType<typeof useJobbet>; c: 
         <Pressable hitSlop={6} style={[x.cb, {backgroundColor: C.panel2}]} onPress={openApp}><Bi n="box-arrow-up-right" size={16} color={C.dim} /></Pressable>
       </View>
       {j.perm !== 'ja' ? (
-        <ScrollView contentContainerStyle={{padding: 22, alignItems: 'center'}}>
-          <View style={x.permIco}><Bi n="chat-dots-fill" size={28} color={C.people} /></View>
-          <Text style={x.permH}>SMS med {first} i RUTT</Text>
-          <Text style={x.permP}>Android frågar strax om RUTT får skicka, läsa och ta emot SMS.{'\n\n'}RUTT visar bara SMS med de nummer du lagt in under Folk – inga andra trådar. Allt stannar i telefonen.{'\n\n'}Säger du nej öppnas SMS-appen i stället.</Text>
-          {j.perm === 'nej' ? (
-            <View style={x.steps}>
-              <Text style={x.stepsH}>Android spärrar SMS för appar som inte kommer från Play Store. Så här låser du upp:</Text>
-              {['Tryck Öppna inställningar nedan – RUTT:s sida öppnas.', 'Tryck ⋮ uppe till höger → Tillåt begränsade inställningar.', 'Behörigheter → SMS → Tillåt.', 'Tryck tillbaka – RUTT ser det direkt.'].map((t, i) => (
-                <View key={i} style={x.stepRow}><View style={x.stepNo}><Text style={x.stepNoT}>{i + 1}</Text></View><Text style={x.stepT}>{t}</Text></View>
-              ))}
-            </View>
-          ) : null}
-          <Pressable style={[x.save, {alignSelf: 'stretch'}]} onPress={() => (j.perm === 'nej' ? Linking.openSettings().catch(() => {}) : j.askPerm())}><Text style={x.saveT}>{j.perm === 'nej' ? 'Öppna inställningar' : 'Fortsätt'}</Text></Pressable>
-          <Pressable style={[x.ghost, {alignSelf: 'stretch'}]} onPress={openApp}><Text style={x.ghostT}>Öppna i SMS-appen i stället</Text></Pressable>
-        </ScrollView>
+        <SmsSetup j={j} first={first} onUseApp={openApp} />
       ) : (
         <>
           <FlatList
@@ -382,6 +372,64 @@ function SmsThread({j, c, onBack, onDial}: {j: ReturnType<typeof useJobbet>; c: 
         </>
       )}
     </View>
+  );
+}
+
+/* ---- Slå på SMS: guidad, steg för steg, bockas av själv ----
+ * Android 15 spärrar SMS-behörighet för appar som inte kommer från Play Store ("begränsade inställningar").
+ * Ordningen som fungerar: 1) RUTT frågar (då låser Android och lägger in menyvalet), 2) Appinformation → ⋮ →
+ * Tillåt begränsade inställningar, 3) Behörigheter → SMS → Tillåt. Samsungs Automatisk blockering kan dölja steg 2.
+ * RUTT kollar igen varje gång du kommer tillbaka och går vidare själv när det är klart. */
+export function SmsSetup({j, first, onUseApp}: {j: ReturnType<typeof useJobbet>; first?: string; onUseApp?: () => void}) {
+  const asked = !!j.book.smsAsked;
+  const opened = j.book.smsOpened || 0;
+  const [help, setHelp] = useState(false);
+  const openInfo = () => { j.save(b => ({...b, smsOpened: (b.smsOpened || 0) + 1})); Linking.openSettings().catch(() => {}); };
+  const openSecurity = () => { (Linking as any).sendIntent ? (Linking as any).sendIntent('android.settings.SECURITY_SETTINGS').catch(() => Linking.openSettings()) : Linking.openSettings(); };
+  const step = !asked ? 1 : 2; // steg 2 och 3 görs på samma sida i inställningarna
+  const Step = ({n, t, sub, done, on, children}: any) => (
+    <View style={[x.sCard, on && {borderColor: C.accent}]}>
+      <View style={x.sTop}>
+        <View style={[x.stepNo, done && {backgroundColor: C.accent2}, !done && !on && {backgroundColor: C.panel2}]}>{done ? <Bi n="check2" size={14} color="#FFFFFF" /> : <Text style={[x.stepNoT, !on && {color: C.dim}]}>{n}</Text>}</View>
+        <Text style={[x.sT, !on && !done && {color: C.dim}]}>{t}</Text>
+      </View>
+      {sub ? <Text style={x.sSub}>{sub}</Text> : null}
+      {on ? children : null}
+    </View>
+  );
+  return (
+    <ScrollView contentContainerStyle={{padding: 18, paddingBottom: 30}}>
+      <Text style={x.permH}>Slå på SMS i RUTT</Text>
+      <Text style={x.permP}>Tre steg, ungefär en minut. Görs en gång. RUTT visar bara SMS med de nummer du lagt in under Folk – inget annat – och allt stannar i telefonen.</Text>
+      <Step n={1} t="Fråga Android" done={asked} on={step === 1} sub={asked ? 'Klart – Android har spärrat RUTT, det är väntat.' : 'Android säger troligen nej direkt. Det är meningen – då dyker valet i steg 2 upp.'}>
+        <Pressable style={x.save} onPress={() => j.askPerm()}><Text style={x.saveT}>Fråga</Text></Pressable>
+      </Step>
+      <Step n={2} t="Lås upp RUTT" on={step === 2} sub="På RUTT:s sida i inställningarna:">
+        <View style={x.mock}>
+          <View style={x.mockBar}><Text style={x.mockTitle}>Appinformation</Text><View style={x.mockDots}><Text style={x.mockDotsT}>⋮</Text></View></View>
+          <View style={x.mockMenu}><Text style={x.mockItem}>Tillåt begränsade inställningar</Text></View>
+        </View>
+        <Text style={x.sSub}>Tryck <Text style={{color: C.ink, fontWeight: '900'}}>⋮</Text> uppe till höger → <Text style={{color: C.ink, fontWeight: '900'}}>Tillåt begränsade inställningar</Text> → bekräfta med PIN eller fingeravtryck.</Text>
+        <Pressable style={x.save} onPress={openInfo}><Bi n="gear-fill" size={16} color={C.onAccent} /><Text style={x.saveT}>Öppna RUTT i inställningar</Text></Pressable>
+      </Step>
+      <Step n={3} t="Tillåt SMS" on={step === 2} sub="Samma sida: Behörigheter → SMS → Tillåt. Tryck sen tillbaka till RUTT – den ser det själv och öppnar SMS:en." />
+      {step === 2 ? (
+        <Pressable style={x.helpBtn} onPress={() => setHelp(h => !h)}>
+          <Bi n={help || opened >= 2 ? 'chevron-down' : 'chevron-right'} size={13} color={C.accentInk} />
+          <Text style={x.link}>Finns inte "Tillåt begränsade inställningar" under ⋮?</Text>
+        </Pressable>
+      ) : null}
+      {step === 2 && (help || opened >= 2) ? (
+        <View style={x.sCard}>
+          <Text style={x.sSub}>Då har Samsungs <Text style={{color: C.ink, fontWeight: '800'}}>Automatisk blockering</Text> spärrat det. Stäng av den en stund:</Text>
+          {['Säkerhet och integritet → Automatisk blockering → Av.', 'Gör steg 2 och 3 ovan.', 'Slå på Automatisk blockering igen om du vill – RUTT behåller SMS.'].map((t, i) => (
+            <View key={i} style={[x.stepRow, {marginTop: 8}]}><View style={[x.stepNo, {backgroundColor: C.panel2}]}><Text style={[x.stepNoT, {color: C.dim}]}>{i + 1}</Text></View><Text style={x.stepT}>{t}</Text></View>
+          ))}
+          <Pressable style={x.ghost} onPress={openSecurity}><Bi n="shield-lock" size={16} color={C.ink} /><Text style={x.ghostT}>Öppna Säkerhet och integritet</Text></Pressable>
+        </View>
+      ) : null}
+      {onUseApp ? <Pressable style={[x.ghost, {marginTop: 14}]} onPress={onUseApp}><Text style={x.ghostT}>Skriv till {first || 'personen'} i SMS-appen i stället</Text></Pressable> : null}
+    </ScrollView>
   );
 }
 
@@ -447,6 +495,18 @@ const x = themed(() => StyleSheet.create({
   stepNo: {width: 24, height: 24, borderRadius: 12, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center'},
   stepNoT: {color: C.onAccent, fontSize: 13, fontWeight: '900'},
   stepT: {color: C.ink, fontSize: 14, lineHeight: 20, flex: 1},
+  sCard: {backgroundColor: C.panel, borderRadius: 14, padding: 14, marginTop: 12, borderWidth: 2, borderColor: 'transparent'},
+  sTop: {flexDirection: 'row', alignItems: 'center', gap: 10},
+  sT: {color: C.ink, fontSize: 16, fontWeight: '900'},
+  sSub: {color: C.dim, fontSize: 13.5, lineHeight: 19, marginTop: 8},
+  mock: {backgroundColor: C.panel2, borderRadius: 10, padding: 10, marginTop: 10},
+  mockBar: {flexDirection: 'row', alignItems: 'center'},
+  mockTitle: {color: C.ink, fontSize: 14, fontWeight: '800', flex: 1},
+  mockDots: {width: 30, height: 30, borderRadius: 15, borderWidth: 2, borderColor: C.accent, alignItems: 'center', justifyContent: 'center'},
+  mockDotsT: {color: C.ink, fontSize: 18, fontWeight: '900', lineHeight: 20},
+  mockMenu: {alignSelf: 'flex-end', backgroundColor: C.panel, borderRadius: 8, paddingVertical: 9, paddingHorizontal: 12, marginTop: 6, borderWidth: 2, borderColor: C.accent},
+  mockItem: {color: C.ink, fontSize: 13, fontWeight: '700'},
+  helpBtn: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14, paddingVertical: 4},
   permIco: {width: 64, height: 64, borderRadius: 32, backgroundColor: C.peopleSoft, alignItems: 'center', justifyContent: 'center', marginTop: 20},
   permH: {color: C.ink, fontSize: 20, fontWeight: '900', marginTop: 14},
   permP: {color: C.dim, fontSize: 14, lineHeight: 20, marginTop: 10, alignSelf: 'stretch'},
