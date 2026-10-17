@@ -8,7 +8,7 @@
  * Chattmeddelanden (RCS) och bilder (MMS) syns inte här – "Öppna i SMS-appen" finns alltid.
  */
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {DeviceEventEmitter, FlatList, Linking, NativeModules, PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
+import {AppState, DeviceEventEmitter, FlatList, Linking, NativeModules, PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {C, themed, hhmm, prettyPhone} from './theme';
 import {Sheet, useKeyboardLift} from './parts';
 import {Bi} from './Bi';
@@ -57,7 +57,8 @@ export function useJobbet({team, me, enabled}: {team: {drivers: {name: string}[]
       return r && s;
     } catch (e) { return false; }
   }, []);
-  useEffect(() => { checkPerm(); }, [checkPerm]);
+  // Tillbaka från telefonens inställningar → kolla igen direkt.
+  useEffect(() => { checkPerm(); const sub = AppState.addEventListener('change', st => { if (st === 'active') checkPerm(); }); return () => sub.remove(); }, [checkPerm]);
   const askPerm = async () => {
     save(b => ({...b, smsAsked: true}));
     if (Platform.OS !== 'android' || !SMS) { setPerm('nej'); return false; }
@@ -65,6 +66,9 @@ export function useJobbet({team, me, enabled}: {team: {drivers: {name: string}[]
       const r = await PermissionsAndroid.requestMultiple([PermissionsAndroid.PERMISSIONS.SEND_SMS, PermissionsAndroid.PERMISSIONS.READ_SMS, PermissionsAndroid.PERMISSIONS.RECEIVE_SMS]);
       const ok = r[PermissionsAndroid.PERMISSIONS.SEND_SMS] === 'granted' && r[PermissionsAndroid.PERMISSIONS.READ_SMS] === 'granted';
       setPerm(ok ? 'ja' : 'nej');
+      // Android 15 spärrar SMS för appar som inte kommer från Play Store ("begränsade inställningar"),
+      // då visas ingen fråga alls. Gå direkt till RUTT:s sida i inställningarna.
+      if (!ok) Linking.openSettings().catch(() => {});
       return ok;
     } catch (e) { setPerm('nej'); return false; }
   };
@@ -189,7 +193,7 @@ export default function JobbetView({j, opterView, opterUnread, opterLast, onOpen
         <Text style={x.secl}>SMS med förare och egna kontakter</Text>
         {list.length ? list.map(({c}) => tagRow(c, () => { j.markSeen(numKey(c.num)); setOpen(c); }))
           : <View style={x.note}><Text style={x.noteT}>Här hamnar SMS med de du har nummer till. Lägg till nummer under Folk.</Text><Pressable onPress={() => setSeg('folk')}><Text style={x.link}>Till Folk</Text></Pressable></View>}
-        {j.perm === 'nej' ? <Text style={x.hint}>RUTT får inte läsa SMS – trådarna öppnas i SMS-appen i stället. Ändra under telefonens inställningar för appar → RUTT → Behörigheter.</Text> : null}
+        {j.perm === 'nej' ? <Pressable onPress={() => Linking.openSettings().catch(() => {})}><Text style={x.hint}>RUTT får inte läsa SMS än. <Text style={x.link}>Öppna inställningar</Text> → ⋮ → Tillåt begränsade inställningar → Behörigheter → SMS.</Text></Pressable> : null}
       </>
     );
   };
@@ -339,8 +343,15 @@ function SmsThread({j, c, onBack, onDial}: {j: ReturnType<typeof useJobbet>; c: 
           <View style={x.permIco}><Bi n="chat-dots-fill" size={28} color={C.people} /></View>
           <Text style={x.permH}>SMS med {first} i RUTT</Text>
           <Text style={x.permP}>Android frågar strax om RUTT får skicka, läsa och ta emot SMS.{'\n\n'}RUTT visar bara SMS med de nummer du lagt in under Folk – inga andra trådar. Allt stannar i telefonen.{'\n\n'}Säger du nej öppnas SMS-appen i stället.</Text>
-          {j.perm === 'nej' ? <Text style={[x.permP, {color: C.bad}]}>RUTT fick inte SMS-behörighet. Ändra under telefonens inställningar → Appar → RUTT → Behörigheter, eller använd SMS-appen.</Text> : null}
-          <Pressable style={[x.save, {alignSelf: 'stretch'}]} onPress={() => j.askPerm()}><Text style={x.saveT}>Fortsätt</Text></Pressable>
+          {j.perm === 'nej' ? (
+            <View style={x.steps}>
+              <Text style={x.stepsH}>Android spärrar SMS för appar som inte kommer från Play Store. Så här låser du upp:</Text>
+              {['Tryck Öppna inställningar nedan – RUTT:s sida öppnas.', 'Tryck ⋮ uppe till höger → Tillåt begränsade inställningar.', 'Behörigheter → SMS → Tillåt.', 'Tryck tillbaka – RUTT ser det direkt.'].map((t, i) => (
+                <View key={i} style={x.stepRow}><View style={x.stepNo}><Text style={x.stepNoT}>{i + 1}</Text></View><Text style={x.stepT}>{t}</Text></View>
+              ))}
+            </View>
+          ) : null}
+          <Pressable style={[x.save, {alignSelf: 'stretch'}]} onPress={() => (j.perm === 'nej' ? Linking.openSettings().catch(() => {}) : j.askPerm())}><Text style={x.saveT}>{j.perm === 'nej' ? 'Öppna inställningar' : 'Fortsätt'}</Text></Pressable>
           <Pressable style={[x.ghost, {alignSelf: 'stretch'}]} onPress={openApp}><Text style={x.ghostT}>Öppna i SMS-appen i stället</Text></Pressable>
         </ScrollView>
       ) : (
@@ -430,6 +441,12 @@ const x = themed(() => StyleSheet.create({
   sendRow: {flexDirection: 'row', gap: 8, padding: 12, paddingBottom: 12, borderTopColor: C.edge, borderTopWidth: StyleSheet.hairlineWidth, alignItems: 'flex-end'},
   sendIn: {flex: 1, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 10, color: C.ink, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, maxHeight: 120},
   sendB: {backgroundColor: C.people, borderRadius: 22, width: 44, height: 44, alignItems: 'center', justifyContent: 'center'},
+  steps: {alignSelf: 'stretch', backgroundColor: C.panel, borderRadius: 12, padding: 14, marginTop: 14, gap: 10},
+  stepsH: {color: C.ink, fontSize: 14, fontWeight: '700', lineHeight: 20},
+  stepRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 10},
+  stepNo: {width: 24, height: 24, borderRadius: 12, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center'},
+  stepNoT: {color: C.onAccent, fontSize: 13, fontWeight: '900'},
+  stepT: {color: C.ink, fontSize: 14, lineHeight: 20, flex: 1},
   permIco: {width: 64, height: 64, borderRadius: 32, backgroundColor: C.peopleSoft, alignItems: 'center', justifyContent: 'center', marginTop: 20},
   permH: {color: C.ink, fontSize: 20, fontWeight: '900', marginTop: 14},
   permP: {color: C.dim, fontSize: 14, lineHeight: 20, marginTop: 10, alignSelf: 'stretch'},
