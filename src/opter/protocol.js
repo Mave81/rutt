@@ -511,6 +511,8 @@ function parseLogon(payload) {
   const info = {
     acdOffId: num(p[0]), resId: num(p[1]), name: p[2] || '', guid: p[3] || '',
     vhcId: num(p[4]), chooseVehicle: /^true$/i.test(p[5] || ''), number: p[11] || '',
+    // Som Opter Driver (MethodsSocketProxy.logon): 10 = visa bara åkeriets egna, 12 = ditt åkeri (ExternalSupplierId).
+    showOnlySupplier: /^true$/i.test(p[10] || ''), supplierId: num(p[12]),
     fields: p,
   };
   info.ok = info.guid.length > 0;       // giltig session = vi fick ett guid
@@ -573,10 +575,13 @@ function encodeSendMessage({offId, resId, vhcId, shiId, text}) {
 }
 
 /* Resource-listan ur en synk → [{resId, name}] (för namnvalet) */
-function resourceList(decoded) {
+function resourceList(decoded, logon) {
   const out = [];
+  const sup = logon ? (logon.supplierId || 0) : 0, onlySup = !!(logon && (logon.showOnlySupplier || sup));
   for (const r of decoded.rows) {
     if (r.table !== 'Resource') continue;
+    if (r.columns.active === false) continue;
+    if (onlySup && (r.columns.supplierId || 0) !== sup) continue; // bara ditt åkeris förare (som Opter)
     const resId = r.key.xxxId;
     const name = r.columns.name || r.columns.shortId || ('Resurs ' + resId);
     if (resId) out.push({ resId, name });
@@ -587,7 +592,13 @@ function resourceList(decoded) {
 
 /* Folket på jobbet (Opter: samma lista som "Ge bort" – aktiva förare, Resources.giveAwayShipmentChooser)
  * + trafikledningens nummer om kontoret lagt in det (Office.OFF_PhoneNoDispatch). Inga telefonnummer finns för förarna. */
-function team(decoded) {
+function team(decoded, logon) {
+  // Som Opter Driver ("Ge bort"-listan): aktiv, förare, inte du själv, och bara ditt åkeris förare när kontoret
+  // satt "visa bara leverantörens" (OFF_ShowOnlySuppliersVehicles) – RES_ExternalSupplierId == ditt åkeri.
+  // Har du ett åkeri (ExternalSupplierId) visas bara dess förare även om flaggan saknas – annars blir det hela Opter (100+).
+  const sup = logon ? (logon.supplierId || 0) : 0;
+  const onlySup = !!(logon && (logon.showOnlySupplier || sup));
+  const me = logon ? logon.resId : 0;
   const rows = (decoded && decoded.rows) || [];
   const seen = new Set(), drivers = [];
   for (const r of rows) {
@@ -595,6 +606,8 @@ function team(decoded) {
     const c = r.columns, id = r.key.xxxId;
     // Standard i Opter: aktiv = sant, förare = sant (skickas bara när det är falskt) → hoppa över de som är avstängda / inte förare.
     if (!id || seen.has(id) || c.active === false || c.driver === false || !c.name) continue;
+    if (onlySup && (c.supplierId || 0) !== sup) continue;
+    if (me && id === me) continue;
     seen.add(id); drivers.push({resId: id, name: String(c.name).trim()});
   }
   drivers.sort((a, b) => a.name.localeCompare(b.name, 'sv'));

@@ -61,3 +61,16 @@ test('folket på jobbet: aktiva förare + trafikledningens nummer', () => {
   expect(t.drivers.map(d => d.name)).toEqual(['Joel Henriksson', 'Tony Rösth']);
   expect(t.dispatchPhone).toBe('08-123 456');
 });
+test('bara ditt åkeris förare – som Opters Ge bort-lista', () => {
+  const rows = [
+    {table: 'Resource', key: {xxxId: 1}, columns: {name: 'Joel Henriksson', supplierId: 55}},
+    {table: 'Resource', key: {xxxId: 2}, columns: {name: 'Kenneth Andersson', supplierId: 55}},
+    {table: 'Resource', key: {xxxId: 3}, columns: {name: 'Annat åkeri', supplierId: 77}},
+    {table: 'Resource', key: {xxxId: 4}, columns: {name: 'Kontorets egen förare'}},
+  ];
+  const logon = P.parseLogon(Buffer.from(['7', '2', 'Kenneth Andersson', 'guid', '0', 'false', '2', '1', '12', 'false', 'true', '3111', '55', 'false', 'false', 'false'].join('\n')));
+  expect(logon.showOnlySupplier).toBe(true);
+  expect(logon.supplierId).toBe(55);
+  expect(P.team({rows}, logon).drivers.map(d => d.name)).toEqual(['Joel Henriksson']);
+  expect(P.resourceList({rows}, logon).map(d => d.name)).toEqual(['Joel Henriksson', 'Kenneth Andersson']);
+});

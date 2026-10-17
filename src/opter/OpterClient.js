@@ -140,7 +140,7 @@ export default class OpterClient {
   }
 
   resources() {
-    return this.lastDecoded ? P.resourceList(this.lastDecoded) : [];
+    return this.lastDecoded ? P.resourceList(this.lastDecoded, this.logon) : [];
   }
 
   async startWork(resId) {

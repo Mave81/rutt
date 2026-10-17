@@ -31,7 +31,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '17 okt · SMS: direkt till inställningar';
+const BUILD = '17 okt · bara ditt åkeris förare';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -192,7 +192,7 @@ function AppInner(): React.JSX.Element {
   useEffect(() => { loadJSON('rutt.team.v1', null).then((v: any) => { if (v && v.drivers) setTeam(v); }); }, []);
   useEffect(() => {
     const d = client.lastDecoded; if (!d) return;
-    try { const t = P.team(d); if (t.drivers.length) { setTeam(t); saveJSON('rutt.team.v1', t); } } catch (e) {}
+    try { const t = P.team(d, client.logon); if (t.drivers.length || client.logon) { setTeam(t); saveJSON('rutt.team.v1', t); } } catch (e) {}
   }, [orders]);
   const [remember, setRemember] = useState(true);
   const [showPw, setShowPw] = useState(false);
