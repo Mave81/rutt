@@ -20,7 +20,7 @@ import NewOrdersView from './src/ui/NewOrdersView';
 import LoadView from './src/ui/LoadView';
 import {loadJSON, saveJSON, ORDERS_KEY, NAMES_KEY, companyKey, rememberName} from './src/store';
 import {Buffer} from 'buffer';
-import {PixelRatio} from 'react-native';
+import {PixelRatio, BackHandler} from 'react-native';
 // @ts-ignore
 import P from './src/opter/protocol';
 // @ts-ignore
@@ -31,7 +31,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '17 okt · SMS-guide i appen';
+const BUILD = '17 okt · status-lampor, rast-ruta, logga ut stänger';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -115,6 +115,10 @@ function AppInner(): React.JSX.Element {
 
   // Arbetstid, stopp-status och POD
   const [work, setWork] = useState<'igång' | 'rast' | 'lunch' | 'slut'>('igång');
+  const [workSince, setWorkSince] = useState<number>(0); // när rasten/lunchen började
+  const [nowTick, setNowTick] = useState(Date.now());
+  useEffect(() => { loadJSON('rutt.work.v1', null).then((v: any) => { if (v && v.day === new Date().toDateString() && v.state) { setWork(v.state); setWorkSince(v.since || 0); } }); }, []);
+  useEffect(() => { if (work === 'igång') return; const t = setInterval(() => setNowTick(Date.now()), 15000); return () => clearInterval(t); }, [work]);
   const [workSheet, setWorkSheet] = useState(false);
   // Orderstatus per order (cid): {loadedAt, doneAt, pod}. Sparas lokalt per dag.
   const [ost, setOst] = useState<Record<string, any>>({});
@@ -564,6 +568,11 @@ function AppInner(): React.JSX.Element {
     try { NativeModules.RuttLocation && NativeModules.RuttLocation.stop(); } catch (e) {}
     setPass(''); setDriverName(''); setOrders({cargo: {}, stops: []}); setMsgs([]); setDemo(false); setStep('login');
   }
+  // Logga ut = allt stängs: Opter-sessionen, GPS-tjänsten och appen. Nästa gång loggar du in på nytt.
+  async function logoutAndClose() {
+    await logout();
+    setTimeout(() => { try { BackHandler.exitApp(); } catch (e) {} }, 300);
+  }
 
   // ---- GPS: be om behörighet, starta tjänsten, skicka senaste position med serverns intervall ----
   useEffect(() => { loadJSON('rutt.gps.v1', true).then((v: any) => setGpsOn(v !== false)); }, []);
@@ -672,7 +681,9 @@ function AppInner(): React.JSX.Element {
 
   // Arbetstid → Opter (live). RST-typ + nytt visningsläge.
   async function doWork(rst: number, newState: 'igång' | 'rast' | 'lunch' | 'slut') {
-    setWork(newState);
+    const since = Date.now();
+    setWork(newState); setWorkSince(since); setNowTick(since);
+    saveJSON('rutt.work.v1', {day: new Date().toDateString(), state: newState, since});
     setWorkSheet(false);
     if (live) { try { await client.workStatus(rst); } catch (e) {} }
   }
@@ -711,7 +722,7 @@ function AppInner(): React.JSX.Element {
   const title = step === 'login' ? (driverName ? `Välkommen ${driverName}` : 'Logga in mot Opter') : step === 'pick' ? 'Välj ditt namn' : tab === 'chat' ? 'Jobbet' : tab === 'last' ? 'Lastplan' : tab === 'klart' ? 'Klart idag' : tab === 'nytt' ? 'Nya order' : (driverName ? `${hej} ${driverName.split(' ')[0]}` : demo ? 'Demo' : 'Dina jobb');
 
   return (
-    <SafeAreaView style={s.safe} edges={['top']}>
+    <SafeAreaView style={s.safe} edges={['top']} key={'root-' + mode}>
       <StatusBar barStyle={C.mode === 'light' ? 'dark-content' : 'light-content'} backgroundColor={C.bg} />
       <View style={s.head}>
         <View style={s.headTop}>
@@ -737,7 +748,7 @@ function AppInner(): React.JSX.Element {
             );
           })()}
           {step === 'route' && (
-            <Pressable hitSlop={8} onPress={() => setWorkSheet(true)} style={s.iconBtn}><Bi n="cup-hot-fill" size={16} color={work === 'igång' ? C.dim : C.accentInk} /></Pressable>
+            <Pressable hitSlop={8} onPress={() => setWorkSheet(true)} style={[s.iconBtn, work !== 'igång' && {borderColor: C.bad, backgroundColor: C.badSoft}]}><Bi n="cup-hot-fill" size={16} color={work === 'igång' ? C.dim : C.bad} /></Pressable>
           )}
           <Pressable hitSlop={8} onPress={() => setDiag(true)} style={s.iconBtn}><Bi n="gear-fill" size={16} color={C.dim} /></Pressable>
         </View>
@@ -802,13 +813,24 @@ function AppInner(): React.JSX.Element {
               <Text style={s.bannerGo}>Visa</Text><Bi n="chevron-right" size={14} color={C.onAccent} />
             </Pressable>
           )}
-          {work !== 'igång' && (tab === 'plan' || tab === 'last') && (
-            <Pressable style={s.workBar} onPress={() => setWorkSheet(true)}>
-              <Bi n={work === 'slut' ? 'power' : 'cup-hot-fill'} size={16} color={C.accentInk} />
-              <Text style={s.workTxt}>{work === 'rast' ? 'Du har rast' : work === 'lunch' ? 'Du har lunch' : 'Arbetspasset är avslutat'}</Text>
-              <Text style={s.workAction}>{work === 'slut' ? 'Återuppta' : 'Avsluta'}</Text>
-            </Pressable>
-          )}
+          {work !== 'igång' && (() => {
+            // Rast / lunch: syns på alla flikar med hur länge den pågått. Röd lampa = du är inte i tjänst.
+            const min = workSince ? Math.max(0, Math.floor((nowTick - workSince) / 60000)) : 0;
+            const dur = min >= 60 ? `${Math.floor(min / 60)} h ${min % 60} min` : `${min} min`;
+            const what = work === 'rast' ? 'Rast' : work === 'lunch' ? 'Lunch' : 'Arbetsdagen avslutad';
+            return (
+              <View style={s.breakCard}>
+                <View style={s.breakIco}><Bi n={work === 'slut' ? 'power' : 'cup-hot-fill'} size={20} color={C.bad} /></View>
+                <View style={{flex: 1, minWidth: 0}}>
+                  <View style={{flexDirection: 'row', alignItems: 'center', gap: 6}}><Lamp col={C.bad} size={8} /><Text style={s.breakT}>{what}</Text></View>
+                  <Text style={s.breakS}>{work === 'slut' ? (workSince ? `sedan ${hhmm(new Date(workSince))}` : '') : `${dur}${workSince ? `  ·  sedan ${hhmm(new Date(workSince))}` : ''}`}{live ? '' : '  ·  demo'}</Text>
+                </View>
+                <Pressable style={s.breakBtn} onPress={() => (work === 'rast' ? doWork(RST.EndBreak, 'igång') : work === 'lunch' ? doWork(RST.EndLunch, 'igång') : doWork(1, 'igång'))}>
+                  <Text style={s.breakBtnT}>{work === 'slut' ? 'Återuppta' : `Avsluta ${work}`}</Text>
+                </Pressable>
+              </View>
+            );
+          })()}
 
           {tab === 'klart' && <DoneView done={doneOrders} onRetry={retrySync} onOpen={(d: any) => setEditFor({cid: d.cid, st: d.st, done: true})} />}
           {tab === 'nytt' && <NewOrdersView orders={newOrders} onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={(o: any) => setOrderStatus(o, 'reject')} />}
@@ -869,7 +891,7 @@ function AppInner(): React.JSX.Element {
           ))}
         </View>
         {step === 'route' && !demo && (
-          <View style={{marginTop: 14, gap: 6}}>
+          <View style={s.statusCard}>
             <StatusLine ok={online === 'ja'} warn={online === 'åter'} text={online === 'ja' ? `Inloggad mot Opter${driverName ? ` som ${driverName}` : ''}` : online === 'åter' ? 'Tappade kontakten – ansluter igen' : 'Inte inloggad'} />
             <StatusLine ok={!!(gpsStat && gpsStat.running)} text={gpsStat && gpsStat.running ? 'GPS-tjänsten är igång' : 'GPS-tjänsten är inte igång'} />
             <StatusLine ok={!!(gpsStat && gpsStat.notif)} text={gpsStat && gpsStat.notif ? 'Notisen "Skickar din position" visas' : 'Notiser är avstängda för RUTT'} onFix={gpsStat && !gpsStat.notif ? () => Linking.openSettings() : undefined} />
@@ -904,9 +926,12 @@ function AppInner(): React.JSX.Element {
         </Pressable>
         {gps.state === 'nekad' && <Text style={[s.sheetNote, {color: C.bad}]}>Platsbehörighet saknas: öppna telefonens Inställningar → Appar → RUTT → Behörigheter → Plats → Tillåt.</Text>}
         {step === 'route' && (
-          <Pressable style={[s.sheetBtn, {alignItems: 'center', marginTop: 16}]} onPress={logout}>
-            <Text style={s.sheetBtnTxt}>Logga ut / byt förare</Text>
-          </Pressable>
+          <>
+            <Pressable style={s.logoutBtn} onPress={logoutAndClose}>
+              <Bi n="power" size={17} color={C.bad} /><Text style={s.logoutTxt}>Logga ut och stäng RUTT</Text>
+            </Pressable>
+            <Text style={[s.sheetNote, {textAlign: 'center', marginTop: 6}]}>GPS slutar skickas och appen stängs. Nästa gång loggar du in igen.</Text>
+          </>
         )}
       </Sheet>
 
@@ -1001,11 +1026,21 @@ function ChatView({msgs, msgText, setMsgText, onSend, onRetry}: any) {
   );
 }
 
+// Statusrad med en liten lampa: grön = funkar, orange = jobbar på det, röd = fel. Mjukt sken runt lampan.
+function Lamp({col, size = 10}: {col: string; size?: number}) {
+  return (
+    <View style={{width: size + 10, height: size + 10, alignItems: 'center', justifyContent: 'center'}}>
+      <View style={{position: 'absolute', width: size + 10, height: size + 10, borderRadius: (size + 10) / 2, backgroundColor: col, opacity: 0.18}} />
+      <View style={{position: 'absolute', width: size + 4, height: size + 4, borderRadius: (size + 4) / 2, backgroundColor: col, opacity: 0.28}} />
+      <View style={{width: size, height: size, borderRadius: size / 2, backgroundColor: col}} />
+    </View>
+  );
+}
 function StatusLine({ok, warn, text, onFix}: {ok: boolean; warn?: boolean; text: string; onFix?: () => void}) {
-  const col = ok ? C.accent2 : warn ? C.accentInk : C.bad;
+  const col = ok ? C.accent2 : warn ? C.accent : C.bad;
   return (
     <Pressable disabled={!onFix} onPress={onFix} style={s.stLine}>
-      <Bi n={ok ? 'check-circle-fill' : warn ? 'arrow-repeat' : 'x-circle-fill'} size={15} color={col} />
+      <Lamp col={col} />
       <Text style={[s.stLineTxt, !ok && !warn && {color: C.bad}]}>{text}</Text>
       {onFix ? <Text style={s.stFix}>Öppna inställningar</Text> : null}
     </Pressable>
@@ -1065,8 +1100,17 @@ const s = themed(() => StyleSheet.create({
   segTxt: {color: C.dim, fontSize: 14, fontWeight: '700'},
   toggle: {width: 46, height: 28, borderRadius: 14, backgroundColor: C.edge, padding: 3, justifyContent: 'center'},
   toggleKnob: {width: 22, height: 22, borderRadius: 11, backgroundColor: '#FFFFFF'},
-  stLine: {flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 3},
-  stLineTxt: {color: C.ink, fontSize: 13.5, flex: 1},
+  stLine: {flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 5},
+  stLineTxt: {color: C.ink, fontSize: 14, flex: 1, fontWeight: '600'},
+  statusCard: {marginTop: 14, backgroundColor: C.panel2, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12},
+  logoutBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 20, height: 52, borderRadius: 12, backgroundColor: C.badSoft},
+  logoutTxt: {color: C.bad, fontSize: 15.5, fontWeight: '800'},
+  breakCard: {flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 14, marginBottom: 8, backgroundColor: C.badSoft, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 12},
+  breakIco: {width: 42, height: 42, borderRadius: 21, backgroundColor: C.panel, alignItems: 'center', justifyContent: 'center'},
+  breakT: {color: C.ink, fontSize: 16, fontWeight: '900'},
+  breakS: {color: C.dim, fontSize: 13, marginTop: 2, fontWeight: '600'},
+  breakBtn: {backgroundColor: C.bad, borderRadius: 10, paddingHorizontal: 12, height: 40, justifyContent: 'center'},
+  breakBtnT: {color: '#FFFFFF', fontSize: 13.5, fontWeight: '800'},
   stFix: {color: C.accentInk, fontSize: 12.5, fontWeight: '700'},
   build: {color: C.accentInk, fontSize: 11, opacity: 0.8},
   wrap: {flexGrow: 1, paddingHorizontal: 18, paddingTop: 8},
