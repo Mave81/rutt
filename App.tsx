@@ -36,11 +36,11 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 // Var dagen börjar (rutten räknas därifrån tills du klarat första stoppet). Väljs under Plan → Imorgon.
 const STARTS = [
-const BUILD = '19 okt · 3.26 · startplats (Västberga), smartare lastning i tre filer, hemresan styr inte sista lossningen';
+  {id: 'vb', lat: 59.2938, lng: 18.0127, label: 'Västberga', end: '15:00'},
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '19 okt · 3.25 · adresser slås upp på kartan så körtider räknas (Imorgon, Plan)';
+const BUILD = '19 okt · 3.26 · startplats (Västberga), smartare lastning i tre filer, hemresan styr inte sista lossningen';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
