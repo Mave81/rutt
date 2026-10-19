@@ -31,7 +31,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '19 okt · kvittensen (signatur + namn) kommer fram i Opter, skicka sparad kvittens igen';
+const BUILD = '19 okt · Lossad kommer alltid fram (kvittensen skickas för sig om Opter inte tar båda), namnförslag från Opter, sändlogg';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -57,6 +57,10 @@ const DEMO = {
 
 // ---- Skyddsnät: fel får aldrig stänga appen. Felet loggas (syns under Felsök) och appen fortsätter. ----
 const CRASH_KEY = 'rutt.crashes.v1';
+// Sändloggen (vad som skickades till Opter och vad Opter svarade) sparas i telefonen och följer med i Skicka orderdata.
+const SENDLOG_KEY = 'rutt.sendlog.v1';
+client.onLog = (l: any) => { saveJSON(SENDLOG_KEY, l); };
+loadJSON(SENDLOG_KEY, []).then((l: any) => { if (Array.isArray(l) && !client.log.length) client.log = l; }).catch(() => {});
 async function logCrash(e: any, where: string) {
   try {
     const list: any[] = await loadJSON(CRASH_KEY, []);

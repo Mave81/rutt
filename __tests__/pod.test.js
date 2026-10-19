@@ -47,3 +47,31 @@ test('kvittenstyp utan "tillåt efter hämtning"-fält räknas som tillåten (Op
   expect(drop.live.podType).toEqual({id: 7, name: 'Kvittens'});
   expect(drop.req.sig).toBe(true); expect(drop.req.name).toBe(true);
 });
+
+test('namnförslag: rader under ordern utan SPS_SHI_Id räknas till ordern, återkallade och dubbletter bort', () => {
+  const ship = row('Shipment', 100, {orderId: 555, adrFrom: 1, adrTo: 2, shsId: 12});
+  const rows = [row('Address', 1, {company: 'A'}), row('Address', 2, {company: 'B'}), ship,
+    row('ShipmentStatus', 12, {name: 'Bekräftad', accepted: true, order: 1}, ship),
+    row('ShipmentStatus', 13, {name: 'Lossad', delivery: true, pod: true, order: 3}, ship),
+    row('ShipmentPodSuggestion', 1, {name: 'Anna Berg'}, ship), row('ShipmentPodSuggestion', 2, {name: 'Per Ö'}, ship),
+    row('ShipmentPodSuggestion', 3, {name: 'Gammal', revoked: true}, ship), row('ShipmentPodSuggestion', 4, {name: 'Anna Berg'}, ship),
+    row('ShipmentPodSuggestion', 5, {name: 'Lisa'}, ship), row('ShipmentPodSuggestion', 6, {name: 'Kim'}, ship)];
+  const drop = P.toRutt({rows}).stops.find(s => s.drop);
+  expect(drop.suggest).toEqual(['Anna Berg', 'Per Ö', 'Lisa', 'Kim']);
+});
+
+test('signatur: aldrig över Opters gräns (Int16-längd), streckstarter kvar, inga negativa koordinater', () => {
+  const st = []; for (let s = 0; s < 12; s++) { const a = []; for (let i = 0; i < 900; i++) a.push({x: -3 + i * 0.7, y: 60 + Math.sin(i / 4) * 50}); st.push(a); }
+  const sig = P.signatureString(st, 3);
+  expect(Buffer.byteLength(sig)).toBeLessThanOrEqual(30000);
+  const n = sig.split(',').map(Number);
+  expect(n.filter((v, i) => i % 2 === 0 && v === -1).length).toBe(12);  // 12 streck
+  expect(n.every(v => v >= -1)).toBe(true);
+  const live = {key: {identityId: 5, offId: 7, xxxId: 9001}, hdr: {}, shiId: 9001, externalId: '', packageIds: []};
+  const d = P.decodeSync(P.encodeShipmentStatus({live, statusId: 44, pod: {sptId: -3, name: 'Åsa', signature: sig}}));
+  expect(d.error).toBeUndefined();
+  expect(d.rows[2].columns.signature).toBe(sig);
+  // vanlig signatur: oförändrad täthet (Opters 4 px)
+  const small = P.signatureString([[{x: 0, y: 0}, {x: 1, y: 0}, {x: 2, y: 0}, {x: 10, y: 0}]], 1);
+  expect(small).toBe('-1,-1,0,0,10,0');
+});

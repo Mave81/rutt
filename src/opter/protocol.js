@@ -173,7 +173,7 @@ const wI32 = (w, n) => { const b = Buffer.alloc(4); b.writeInt32LE(n); w.push(b)
 const wI64 = (w, n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); w.push(b); };
 function wInt(w, prop, val) { if (val == null) { wB(w, DT.Int32Null); wB(w, prop); } else { wB(w, DT.Int32); wB(w, prop); wI32(w, val); } }
 function wBool(w, prop, val) { if (val == null) { wB(w, DT.BoolNull); wB(w, prop); } else { wB(w, DT.Bool); wB(w, prop); wB(w, val ? 1 : 0); } }
-function wStr(w, prop, val) { if (val == null || val === '') { wB(w, DT.StringNull); wB(w, prop); } else { wB(w, DT.String); wB(w, prop); const s = Buffer.from(val, CHARSET); wI16(w, s.length); w.push(s); } }
+function wStr(w, prop, val) { if (val == null || val === '') { wB(w, DT.StringNull); wB(w, prop); } else { wB(w, DT.String); wB(w, prop); let s = Buffer.from(String(val), CHARSET); if (s.length > 32767) s = Buffer.from(String(val).slice(0, 8000), CHARSET); wI16(w, s.length); w.push(s); } }
 function wDate(w, prop, val) { if (val == null) { wB(w, DT.DateTimeNull); wB(w, prop); } else { wB(w, DT.DateTime); wB(w, prop); wI32(w, dateToSecs2000(val)); } }
 function wStartTable(w, tableName, key) { wB(w, DT.StartTable); wB(w, TableOrd[tableName]); wB(w, 14); wI32(w, key.identityId || 0); wI32(w, key.offId || 0); wI32(w, key.xxxId || 0); wB(w, 0); wB(w, 0); }
 /* Nya rader: Opter ger varje nyskapad rad ett eget löpnummer (identityId) och
@@ -223,14 +223,27 @@ function encodeWorkStatus({ offId, rstType, resId, vhcId }) {
  * Signatur = "x,y,x,y,…" i pixlar, "-1,-1" före varje nytt streck (Opters FingerPaint-format).
  */
 function wBytes(w, prop, buf) { if (!buf || !buf.length) return; wB(w, DT.ByteArray); wB(w, prop); wI32(w, buf.length); w.push(buf); }
-function signatureString(strokes, scale) {
-  const out = [];
-  for (const st of strokes || []) {
-    if (!st || st.length < 1) continue;
-    out.push(-1, -1);
-    for (const p of st) out.push(Math.round(p.x * scale), Math.round(p.y * scale));
-  }
-  return out.join(',');
+function signatureString(strokes, scale, maxBytes = 30000) {
+  // Opters format: "-1,-1,x,y,x,y,…" i hela pixlar, "-1,-1" före varje streck (DrawView.touch_start).
+  // Opter skriver strängens längd som Int16 → högst 32 767 byte. Opter gallrar punkter tätare än 4 px
+  // (TOUCH_TOLERANCE); RUTT gör samma, och glesar ut mer bara om signaturen ändå blir för lång.
+  const px = (strokes || []).filter(st => st && st.length).map(st => st.map(p => ({x: Math.max(0, Math.round(p.x * scale)), y: Math.max(0, Math.round(p.y * scale))})));
+  const build = (tol) => {
+    const out = [];
+    for (const st of px) {
+      const keep = [st[0]];
+      for (let i = 1; i < st.length; i++) {
+        const a = keep[keep.length - 1], b = st[i];
+        if (Math.hypot(b.x - a.x, b.y - a.y) >= tol || (i === st.length - 1 && (b.x !== a.x || b.y !== a.y))) keep.push(b);
+      }
+      out.push(-1, -1);
+      for (const p of keep) out.push(p.x === -1 ? 0 : p.x, p.y === -1 ? 0 : p.y);
+    }
+    return out.join(',');
+  };
+  let tol = 4, s = build(tol);
+  while (Buffer.byteLength(s) > maxBytes && tol < 200) { tol = Math.ceil(tol * 1.5); s = build(tol); }
+  return s;
 }
 function encodeShipmentStatus({ live, statusId, pod }) {
   // Exakt som Opter Driver: (registerPod + setShipmentStatus) i samma synk.
@@ -701,7 +714,12 @@ function toRutt(decoded) {
   for (const r of decoded.rows) if (r.table === 'ShipmentPackage') { const k = r.columns.shiId || (r.parent && r.parent.key && r.parent.key.xxxId); (pkgBy[k] = pkgBy[k] || []).push({...r.columns, _id: r.key.xxxId}); }
 
   const sugBy = {};
-  for (const r of decoded.rows) if (r.table === 'ShipmentPodSuggestion' && !r.columns.revoked && r.columns.name) { const k = r.columns.shiId; (sugBy[k] = sugBy[k] || []).push(String(r.columns.name).trim()); }
+  // Namnförslag (Opter: ProofOfDelivery läser orderns ShipmentPodSuggestion-rader, ej återkallade, utan dubbletter).
+  // Raderna ligger under ordern → SPS_SHI_Id skickas oftast inte, så ordern tas från föräldern.
+  for (const r of decoded.rows) if (r.table === 'ShipmentPodSuggestion' && !r.columns.revoked && r.columns.name) {
+    const k = r.columns.shiId || (r.parent && r.parent.table === 'Shipment' && r.parent.key.xxxId);
+    if (k) (sugBy[k] = sugBy[k] || []).push(String(r.columns.name).trim());
+  }
 
   // Orderns egna statusar och kvittenstyper (ligger som underrader i orderns block).
   const belongs = (r, shiId) => (r.columns.shiId === shiId) || (r.parent && r.parent.table === 'Shipment' && r.parent.key.xxxId === shiId);

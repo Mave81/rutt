@@ -41,7 +41,20 @@ export default class OpterClient {
     this.resId = null;
     this.msgRows = []; // samlad chatthistorik över alla synkar (en post per meddelande)
     this._relogin = null;
+    this.log = [];      // sändlogg: vad RUTT skickade och vad Opter svarade (följer med i Skicka orderdata)
+    this.onLog = null;  // appen sparar loggen i telefonen
   }
+  _log(e) {
+    this.log = [...this.log, {at: new Date().toISOString(), ...e}].slice(-80);
+    try { this.onLog && this.onLog(this.log); } catch (x) {}
+  }
+  _podInfo(pod) {
+    if (!pod) return null;
+    return {spt: pod.sptId || 0, dpt: pod.dptId || 0, sptSub: pod.sptIdSub || 0, dptSub: pod.dptIdSub || 0, name: pod.name ? pod.name.length : 0,
+      sig: pod.signature ? Buffer.byteLength(pod.signature) : 0, remark: pod.remark ? pod.remark.length : 0, comment: pod.comment ? pod.comment.length : 0,
+      kolli: pod.packageCount, img: pod.image ? pod.image.length : 0, pos: pod.lat != null};
+  }
+  _podsOf(shiId) { return this._count('ShipmentPod', shiId); }
 
   async connect(cfg) {
     this.cfg = cfg;
@@ -238,47 +251,61 @@ export default class OpterClient {
   }
   async setStatus(live, statusId, pod) {
     if (!this.logon) throw new Error('inte inloggad');
-    const offId = this.logon.acdOffId;
-    const attempt = async (podData) => {
-      const payload = P.encodeShipmentStatus({live, statusId, pod: podData});
+    const entry = {kind: 'status', shiId: live.shiId, statusId, from: this._statusOf(live.shiId), pod: this._podInfo(pod), podsBefore: this._podsOf(live.shiId), tries: []};
+    const attempt = async (podData, label) => {
+      let payload;
+      try { payload = P.encodeShipmentStatus({live, statusId, pod: podData}); }
+      catch (e) { entry.tries.push({label, err: 'bygga: ' + String(e && e.message || e)}); throw e; }
       try {
         const res = await this.send(P.MessageType.Synchronize, payload, {once: true});
+        entry.tries.push({label, bytes: payload.length, resp: res.type, respBytes: res.payload ? res.payload.length : 0});
         if (res.type === P.MessageType.Corrupt) throw new Error('Opter kunde inte läsa uppdateringen');
         this._take(P.decodeSync(res.payload));
         return true;
       } catch (e) {
+        if (!entry.tries.length || entry.tries[entry.tries.length - 1].label !== label) entry.tries.push({label, bytes: payload.length, err: String(e && e.message || e)});
+        else entry.tries[entry.tries.length - 1].err = String(e && e.message || e);
         try { await this.relogin(); } catch (e2) {}
         return false; // kan ha kommit fram – kontrolleras nedan
       }
     };
-    let imageDropped = false;
-    let sent = await attempt(pod);
-    try { await this._fullSync(); } catch (e) {}
-    let cur = this._statusOf(live.shiId);
-    let confirmed = cur === statusId || (cur === null && sent);
-    if (!confirmed && !sent && pod && pod.image) {
-      // stor bild kan ha stoppat sändningen → skicka utan bild
-      imageDropped = true;
-      sent = await attempt({...pod, image: null});
-      try { await this._fullSync(); } catch (e) {}
-      cur = this._statusOf(live.shiId);
-      confirmed = cur === statusId || (cur === null && sent);
-    } else if (!confirmed && !sent) {
-      sent = await attempt(pod);
-      try { await this._fullSync(); } catch (e) {}
-      cur = this._statusOf(live.shiId);
-      confirmed = cur === statusId || (cur === null && sent);
+    const check = async () => { try { await this._fullSync(); } catch (e) {} const cur = this._statusOf(live.shiId); return {cur, ok: cur === statusId || cur === null}; };
+    let imageDropped = false, sent = false, c;
+    try {
+      sent = await attempt(pod, 'kvittens');
+      c = await check();
+      if (!c.ok && pod && pod.image) {
+        // stor bild kan ha stoppat sändningen → samma kvittens utan bild
+        imageDropped = true;
+        sent = await attempt({...pod, image: null}, 'utan bild');
+        c = await check();
+      }
+      if (!c.ok && pod) {
+        // Opter tog inte statusen tillsammans med kvittensen → statusen först, kvittensen för sig (som Ny kvittens i Opter).
+        sent = await attempt(null, 'bara status');
+        c = await check();
+        if (c.ok) {
+          try {
+            const r2 = await this.send(P.MessageType.Synchronize, P.encodeShipmentEdit({live, pod: imageDropped ? {...pod, image: null} : pod}), {once: true});
+            entry.tries.push({label: 'kvittens för sig', resp: r2.type});
+            if (r2.type !== P.MessageType.Corrupt) this._take(P.decodeSync(r2.payload));
+          } catch (e) { entry.tries.push({label: 'kvittens för sig', err: String(e && e.message || e)}); }
+          try { await this._fullSync(); } catch (e) {}
+        }
+      } else if (!c.ok && !sent) {
+        sent = await attempt(pod, 'igen');
+        c = await check();
+      }
+    } catch (e) {
+      // Paketet gick inte att bygga (ska aldrig hända) → statusen ska ändå fram.
+      if (pod) { try { sent = await attempt(null, 'bara status (reserv)'); } catch (e2) {} }
+      c = await check();
     }
-    return {confirmed, imageDropped, rutt: P.toRutt(this.lastDecoded)};
+    entry.to = c.cur; entry.confirmed = c.ok; entry.podsAfter = this._podsOf(live.shiId);
+    this._log(entry);
+    return {confirmed: c.ok, imageDropped, podSeen: entry.podsAfter > entry.podsBefore, rutt: P.toRutt(this.lastDecoded)};
   }
 
-  /*
-   * Ändra en order i efterhand (status, kvittens, tillägg, avvikelse, ändring, bild) – en synk, exakt en gång.
-   * Kontroll efteråt mot Opters egen data: status = ordern står på den nya statusen; tillägg/avvikelse =
-   * fler sådana rader på ordern än innan. Ändringar och bilder: Opter skickar dem inte tillbaka till föraren,
-   * så där räcker det att servern tog emot synken utan fel.
-   * Skickas aldrig om automatiskt (ett tillägg ska inte bli två) – appen visar "försök igen".
-   */
   _count(table, shiId) {
     return (this.lastDecoded && this.lastDecoded.rows || []).filter(x => x.table === table && (x.columns.shiId === shiId || (x.parent && x.parent.table === 'Shipment' && x.parent.key.xxxId === shiId))).length;
   }
@@ -306,6 +333,8 @@ export default class OpterClient {
       try { await this._fullSync(); } catch (e) {}
     }
     const ok2 = !edit.statusId || this._statusOf(live.shiId) === edit.statusId || this._statusOf(live.shiId) === null;
+    this._log({kind: 'ändring', shiId: live.shiId, statusId: edit.statusId || 0, pod: this._podInfo(edit.pod), adds: nSa, damages: nSd, changes: (edit.changes || []).length, images: (edit.images || []).length,
+      sent, imageDropped, err: err ? String(err.message || err) : null, to: this._statusOf(live.shiId), confirmed: (sent || confirmed) && ok2});
     return {confirmed: (sent || confirmed) && ok2, sent, imageDropped, error: err ? String(err.message || err) : null, rutt: P.toRutt(this.lastDecoded)};
   }
 
@@ -339,7 +368,7 @@ export default class OpterClient {
       app: 'RUTT', at: new Date().toISOString(), note,
       logon: this.logon ? {acdOffId: this.logon.acdOffId, resId: this.resId, vhcId: this.logon.vhcId, name: this.logon.name} : null,
       decoded: (d.decodedBytes || 0) + '/' + (d.totalBytes || 0), error: d.error || null,
-      syncTimes: d.syncTimes || null, counts, rows,
+      syncTimes: d.syncTimes || null, counts, rows, sendLog: this.log,
     };
   }
 

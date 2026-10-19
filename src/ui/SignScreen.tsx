@@ -56,7 +56,9 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
   // Förslag: Opters egna för ordern först, sen tidigare mottagare hos samma företag.
   const suggestions = useMemo(() => {
     const out: string[] = [];
-    for (const n of [...((stop && stop.suggest) || []), ...(savedNames || [])]) {
+    // Som Opter: förslagen från alla order som lossas på stället.
+    const fromOpter = [stop, ...((stop && stop.group) || [])].flatMap((x: any) => (x && x.suggest) || []);
+    for (const n of [...fromOpter, ...(savedNames || [])]) {
       const t = String(n || '').trim();
       if (t && !out.some(x => x.toLowerCase() === t.toLowerCase())) out.push(t);
     }
