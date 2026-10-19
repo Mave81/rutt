@@ -83,6 +83,8 @@ export default function LoadView({orders, cargo, route, laterRoute}: {orders: Lo
     return `${a === b ? `rad ${a}` : `rad ${a}–${b}`} · ${where}`;
   };
 
+  // I rutan står vart pallen ska (mottagarens namn, kort) – en ruta = en pallplats.
+  const shortWho = (cid: string) => { const o = plan.list.find((x: any) => x.cid === cid); const w = String((o && o.drop && (o.drop.who || o.drop.adr)) || (cargo[cid] || {}).name || '').replace(/\b(AB|HB|KB|i Sverige|Sverige)\b/g, '').trim(); const f = w.split(/[\s/,]+/).filter(Boolean); return f[0] && f[0].length < 4 && f[1] ? f[0] + ' ' + f[1] : f[0] || '—'; };
   const sel = step >= 0 && plan.steps[step] ? plan.steps[step] : null;
   const shown = sel ? sel.slots : plan.slots;
   const stepTxt = sel ? (sel.stop ? `${sel.stop.pickup ? 'Hämtat' : 'Lossat'} hos ${sel.stop.who || '—'}${(plan.etaPick[sel.stop.pickup] || plan.etaDrop[sel.stop.drop]) ? ` · ca ${hhmm(new Date(plan.etaPick[sel.stop.pickup] || plan.etaDrop[sel.stop.drop]))}` : ''}` : 'Så ser bilen ut nu') : null;
@@ -100,7 +102,7 @@ export default function LoadView({orders, cargo, route, laterRoute}: {orders: Lo
       ) : null}
       <View style={l.sumRow}>
         <Text style={l.sum}><Text style={l.sumB}>{Math.min(sel ? sel.cnt : plan.pallets, TOTAL)}</Text> av {TOTAL} pallplatser{sel ? '' : plan.multiPick ? ' när bilen är fullast' : ''}</Text>
-        <Text style={l.sumDim}>{sel ? '' : 'Siffran = ordern i listan nedan'}</Text>
+        <Text style={l.sumDim}>{sel ? '' : 'En ruta = en pall · namnet = vart den ska'}</Text>
       </View>
       {stepTxt ? <Text style={l.stepInfo}>{stepTxt}</Text> : null}
       {plan.over > 0 && (
@@ -121,7 +123,7 @@ export default function LoadView({orders, cargo, route, laterRoute}: {orders: Lo
                 return (
                   <View key={c} style={[l.cell, {backgroundColor: sh.bg}]}>
                     {sl.loose ? <Bi n="box-seam-fill" size={13} color={sh.ink} /> : null}
-                    <Text style={[l.cellNo, {color: sh.ink}]}>{n}</Text>
+                    <Text style={[l.cellNo, {color: sh.ink}]} numberOfLines={1}>{shortWho(sl.cid)}</Text>
                   </View>
                 );
               })}
@@ -182,7 +184,7 @@ const l = themed(() => StyleSheet.create({
   rowNo: {width: 16, color: C.faint, fontSize: 11, fontWeight: '700', textAlign: 'center'},
   cell: {flex: 1, height: 46, borderRadius: 8, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 4},
   cellEmpty: {backgroundColor: C.panel2, opacity: 0.6},
-  cellNo: {fontSize: 18, fontWeight: '900'},
+  cellNo: {fontSize: 13.5, fontWeight: '900', paddingHorizontal: 4, flexShrink: 1},
   head: {color: C.ink, fontSize: 15, fontWeight: '800', marginTop: 18, marginBottom: 4, paddingHorizontal: 2},
   item: {flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.panel, borderRadius: 10, paddingVertical: 11, paddingHorizontal: 12, marginTop: 6},
   badge: {width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center'},
