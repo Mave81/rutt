@@ -31,7 +31,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '19 okt · skickas direkt när RUTT går i bakgrunden, osänt skickas efter omstart, Skicka orderdata till Claude på varje order';
+const BUILD = '19 okt · Skicka orderdata till Claude via Gmail (RUTT-DATA)';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -60,24 +60,6 @@ const CRASH_KEY = 'rutt.crashes.v1';
 // Sändloggen (vad som skickades till Opter och vad Opter svarade) sparas i telefonen och följer med i Skicka orderdata.
 const SENDLOG_KEY = 'rutt.sendlog.v1';
 client.onLog = (l: any) => { saveJSON(SENDLOG_KEY, l); };
-// Efter varje Lossad skickas bevisen (vad RUTT skickade, vad Opter svarade, serverns rader för ordern) till din dator
-// (forre.nu/rutt/dump.php → rutt/dumps), så Claude kan kontrollera själv. Högst en var 10:e sekund → kö.
-const diagQ: any[] = []; let diagBusy = false;
-async function diagPump() {
-  if (diagBusy) return; diagBusy = true;
-  while (diagQ.length) {
-    const body = JSON.stringify(diagQ[0]);
-    let ok = false;
-    for (let i = 0; i < 3 && !ok; i++) {
-      try { const r = await fetch('https://forre.nu/rutt/dump.php', {method: 'POST', headers: {'Content-Type': 'application/json'}, body}); ok = r.ok; } catch (e) {}
-      if (!ok) await new Promise<void>(res => setTimeout(() => res(), 11000));
-    }
-    diagQ.shift();
-    if (diagQ.length) await new Promise<void>(res => setTimeout(() => res(), 11000));
-  }
-  diagBusy = false;
-}
-client.onDiag = (entry: any, rows: any[]) => { diagQ.push({app: 'RUTT', kind: 'auto-lossning', at: new Date().toISOString(), build: BUILD, sendLog: [entry], rows}); diagPump(); };
 loadJSON(SENDLOG_KEY, []).then((l: any) => { if (Array.isArray(l) && !client.log.length) client.log = l; }).catch(() => {});
 async function logCrash(e: any, where: string) {
   try {
@@ -406,9 +388,12 @@ function AppInner(): React.JSX.Element {
       const body = JSON.stringify({app: 'RUTT', kind: 'order', at: new Date().toISOString(), build: BUILD, cid, shiId: L ? L.shiId : null, orderNo: (st && st.orderNo) || null,
         live: L ? {key: L.key, curId: L.curId, unloadSt: L.unloadSt, loadSt: L.loadSt, podType: L.podType, hasSpt: L.hasSpt, packageIds: L.packageIds} : null,
         fresh: d.fresh, local, sendLog: d.sendLog, rows: d.rows});
-      const r = await fetch('https://forre.nu/rutt/dump.php', {method: 'POST', headers: {'Content-Type': 'application/json'}, body});
-      const j: any = await r.json().catch(() => null);
-      flash(r.ok && j && j.ok ? `Orderdata skickad till Claude · ${Math.round(body.length / 1024)} kB` : `Kunde inte skicka: ${(j && j.err) || 'svar ' + r.status}`, null);
+      // Till din Gmail (kenta81@gmail.com, ämne RUTT-DATA) – Claude läser mejlet därifrån. Du trycker bara Skicka.
+      const text = body.length > 200000 ? body.slice(0, 200000) : body; // Androids gräns för delad text ~1 MB
+      const subj = `RUTT-DATA order ${(st && st.orderNo) || cid}`;
+      if (NativeModules.RuttSms && NativeModules.RuttSms.email) await NativeModules.RuttSms.email('kenta81@gmail.com', subj, text);
+      else await Share.share({title: subj, message: text});
+      flash('Gmail öppnas – tryck Skicka', null);
     } catch (e: any) { flash('Kunde inte skicka: ' + String(e?.message || e), null); }
   }
   async function resendSavedPod(cid: string, st: any) {

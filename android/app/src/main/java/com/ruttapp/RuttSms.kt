@@ -156,6 +156,23 @@ class RuttSmsModule(private val rc: ReactApplicationContext) : ReactContextBaseJ
     } catch (e: Throwable) { p.reject("pick", e) }
   }
 
+  // Mejl med färdig mottagare, ämne och text (Gmail om den finns, annars väljaren). Används för felsökningsdata till Claude.
+  @ReactMethod
+  fun email(to: String, subject: String, body: String, p: Promise) {
+    try {
+      val base = Intent(Intent.ACTION_SEND).apply {
+        type = "message/rfc822"
+        putExtra(Intent.EXTRA_EMAIL, arrayOf(to))
+        putExtra(Intent.EXTRA_SUBJECT, subject)
+        putExtra(Intent.EXTRA_TEXT, body)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      val gm = Intent(base).setPackage("com.google.android.gm")
+      try { rc.startActivity(gm) } catch (e: Throwable) { rc.startActivity(Intent.createChooser(base, subject).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+      p.resolve(true)
+    } catch (e: Throwable) { p.reject("email", e) }
+  }
+
   override fun onNewIntent(intent: Intent) {}
 
   @ReactMethod fun addListener(eventName: String) {}
