@@ -66,7 +66,8 @@ export default function EditSheet({item, opts, history, onClose, onSend, onRepod
   const E = (L && L.edit) || null;
   const O = opts || DEMO_OPTS;
   const perm = O.perm || DEMO_OPTS.perm;
-  const locked = !!(L && (L.locked || (E && E.completed)));
+  const gone = !!(st.gone || (L && L.gone)); // finns inte längre hos Opter (klarmarkerad) – visas bara
+  const locked = gone || !!(L && (L.locked || (E && E.completed)));
   const addTypes = E ? E.addTypes : DEMO_ADD;
   const statuses = (E ? E.statuses : DEMO_STATUS);
   const curId = L ? L.curId : item.done ? 12 : 0; // demo: Klart står som Lossad
@@ -276,7 +277,7 @@ export default function EditSheet({item, opts, history, onClose, onSend, onRepod
       {locked ? (
         <View style={e.lock}><Bi n="lock-fill" size={14} color={C.dim} /><Text style={e.lockTxt}>Klarmarkerad av kontoret – kan inte ändras (samma som i Opter).</Text></View>
       ) : null}
-      <View style={locked ? {opacity: 0.4} : null}>
+      <View style={locked ? {opacity: 0.4} : null} pointerEvents={locked ? 'none' : 'auto'}>
         <Item on={canStatus} icon="arrow-counterclockwise" t="Ändra status" s={`T.ex. tillbaka till ${(pickable.find((x: any) => x.pickup) || pickable[0] || {}).name || 'Lastad'}`} go={() => setScr('status')} />
         <Item on={item.done && perm.pod && !!onResend && !!saved && (!!saved.hasSig || !!saved.name)} icon="cloud-arrow-up-fill" t="Skicka sparad kvittens" s={[saved && saved.hasSig ? 'Signaturen' : '', saved && saved.name ? (saved.hasSig ? 'och ' : '') + 'namnet ' + saved.name : ''].filter(Boolean).join(' ') + ' från lossningen, till Opter igen'} go={() => { onClose(); onResend && onResend(); }} tint={C.accent2} />
         <Item on={item.done && perm.pod && !!onRepod} icon="pen-fill" t="Ny kvittens" s="Signatur, namn eller foto igen" go={() => { onClose(); onRepod && onRepod(); }} />

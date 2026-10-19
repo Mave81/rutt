@@ -31,7 +31,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '19 okt · chattbubblor klipper inte sista ordet (Samsung), klara order kvar under Klart, inloggad = skarpt läge';
+const BUILD = '19 okt · Klart visar också lossningar som Opter slutat skicka (ur det RUTT sparat), chattbubblor klipper inte';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -263,7 +263,12 @@ function AppInner(): React.JSX.Element {
     const {pick, drop} = legs(cid); const st = drop || pick || {}; const o = ost[cid] || {}; const L = st.live || {};
     return {cid, st, who: st.who, adr: st.adr, area: st.area, orderNo: st.orderNo, doneAt: o.doneAt || L.doneAt || null, pod: o.pod, edits: o.edits || [],
       sync: o.sync && o.sync.unload, byOpter: !o.doneAt, rejected: /nekad/i.test(String(L.cur || '')), locked: !!(L.locked || (L.edit && L.edit.completed))};
-  }).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)), [cidsAll, cls, ost]);
+  }).concat(demo ? [] : Object.keys(ost).filter(cid => !cidsAll.includes(cid) && ost[cid] && ost[cid].doneAt && !ost[cid].rejectedAt && !ost[cid].givenAt).map(cid => {
+    // Lossad i RUTT men finns inte längre hos Opter (kontoret har klarmarkerat den) – visas ur det RUTT sparat, som i Opter.
+    const o = ost[cid] || {};
+    const st = {who: o.who || '', orderNo: cid, drop: cid, verb: 'Lämna', gone: true};
+    return {cid, st, who: o.who || '', adr: '', area: '', orderNo: cid, doneAt: o.doneAt, pod: o.pod, edits: o.edits || [], sync: o.sync && o.sync.unload, byOpter: false, rejected: false, locked: true};
+  })).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)), [cidsAll, cls, ost, demo]);
   // Dagens plan: "att göra"-ordrar. Steg som ska göras en senare dag läggs under "Senare dagar".
   const {src, later} = useMemo(() => {
     if (!fullSrc) return {src: null as any, later: [] as any[]};
@@ -337,12 +342,12 @@ function AppInner(): React.JSX.Element {
   }
   useEffect(() => { loadJSON(NAMES_KEY, {}).then(n => setNames(n || {})); }, []);
   useEffect(() => {
-    if (!src) return;
-    const key = ORDERS_KEY(fullSrc === DEMO);
+    // Dagens sparade orderstatus laddas direkt (även utan order från Opter) – annars blir Klart tomt.
+    const key = ORDERS_KEY(!!demo);
     if (ostLoaded.current === key) return;
     ostLoaded.current = key;
     loadJSON(key, {}).then(v => setOst(v || {}));
-  }, [src]);
+  }, [demo]);
   useEffect(() => { if (ostLoaded.current) saveJSON(ostLoaded.current, ost); }, [ost]);
 
   function flash(text: string, undo: (() => void) | null) {
@@ -1096,9 +1101,9 @@ function AppInner(): React.JSX.Element {
         history={editFor ? ((ost[editFor.cid] || {}).edits || []) : []}
         onClose={() => setEditFor(null)}
         onSend={(edit: any, label: string) => editFor && sendEdit(editFor.cid, editFor.st, edit, label)}
-        onRepod={editFor && editFor.done && editFor.st && editFor.st.drop ? () => { const st = editFor.st; setEditFor(null); setSignStop({...st, repod: true}); } : undefined}
+        onRepod={editFor && editFor.done && editFor.st && editFor.st.drop && editFor.st.live ? () => { const st = editFor.st; setEditFor(null); setSignStop({...st, repod: true}); } : undefined}
         saved={editFor ? (() => { const p = podMem.current[editFor.cid] || (ost[editFor.cid] || {}).pod; return p ? {name: p.name || '', hasSig: !!(p.sig && p.sig.strokes && p.sig.strokes.length)} : null; })() : null}
-        onResend={editFor && editFor.done && editFor.st && editFor.st.drop ? () => { const f = editFor; setEditFor(null); resendSavedPod(f.cid, f.st); } : undefined}
+        onResend={editFor && editFor.done && editFor.st && editFor.st.drop && editFor.st.live ? () => { const f = editFor; setEditFor(null); resendSavedPod(f.cid, f.st); } : undefined}
         onDump={editFor ? () => { const f = editFor; setEditFor(null); sendOrderDump(f.cid, f.st); } : undefined}
       />
       {signStop && (
