@@ -9,11 +9,11 @@
  *    kontorets behörighet (SetMultipleStatusPermission), som Opter Driver.
  */
 import React, {useMemo, useState} from 'react';
-import {FlatList, Linking, Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {FlatList, Linking, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, themed, hhmm, prettyPhone, whenText} from './theme';
 import {Sheet} from './parts';
-import {Bi} from './Bi';
+import {Bi, BiName} from './Bi';
 import Slider from './Slider';
 import ReorderSheet from './Reorder';
 import {loadJSON, saveJSON} from '../store';
@@ -118,6 +118,31 @@ function SyncLine({state, label, onRetry}: {state?: string; label: string; onRet
 
 // ---- SMS: färdiga texter, du trycker bara skicka i telefonens SMS-app ----
 const MINS = [5, 10, 15, 20, 30];
+export type TellTarget = {id: string; name: string; sub: string; icon: BiName};
+// "Säg till": texten går att ändra, sen ett tryck på vem som ska få den.
+function TellSheet({t, targets, onClose, onSend, onSms}: {t: {text: string; mob: any; who: string} | null; targets: TellTarget[]; onClose: () => void; onSend: (id: string, text: string) => void; onSms: (num: string, text: string) => void}) {
+  const [text, setText] = useState('');
+  const [base, setBase] = useState('');
+  if (t && t.text !== base) { setBase(t.text); setText(t.text); }
+  if (!t) return null;
+  const body = text.trim();
+  const Row = ({icon, name, sub, go}: {icon: BiName; name: string; sub: string; go: () => void}) => (
+    <Pressable disabled={!body} style={[o.tellRow, !body && {opacity: 0.4}]} onPress={go} android_ripple={{color: C.edge}}>
+      <View style={o.tellIc}><Bi n={icon} size={17} color={C.people} /></View>
+      <View style={{flex: 1, minWidth: 0}}><Text style={o.tellN} numberOfLines={1}>{name}</Text><Text style={o.tellS} numberOfLines={1}>{sub}</Text></View>
+      <Bi n="send-fill" size={16} color={C.people} />
+    </Pressable>
+  );
+  return (
+    <Sheet open onClose={onClose} title="Säg till" sub={t.who} scroll>
+      <TextInput value={text} onChangeText={setText} multiline style={o.tellIn} placeholderTextColor={C.faint} placeholder="Vad vill du säga?" />
+      <Text style={o.sheetLbl}>Skicka till</Text>
+      {targets.map(x => <Row key={x.id} icon={x.icon} name={x.name} sub={x.sub} go={() => onSend(x.id, body)} />)}
+      {t.mob ? <Row icon="geo-alt-fill" name={String(t.mob.label).replace(/\s*\(mobil\)/i, '')} sub={`SMS · ${prettyPhone(t.mob.num)} · på stället`} go={() => onSms(t.mob.num, body)} /> : null}
+      <Row icon="share-fill" name="Annan app" sub="WhatsApp, mejl, kopiera …" go={() => { onClose(); Share.share({message: body}).catch(() => {}); }} />
+    </Sheet>
+  );
+}
 function SmsSheet({to, onClose}: {to: {name: string; num: string; who: string} | null; onClose: () => void}) {
   const [min, setMin] = useState(10);
   if (!to) return null;
@@ -150,16 +175,19 @@ function SmsSheet({to, onClose}: {to: {name: string; num: string; who: string} |
   );
 }
 
-export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm}: {
+export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell}: {
   route: any; cargo: any; ost: Record<string, any>; allStops: any[];
   onLoaded: (st: any, more?: any[]) => void; onUnload: (st: any, more?: any[]) => void;
   onEdit: (cid: string, st: any) => void;
   onAvised: (cid: string) => void;
   onRetry: (cid: string) => void; live: boolean; later?: any[]; onReorder?: (keys: string[] | null) => void; perm?: any;
+  tellTo?: TellTarget[];
+  onTell?: (id: string, text: string) => void;
 }) {
   const [focus, setFocus] = useState<string | null>(null); // annat stopp än NÄSTA valt som "nu"
   const [callStop, setCallStop] = useState<any>(null);
   const [sms, setSms] = useState<any>(null);
+  const [tell, setTell] = useState<{text: string; mob: any; who: string} | null>(null);
   const [listOpen, setListOpen] = useState(false);
   const [fullInfo, setFullInfo] = useState<Record<string, boolean>>({});
   const [reorder, setReorder] = useState(false);
@@ -423,6 +451,18 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
       </View>
     );
   };
+  // "Säg till": färdig text om vad du hämtar/lämnar här – antal pall, ställe, gata, ordernummer.
+  const tellText = (pl: Place) => {
+    const st = pl.st;
+    const pals = (rs: Row[]) => rs.reduce((n, r) => n + ((cargo[r.cid] && Number(cargo[r.cid].pal)) || 0), 0);
+    const pt = (n: number) => (n > 0 ? `${n} pall` : '');
+    const pick = pl.picks.filter(r => isOn(pl.picks, r)), drop = pl.drops.filter(r => isOn(pl.drops, r));
+    const what = [drop.length ? `lämnar ${pt(pals(drop)) || (drop.length > 1 ? drop.length + ' order' : 'leveransen')}` : '', pick.length ? `hämtar ${pt(pals(pick)) || (pick.length > 1 ? pick.length + ' order' : 'godset')}` : ''].filter(Boolean).join(' och ');
+    const where = [st.who, st.adr, st.area].filter(Boolean).filter((x: string, i: number, a: string[]) => a.indexOf(x) === i).join(', ');
+    const nos = [...new Set([...drop, ...pick].map(r => r.st.orderNo).filter(Boolean).map(String))];
+    const t = `Jag ${what || 'är'} hos ${where || placeName(st)}.` + (nos.length ? ` Order ${nos.join(', ')}.` : '');
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  };
   // Tummzonen: GPS · Ring · SMS + dragknappen för stället som visas.
   const dock = (pl: Place) => {
     const st = pl.st;
@@ -440,6 +480,9 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
           </Pressable>
           <Pressable disabled={!mob} style={[o.round, !mob && {opacity: 0.35}]} onPress={() => mob && setSms({name: String(mob.label).replace(/\s*\(mobil\)/i, ''), num: mob.num, who: st.who})} android_ripple={{color: C.edge}}>
             <Bi n="chat-dots-fill" size={18} color={C.people} /><Text style={[o.roundTxt, {color: C.people}]}>SMS</Text>
+          </Pressable>
+          <Pressable style={o.round} onPress={() => setTell({text: tellText(pl), mob, who: placeName(st)})} android_ripple={{color: C.edge}}>
+            <Bi n="megaphone-fill" size={18} color={C.people} /><Text style={[o.roundTxt, {color: C.people}]}>Säg till</Text>
           </Pressable>
         </View>
         {pl.drops.length > 0 && (
@@ -624,6 +667,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
       {placeSheetView()}
       <CallSheet st={callStop} onClose={() => setCallStop(null)} />
       <SmsSheet to={sms} onClose={() => setSms(null)} />
+      <TellSheet t={tell} targets={tellTo} onClose={() => setTell(null)} onSend={(id, text) => { setTell(null); onTell && onTell(id, text); }} onSms={(num, text) => { setTell(null); Linking.openURL(`sms:${num}?body=${encodeURIComponent(text)}`).catch(() => {}); }} />
       <NavSheet st={navFor} onClose={() => setNavFor(null)} />
       {onReorder ? <ReorderSheet open={reorder} items={orderItems} manual={!!route.manual} onClose={() => setReorder(false)} onSave={keys => { setReorder(false); setFocus(null); onReorder(keys); }} /> : null}
       <Sheet open={!!planned} onClose={() => setPlanned(null)} scroll>
@@ -779,10 +823,15 @@ const o = themed(() => StyleSheet.create({
   li: {flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, borderBottomColor: C.edge, borderBottomWidth: StyleSheet.hairlineWidth},
   liT: {color: C.ink, fontSize: 15.5, fontWeight: '800'},
   liMore: {width: 38, height: 38, borderRadius: 19, backgroundColor: C.panel, alignItems: 'center', justifyContent: 'center'},
+  tellIn: {backgroundColor: C.panel2, color: C.ink, borderRadius: 12, padding: 12, fontSize: 16, fontWeight: '600', minHeight: 92, textAlignVertical: 'top', marginBottom: 6},
+  tellRow: {flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: C.edge},
+  tellIc: {width: 36, height: 36, borderRadius: 18, backgroundColor: C.peopleSoft, alignItems: 'center', justifyContent: 'center'},
+  tellN: {color: C.ink, fontSize: 15, fontWeight: '800'},
+  tellS: {color: C.dim, fontSize: 12.5, marginTop: 1},
   dock: {paddingHorizontal: 12, paddingTop: 8, paddingBottom: 10, backgroundColor: C.bg},
   dockRow: {flexDirection: 'row', gap: 8},
-  round: {flex: 1, height: 54, borderRadius: 14, backgroundColor: C.panel, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8},
-  roundTxt: {fontSize: 14.5, fontWeight: '800'},
+  round: {flex: 1, height: 54, borderRadius: 14, backgroundColor: C.panel, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3},
+  roundTxt: {fontSize: 12.5, fontWeight: '800'},
   allDoneBig: {color: C.ink, fontSize: 26, fontWeight: '900'},
   // SMS
   sheetLbl: {color: C.dim, fontSize: 12, fontWeight: '600', marginTop: 6},

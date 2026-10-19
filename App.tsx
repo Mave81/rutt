@@ -9,7 +9,7 @@ import {
   FlatList, ActivityIndicator, ScrollView, Keyboard, Share, Vibration, NativeModules, PermissionsAndroid, Platform, useColorScheme, Linking,
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
-import {C, themed, hhmm, isFutureDay, applyTheme} from './src/ui/theme';
+import {C, themed, hhmm, isFutureDay, applyTheme, prettyPhone} from './src/ui/theme';
 import {Bi} from './src/ui/Bi';
 import {Sheet} from './src/ui/parts';
 import OrdersView, {DoneView, setNavApp, NavApp} from './src/ui/OrdersView';
@@ -31,7 +31,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '19 okt · Lossad kommer alltid fram (kvittensen skickas för sig om Opter inte tar båda), namnförslag från Opter, sändlogg';
+const BUILD = '19 okt · Säg till: hämtar 4 pall hos …, gata, ordernummer → Kontoret, chefen, trafikledningen eller stället';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -695,6 +695,25 @@ function AppInner(): React.JSX.Element {
   }, [msgs, pending]);
 
 
+  // "Säg till" från ett ställe: Kontoret (chatten i Opter), chefen och trafikledningen (SMS, samma som under Jobbet).
+  const chefC = jobbet.contacts.find((c: any) => c.name === jobbet.chef && c.num) || null;
+  const tellTo: any[] = [
+    {id: 'office', name: 'Kontoret', sub: 'Chatten i Opter', icon: 'headset'},
+    ...(chefC ? [{id: 'chef', name: chefC.name.split(' ')[0] + ' · chef', sub: 'SMS · ' + prettyPhone(chefC.num), icon: 'star-fill'}] : []),
+    ...(jobbet.tl ? [{id: 'tl', name: 'Trafikledningen', sub: 'SMS · ' + prettyPhone(jobbet.tl), icon: 'telephone-fill'}] : []),
+  ];
+  function tell(id: string, text: string) {
+    const t = text.trim(); if (!t) return;
+    if (id === 'office') {
+      if (demo || !client.logon) { flash('Demo · skickas inte till Kontoret', null); return; }
+      const item = {id: Date.now() + Math.random(), text: t, created: new Date(), received: false, state: 'sending', local: true};
+      setPending(p => [...p, item]);
+      deliver(item);
+      flash('Skickat till Kontoret', null);
+    } else if (id === 'chef' && chefC) { jobbet.send(chefC, t); flash(`SMS till ${chefC.name.split(' ')[0]}`, null); }
+    else if (id === 'tl' && jobbet.tl) { jobbet.send({name: 'Trafikledningen', num: jobbet.tl, kind: 'tl'}, t); flash('SMS till trafikledningen', null); }
+  }
+
   // Arbetstid → Opter (live). RST-typ + nytt visningsläge.
   async function doWork(rst: number, newState: 'igång' | 'rast' | 'lunch' | 'slut') {
     const since = Date.now();
@@ -860,7 +879,7 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any, more: any[] = []) => setSignStop(more.length ? {...st, group: [st, ...more]} : st)} onEdit={(cid: string, st: any) => setEditFor({cid, st, done: false})} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any, more: any[] = []) => setSignStop(more.length ? {...st, group: [st, ...more]} : st)} onEdit={(cid: string, st: any) => setEditFor({cid, st, done: false})} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} />
           )}
           {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} laterRoute={laterRoute} />}
           {tab === 'chat' && <JobbetView j={jobbet} live={live} opterUnread={unread} opterLast={chatList[chatList.length - 1]} onOpenOpter={markOpterRead}
