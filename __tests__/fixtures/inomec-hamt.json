@@ -1,0 +1,471 @@
+{
+"w": 2238,
+"h": 3168,
+"lines": [
+{
+"t": "AVTAL NR:",
+"b": 1010,
+"x": 179,
+"y": 328,
+"w": 237,
+"h": 31
+},
+{
+"t": "01-023933",
+"b": 1011,
+"x": 552,
+"y": 328,
+"w": 212,
+"h": 31
+},
+{
+"t": "FOR: Zengun AB",
+"b": 2010,
+"x": 181,
+"y": 443,
+"w": 307,
+"h": 40
+},
+{
+"t": "Zengun AB",
+"b": 3010,
+"x": 183,
+"y": 534,
+"w": 182,
+"h": 36
+},
+{
+"t": "MOTKOD 7365567799457",
+"b": 3020,
+"x": 185,
+"y": 576,
+"w": 433,
+"h": 29
+},
+{
+"t": "Box 171",
+"b": 3020,
+"x": 185,
+"y": 618,
+"w": 126,
+"h": 28
+},
+{
+"t": "Ostersund",
+"b": 3030,
+"x": 184,
+"y": 655,
+"w": 167,
+"h": 34
+},
+{
+"t": "83122",
+"b": 3040,
+"x": 184,
+"y": 702,
+"w": 100,
+"h": 29
+},
+{
+"t": "Kundinformation",
+"b": 4010,
+"x": 181,
+"y": 1012,
+"w": 297,
+"h": 28
+},
+{
+"t": "Meddelat datum:",
+"b": 5010,
+"x": 185,
+"y": 1102,
+"w": 286,
+"h": 28
+},
+{
+"t": "19-10-2026",
+"b": 5011,
+"x": 570,
+"y": 1102,
+"w": 183,
+"h": 28
+},
+{
+"t": "Hyrstoppsref:",
+"b": 5010,
+"x": 185,
+"y": 1160,
+"w": 235,
+"h": 44
+},
+{
+"t": "01-217293",
+"b": 5011,
+"x": 568,
+"y": 1164,
+"w": 173,
+"h": 29
+},
+{
+"t": "Beskrivning",
+"b": 5010,
+"x": 185,
+"y": 1212,
+"w": 206,
+"h": 45
+},
+{
+"t": "25-09-2026",
+"b": 5011,
+"x": 568,
+"y": 1216,
+"w": 185,
+"h": 29
+},
+{
+"t": "Hyrstoppsref:",
+"b": 5010,
+"x": 185,
+"y": 1266,
+"w": 235,
+"h": 44
+},
+{
+"t": "09-10-2026",
+"b": 5011,
+"x": 568,
+"y": 1270,
+"w": 185,
+"h": 28
+},
+{
+"t": "Kundnummer:",
+"b": 5010,
+"x": 185,
+"y": 1320,
+"w": 245,
+"h": 43
+},
+{
+"t": "16182",
+"b": 5011,
+"x": 570,
+"y": 1324,
+"w": 97,
+"h": 29
+},
+{
+"t": "Kundens Ordernr:",
+"b": 5010,
+"x": 185,
+"y": 1376,
+"w": 310,
+"h": 28
+},
+{
+"t": "648785-4090",
+"b": 5011,
+"x": 568,
+"y": 1376,
+"w": 213,
+"h": 29
+},
+{
+"t": "Leveransmetod:",
+"b": 5010,
+"x": 185,
+"y": 1426,
+"w": 278,
+"h": 43
+},
+{
+"t": "Fraktfritt",
+"b": 5011,
+"x": 570,
+"y": 1430,
+"w": 131,
+"h": 28
+},
+{
+"t": "FLOTTA Nr",
+"b": 6010,
+"x": 176,
+"y": 1527,
+"w": 177,
+"h": 25
+},
+{
+"t": "BESKRIVNING:",
+"b": 6011,
+"x": 458,
+"y": 1527,
+"w": 240,
+"h": 25
+},
+{
+"t": "7718100",
+"b": 7010,
+"x": 174,
+"y": 1602,
+"w": 130,
+"h": 27
+},
+{
+"t": "Fallskyddsblock 10 m vajer, Sharp Edge, ej",
+"b": 7011,
+"x": 457,
+"y": 1602,
+"w": 645,
+"h": 33
+},
+{
+"t": "debiterad",
+"b": 8010,
+"x": 456,
+"y": 1641,
+"w": 138,
+"h": 25
+},
+{
+"t": "7718700",
+"b": 9010,
+"x": 174,
+"y": 1698,
+"w": 130,
+"h": 27
+},
+{
+"t": "Fallskyddsblock 10 m vajer, Sharp Edge, ej",
+"b": 9011,
+"x": 457,
+"y": 1698,
+"w": 645,
+"h": 33
+},
+{
+"t": "debiterad",
+"b": 10010,
+"x": 456,
+"y": 1737,
+"w": 138,
+"h": 25
+},
+{
+"t": "LYFTUTHYRNING",
+"b": 11010,
+"x": 1530,
+"y": 325,
+"w": 466,
+"h": 35
+},
+{
+"t": "Stockholm Vastberga",
+"b": 12010,
+"x": 1205,
+"y": 534,
+"w": 345,
+"h": 36
+},
+{
+"t": "Vastberga Allé 60",
+"b": 12010,
+"x": 1203,
+"y": 576,
+"w": 288,
+"h": 36
+},
+{
+"t": "Hagersten",
+"b": 12010,
+"x": 1206,
+"y": 618,
+"w": 164,
+"h": 36
+},
+{
+"t": "SE556997284601",
+"b": 12010,
+"x": 1205,
+"y": 660,
+"w": 285,
+"h": 29
+},
+{
+"t": "126 30",
+"b": 12010,
+"x": 1206,
+"y": 702,
+"w": 107,
+"h": 29
+},
+{
+"t": "Tel: +46 8-53186045",
+"b": 13010,
+"x": 1203,
+"y": 806,
+"w": 404,
+"h": 45
+},
+{
+"t": "Email: E-mail: info@inomec.se",
+"b": 13010,
+"x": 1205,
+"y": 864,
+"w": 520,
+"h": 36
+},
+{
+"t": "LEVERANSADRESS",
+"b": 14010,
+"x": 1205,
+"y": 1012,
+"w": 356,
+"h": 28
+},
+{
+"t": "Zengun AB",
+"b": 15010,
+"x": 1202,
+"y": 1102,
+"w": 182,
+"h": 36
+},
+{
+"t": "Gallerian Ring Jeppe 0703246523",
+"b": 15010,
+"x": 1204,
+"y": 1144,
+"w": 553,
+"h": 36
+},
+{
+"t": "11321",
+"b": 15010,
+"x": 1206,
+"y": 1186,
+"w": 91,
+"h": 29
+},
+{
+"t": "Lev Kontaktnamn: Jeppe Nilsson",
+"b": 16010,
+"x": 1204,
+"y": 1376,
+"w": 568,
+"h": 36
+},
+{
+"t": "Telefonnr:",
+"b": 16010,
+"x": 1202,
+"y": 1430,
+"w": 176,
+"h": 28
+},
+{
+"t": "ANT/AKT",
+"b": 18010,
+"x": 1171,
+"y": 1527,
+"w": 146,
+"h": 25
+},
+{
+"t": "NOTERINGAR",
+"b": 18011,
+"x": 1502,
+"y": 1527,
+"w": 224,
+"h": 25
+},
+{
+"t": "1",
+"b": 19010,
+"x": 1192,
+"y": 1609,
+"w": 10,
+"h": 27
+},
+{
+"t": "——",
+"b": 19011,
+"x": 1318,
+"y": 1632,
+"w": 118,
+"h": 4
+},
+{
+"t": "1",
+"b": 20010,
+"x": 1192,
+"y": 1705,
+"w": 10,
+"h": 27
+},
+{
+"t": "——",
+"b": 20011,
+"x": 1318,
+"y": 1728,
+"w": 118,
+"h": 4
+},
+{
+"t": "AruKeIn KOMmMer alt inspeKteras vid retur till var SeErviceverKstaG OCn eventuella",
+"b": 21010,
+"x": 185,
+"y": 2595,
+"w": 1275,
+"h": 23
+},
+{
+"t": "ebladar maddalac",
+"b": 22010,
+"x": 186,
+"y": 2625,
+"w": 271,
+"h": 17
+},
+{
+"t": "Signatur for:",
+"b": 23010,
+"x": 194,
+"y": 2688,
+"w": 196,
+"h": 36
+},
+{
+"t": "Zengun AB",
+"b": 23010,
+"x": 192,
+"y": 2743,
+"w": 200,
+"h": 37
+},
+{
+"t": "Namnfort.:",
+"b": 24010,
+"x": 184,
+"y": 2842,
+"w": 167,
+"h": 26
+},
+{
+"t": "Datum:",
+"b": 25010,
+"x": 184,
+"y": 2934,
+"w": 113,
+"h": 26
+},
+{
+"t": "Page 1 of 1",
+"b": 27010,
+"x": 1896,
+"y": 3087,
+"w": 183,
+"h": 46
+}
+],
+"text": "AVTAL NR:\n01-023933\nFOR: Zengun AB\nZengun AB\nMOTKOD 7365567799457\nBox 171\nOstersund\n83122\nKundinformation\nMeddelat datum:\n19-10-2026\nHyrstoppsref:\n01-217293\nBeskrivning\n25-09-2026\nHyrstoppsref:\n09-10-2026\nKundnummer:\n16182\nKundens Ordernr:\n648785-4090\nLeveransmetod:\nFraktfritt\nFLOTTA Nr\nBESKRIVNING:\n7718100\nFallskyddsblock 10 m vajer, Sharp Edge, ej\ndebiterad\n7718700\nFallskyddsblock 10 m vajer, Sharp Edge, ej\ndebiterad\nLYFTUTHYRNING\nStockholm Vastberga\nVastberga Allé 60\nHagersten\nSE556997284601\n126 30\nTel: +46 8-53186045\nEmail: E-mail: info@inomec.se\nLEVERANSADRESS\nZengun AB\nGallerian Ring Jeppe 0703246523\n11321\nLev Kontaktnamn: Jeppe Nilsson\nTelefonnr:\nANT/AKT\nNOTERINGAR\n1\n——\n1\n——\nAruKeIn KOMmMer alt inspeKteras vid retur till var SeErviceverKstaG OCn eventuella\nebladar maddalac\nSignatur for:\nZengun AB\nNamnfort.:\nDatum:\nPage 1 of 1"
+}

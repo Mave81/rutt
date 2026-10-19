@@ -203,6 +203,108 @@ class RuttSmsModule(private val rc: ReactApplicationContext) : ReactContextBaseJ
     }.start()
   }
 
+  /** Läser texten i en bild (file://…): rader med ruta, i bildens pixlar. Fungerar utan nät. */
+  @ReactMethod
+  fun ocr(uri: String, p: Promise) {
+    try {
+      val img = com.google.mlkit.vision.common.InputImage.fromFilePath(rc, Uri.parse(uri))
+      val rec = com.google.mlkit.vision.text.TextRecognition.getClient(com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS)
+      rec.process(img).addOnSuccessListener { t ->
+        val out = Arguments.createMap(); out.putInt("w", img.width); out.putInt("h", img.height)
+        val lines = Arguments.createArray()
+        t.textBlocks.forEachIndexed { bi, b ->
+          for (l in b.lines) {
+            val r = l.boundingBox ?: continue
+            val m = Arguments.createMap()
+            m.putString("t", l.text); m.putInt("b", bi)
+            m.putInt("x", r.left); m.putInt("y", r.top); m.putInt("w", r.width()); m.putInt("h", r.height())
+            lines.pushMap(m)
+          }
+        }
+        out.putArray("lines", lines); out.putString("text", t.text)
+        p.resolve(out); rec.close()
+      }.addOnFailureListener { e -> p.reject("ocr", e); rec.close() }
+    } catch (e: Throwable) { p.reject("ocr", e) }
+  }
+
+  /**
+   * Ifylld sedel: ritar text (namn, datum, tid, hämtad av) och signaturen på sidbilden och sparar en ny PNG.
+   * texts: [{t, x, y, size}] i bildens pixlar. sig: {strokes:[[{x,y}]], w, h} + box {x,y,w,h}.
+   * footer: rader som läggs i en vit list under sidan (när sedeln saknar fält att skriva i).
+   */
+  @ReactMethod
+  fun fillSedel(src: String, texts: ReadableArray, sig: com.facebook.react.bridge.ReadableMap?, footer: ReadableArray?, p: Promise) {
+    Thread {
+      try {
+        val opts = android.graphics.BitmapFactory.Options().apply { inMutable = true }
+        val path = Uri.parse(src).path ?: throw Exception("ingen fil")
+        val base = android.graphics.BitmapFactory.decodeFile(path, opts) ?: throw Exception("kunde inte läsa bilden")
+        val fl = if (footer != null) footer.size() else 0
+        val lineH = (base.width * 0.028f)
+        val extra = if (fl > 0) (lineH * (fl + 1.6f)).toInt() + (if (sig != null) (base.width * 0.16f).toInt() else 0) else 0
+        val out = android.graphics.Bitmap.createBitmap(base.width, base.height + extra, android.graphics.Bitmap.Config.ARGB_8888)
+        val cv = android.graphics.Canvas(out)
+        cv.drawColor(android.graphics.Color.WHITE)
+        cv.drawBitmap(base, 0f, 0f, null)
+        val ink = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.rgb(26, 63, 160) }
+        for (i in 0 until texts.size()) {
+          val t = texts.getMap(i) ?: continue
+          ink.textSize = t.getDouble("size").toFloat(); ink.typeface = android.graphics.Typeface.DEFAULT_BOLD
+          cv.drawText(t.getString("t") ?: "", t.getDouble("x").toFloat(), t.getDouble("y").toFloat(), ink)
+        }
+        var sigTop = 0f
+        if (fl > 0) {
+          val y0 = base.height.toFloat()
+          val sep = android.graphics.Paint().apply { color = android.graphics.Color.rgb(200, 200, 200); strokeWidth = 2f }
+          cv.drawLine(base.width * 0.04f, y0 + lineH * 0.5f, base.width * 0.96f, y0 + lineH * 0.5f, sep)
+          for (i in 0 until fl) {
+            ink.textSize = lineH * (if (i == 0) 0.78f else 0.66f); ink.typeface = if (i == 0) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
+            cv.drawText(footer!!.getString(i) ?: "", base.width * 0.05f, y0 + lineH * (1.4f + i), ink)
+          }
+          sigTop = y0 + lineH * (fl + 1.1f)
+        }
+        if (sig != null) {
+          val strokes = sig.getArray("strokes"); val sw = sig.getDouble("w").toFloat(); val sh = sig.getDouble("h").toFloat()
+          val box = sig.getMap("box")
+          val bx = if (box != null) box.getDouble("x").toFloat() else base.width * 0.05f
+          val by = if (box != null) box.getDouble("y").toFloat() else sigTop
+          val bw = if (box != null) box.getDouble("w").toFloat() else base.width * 0.45f
+          val bh = if (box != null) box.getDouble("h").toFloat() else base.width * 0.14f
+          val k = minOf(bw / sw, bh / sh); val ox = bx + (bw - sw * k) / 2; val oy = by + (bh - sh * k) / 2
+          val pen = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.rgb(26, 63, 160); style = android.graphics.Paint.Style.STROKE; strokeWidth = maxOf(2.5f, base.width / 400f); strokeCap = android.graphics.Paint.Cap.ROUND; strokeJoin = android.graphics.Paint.Join.ROUND }
+          if (strokes != null) for (i in 0 until strokes.size()) {
+            val st = strokes.getArray(i) ?: continue
+            val path2 = android.graphics.Path()
+            for (j in 0 until st.size()) { val pt = st.getMap(j) ?: continue; val x = ox + pt.getDouble("x").toFloat() * k; val y = oy + pt.getDouble("y").toFloat() * k; if (j == 0) path2.moveTo(x, y) else path2.lineTo(x, y) }
+            cv.drawPath(path2, pen)
+          }
+        }
+        val dir = File(rc.cacheDir, "shared"); dir.mkdirs()
+        val f = File(dir, "ifylld_" + System.currentTimeMillis() + ".png")
+        f.outputStream().use { out.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        base.recycle(); out.recycle()
+        p.resolve("file://" + f.absolutePath)
+      } catch (e: Throwable) { p.reject("fill", e) }
+    }.start()
+  }
+
+  /** Öppnar Meddelanden med bilden bifogad till numret (du trycker Skicka – Android låter inte appar skicka MMS själva). */
+  @ReactMethod
+  fun shareImage(uri: String, num: String, text: String, p: Promise) {
+    try {
+      val f = File(Uri.parse(uri).path ?: "")
+      val cu = androidx.core.content.FileProvider.getUriForFile(rc, rc.packageName + ".files", f)
+      val i = Intent(Intent.ACTION_SEND).apply {
+        type = "image/png"; putExtra(Intent.EXTRA_STREAM, cu); putExtra("address", num); putExtra("sms_body", text); putExtra(Intent.EXTRA_TEXT, text)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      val pkg = Telephony.Sms.getDefaultSmsPackage(rc)
+      if (pkg != null) i.setPackage(pkg)
+      try { rc.startActivity(i) } catch (_: Throwable) { i.setPackage(null); rc.startActivity(Intent.createChooser(i, "Skicka sedeln").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+      p.resolve(true)
+    } catch (e: Throwable) { p.reject("share", e) }
+  }
+
   @ReactMethod
   fun pickContact(p: Promise) {
     val act = rc.currentActivity

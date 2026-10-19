@@ -43,7 +43,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
   // Kvittenstyp väljer du själv (som i Opter). Krav = orderns krav OCH typens krav.
   const P = (stop && stop.pod) || null;
   // Tilläggen som kontoret lagt på ordern (Opter: ShipmentAddServiceType). Demo: exempel.
-  const addTypes: any[] = stop && stop.live && stop.live.edit ? stop.live.edit.addTypes : stop && !stop.live ? [{id: 1, name: 'Väntetid'}, {id: 2, name: 'Inbärning'}, {id: 3, name: 'Bomkörning'}] : [];
+  const addTypes: any[] = stop && stop.live && stop.live.edit ? stop.live.edit.addTypes : stop && !stop.live && !stop.own && !stop.ownSign ? [{id: 1, name: 'Väntetid'}, {id: 2, name: 'Inbärning'}, {id: 3, name: 'Bomkörning'}] : [];
   const types: any[] = (P && P.types) || [];
   const type = types.find(t => t.id === typeId) || null;
   const subs: any[] = type && P ? P.subTypes.filter((x: any) => x.mainId === type.id) : [];

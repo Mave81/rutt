@@ -82,8 +82,8 @@ android {
         applicationId "com.ruttapp"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 49
-        versionName "3.28"
+        versionCode 50
+        versionName "3.29"
     }
     // Bygg bara arm64 (det moderna telefoner kör) -> mindre APK, under GitHubs 100 MB
     splits {
@@ -119,6 +119,8 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+    // Läser sedlar (bild/PDF-sida) i telefonen, utan nät: Googles textigenkänning, latinska bokstäver, inbyggd modell.
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

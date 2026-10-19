@@ -125,8 +125,8 @@ export function useJobbet({team, me, enabled}: {team: {drivers: {name: string}[]
 }
 
 /* ---- Fliken ---- */
-export default function JobbetView({j, opterView, opterUnread, opterLast, onOpenOpter, live}: {
-  j: ReturnType<typeof useJobbet>; opterView: React.ReactNode; opterUnread: number; opterLast: any; onOpenOpter: () => void; live: boolean;
+export default function JobbetView({j, opterView, opterUnread, opterLast, onOpenOpter, live, onMakeJob}: {
+  j: ReturnType<typeof useJobbet>; opterView: React.ReactNode; opterUnread: number; opterLast: any; onOpenOpter: () => void; live: boolean; onMakeJob?: (m: Media) => void;
 }) {
   const [seg, setSeg] = useState<'chatt' | 'folk'>('chatt');
   const [open, setOpen] = useState<null | 'opter' | Contact>(null);
@@ -170,7 +170,7 @@ export default function JobbetView({j, opterView, opterUnread, opterLast, onOpen
       <SmsSetup j={j} />
     </View>
   );
-  if (open) return <SmsThread j={j} c={open} onBack={() => setOpen(null)} onDial={dial} />;
+  if (open) return <SmsThread j={j} c={open} onBack={() => setOpen(null)} onDial={dial} onMakeJob={onMakeJob} />;
 
   const tagRow = (c: Contact, onPress: () => void) => {
     const key = numKey(c.num), th = j.threads[key] || [], last = th[th.length - 1], un = j.unreadOf(key);
@@ -325,7 +325,7 @@ function AddSheet({open, onClose, onSave}: {open: boolean; onClose: () => void; 
 }
 
 /* ---- En SMS-tråd ---- */
-function SmsThread({j, c, onBack, onDial}: {j: ReturnType<typeof useJobbet>; c: Contact; onBack: () => void; onDial: (n: string) => void}) {
+function SmsThread({j, c, onBack, onDial, onMakeJob}: {j: ReturnType<typeof useJobbet>; c: Contact; onBack: () => void; onDial: (n: string) => void; onMakeJob?: (m: Media) => void}) {
   const [text, setText] = useState('');
   const {lift} = useKeyboardLift();
   const key = numKey(c.num);
@@ -338,7 +338,8 @@ function SmsThread({j, c, onBack, onDial}: {j: ReturnType<typeof useJobbet>; c: 
   const [view, setView] = useState<{md: Media; who: string; date: number} | null>(null);
   return (
     <View style={{flex: 1, paddingBottom: lift}}>
-      <MediaViewer media={view && view.md} title={view ? `${view.who} · ${whenShort(view.date)}` : ''} onClose={() => setView(null)} />
+      <MediaViewer media={view && view.md} title={view ? `${view.who} · ${whenShort(view.date)}` : ''} onClose={() => setView(null)}
+        action={view && onMakeJob ? {label: 'Gör till jobb', icon: 'plus-circle-fill', onPress: () => { const md = view.md; setView(null); onMakeJob(md); }} : undefined} />
       <View style={x.chd}>
         <Pressable hitSlop={12} onPress={onBack}><Bi n="chevron-left" size={18} color={C.dim} /></Pressable>
         <Avatar c={c} chef={c.name === j.chef} />

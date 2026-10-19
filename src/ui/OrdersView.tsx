@@ -343,7 +343,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
       <View key={k(r)} style={o.li}>
         <Pressable hitSlop={12} onPress={() => toggle(list, r)} style={{paddingVertical: 4}}><View style={[o.ck, on && o.ckOn]}>{on ? <Bi n="check2" size={14} color="#FFFFFF" /> : null}</View></Pressable>
         <Pressable style={[{flex: 1, minWidth: 0}, !on && {opacity: 0.5}]} onPress={() => other && setPlaceSheet({st: other, role: r.kind === 'pickup' ? 'MOTTAGARE · dit godset ska' : 'AVSÄNDARE · där det hämtades'})}>
-          <Text style={o.liT} numberOfLines={1}>{goodsOf(r)}</Text>
+          <Text style={o.liT} numberOfLines={1}>{r.st.own ? <Text style={o.ownTag}>{(r.st.own.from || 'EGET').toUpperCase()}  </Text> : null}{goodsOf(r)}</Text>
           <Text style={o.ordS} numberOfLines={1}>{other ? <>{r.kind === 'pickup' ? '→ ' : 'från '}<Text style={o.ordSB}>{placeName(other)}</Text>{other.area ? ` · ${other.area}` : ''}</> : null}{r.st.orderNo ? `  ·  ${r.st.orderNo}` : ''}</Text>
           {syncBad(r) ? <Text style={[o.ordS, {color: C.bad}]} onPress={() => onRetry(r.cid)}>Inte bekräftad i Opter – tryck för att skicka igen</Text> : null}
         </Pressable>
@@ -722,6 +722,7 @@ const o = themed(() => StyleSheet.create({
   meta: {color: C.faint, fontSize: 12, marginTop: 8},
   syncRow: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8},
   sync: {fontSize: 12, fontWeight: '700', flexShrink: 1},
+  ownTag: {color: C.people, fontSize: 11, fontWeight: '900', letterSpacing: 0.6},
   avise: {flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12, backgroundColor: C.accentSoft, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 12},
   aviseDue: {backgroundColor: C.accent},
   aviseT: {color: C.accentInk, fontSize: 15, fontWeight: '800'},

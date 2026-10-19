@@ -23,6 +23,8 @@ import * as DB from './src/dagbok';
 import DagbokView from './src/ui/DagbokView';
 import PlanDay from './src/ui/PlanDay';
 import MediaViewer from './src/ui/MediaViewer';
+import SedelSheet from './src/ui/SedelSheet';
+import {Egen, EGNA_KEY, isEgen, toStops, cargoOf, statusSms, opterSms} from './src/egna';
 const TRAVEL = require('./src/opter/travel');
 import {baseDriveMin, SERVICE_MIN, PAL_MIN} from './src/opter/optimizer';
 import {Buffer} from 'buffer';
@@ -40,8 +42,8 @@ const STARTS = [
   {id: 'vb', lat: 59.2938, lng: 18.0127, label: 'Västberga', end: '15:00'},
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
-const BUILD = '19 okt · 3.28 · bilder och PDF från Joel i Jobbet, Dela → RUTT, tidspasning med ett s';
-const BUILD = '19 okt · 3.27 · tidspassning visas (Plan, Imorgon, nya order) och styr tiden när den står i ordern';
+// Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
+const BUILD = '19 okt · 3.29 · sedel → jobb (Inomec, Cramo, bilder), SMS Lastat ✅ Lossat ✅ till Joel, bilder/PDF i Jobbet, Dela → RUTT';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -143,6 +145,14 @@ function AppInner(): React.JSX.Element {
     const b = AppState.addEventListener('change', (st: string) => { if (st === 'active') take(); });
     return () => { a.remove(); b.remove(); };
   }, []);
+  // Egna jobb (sedlar från Joel som du gjort till stopp). Klara jobb äldre än en vecka rensas.
+  const [egna, setEgna] = useState<Egen[]>([]);
+  const egnaLoaded = useRef(false);
+  useEffect(() => { loadJSON(EGNA_KEY, []).then((v: any) => { const wk = new Date(Date.now() - 7 * 86400000); const lim = `${wk.getFullYear()}-${String(wk.getMonth() + 1).padStart(2, '0')}-${String(wk.getDate()).padStart(2, '0')}`; setEgna(Array.isArray(v) ? v.filter((e: any) => e && e.day >= lim) : []); egnaLoaded.current = true; }); }, []);
+  const saveEgna = (f: (l: Egen[]) => Egen[]) => setEgna(l => { const n = f(l); if (egnaLoaded.current) saveJSON(EGNA_KEY, n); return n; });
+  const [sedelFor, setSedelFor] = useState<{media?: any; job?: Egen} | null>(null);
+  const [smsOpter, setSmsOpter] = useState(false); // Lastat/Lossat-SMS även för Opter-order (Inställningar)
+  useEffect(() => { loadJSON('rutt.smsopter.v1', false).then((v: any) => setSmsOpter(!!v)); }, []);
   const [klartView, setKlartView] = useState<'idag' | 'dagbok'>('idag');
 
   // Arbetstid, stopp-status och POD
@@ -289,7 +299,13 @@ function AppInner(): React.JSX.Element {
     }).map((x: any) => ({...x, live: x.live ? {...x.live, gone: true} : x.live}));
     return extra.length ? {...orders, cargo: {...dayCache.cargo, ...orders.cargo}, stops: [...orders.stops, ...extra]} : orders;
   }, [orders, dayCache, ost, demo]);
-  const fullSrc: any = demo ? DEMO : ordersAll.stops.length ? ordersAll : null; // demo går att slå på när som helst (Inställningar)
+  const baseSrc: any = demo ? DEMO : ordersAll.stops.length ? ordersAll : null; // demo går att slå på när som helst (Inställningar)
+  // Egna jobb blandas in som vanliga order: samma plan, lastplan, Klart och dagbok – men skickas aldrig till Opter.
+  const fullSrc: any = useMemo(() => {
+    if (!egna.length) return baseSrc;
+    const st = egna.flatMap(e => toStops(e)); const cg: any = {}; for (const e of egna) cg[e.id] = cargoOf(e);
+    return baseSrc ? {...baseSrc, stops: [...baseSrc.stops, ...st], cargo: {...baseSrc.cargo, ...cg}} : {stops: st, cargo: cg, perm: null, opts: null};
+  }, [baseSrc, egna]);
   // ---- Var hör varje order hemma? Opters regler (live.tab) + dina tryck i RUTT ----
   const cidsAll: string[] = useMemo(() => (fullSrc ? [...new Set(fullSrc.stops.map((s: any) => String(s.pickup || s.drop)))] as string[] : []), [fullSrc]);
   const legs = (cid: string) => ({pick: fullSrc.stops.find((s: any) => String(s.pickup) === cid), drop: fullSrc.stops.find((s: any) => String(s.drop) === cid)});
@@ -348,7 +364,7 @@ function AppInner(): React.JSX.Element {
     }
     if (gpsRoutePos && Date.now() - gpsRoutePos.time < 10 * 60000) cur = {lat: gpsRoutePos.lat, lng: gpsRoutePos.lng};
     const anyDone = Object.keys(ost).length > 0;
-    const now = fullSrc === DEMO && !anyDone ? new Date(new Date().setHours(6, 0, 0, 0)).getTime() : Date.now();
+    const now = demo && !anyDone ? new Date(new Date().setHours(6, 0, 0, 0)).getTime() : Date.now();
     try {
       return computeRoute(stops, src.cargo, {...START, cur}, now, manual ? manual.keys : null);
     } catch (e: any) {
@@ -594,10 +610,11 @@ function AppInner(): React.JSX.Element {
     const at = Date.now();
     setOst(o => { const n = {...o}; for (const x of list) n[x.pickup] = {...(o[x.pickup] || {}), loadedAt: at}; return n; });
     list.forEach(x => sendLoad(x));
+    smsLater(list.map(x => ({st: x, cid: String(x.pickup)})), 'load', at, '');
     if (!demo) for (const x of list) { const cid = String(x.pickup); const d = dayOrderOf(cid); DB.logEvent({t: at, kind: 'load', cid, who: x.who, lat: x.lat, lng: x.lng, pal: d.pal}); DB.saveOrder(DB.ymdOf(at), {...d, loadedAt: at}); }
     flash(list.length > 1 ? `Lastad · ${list.length} order hos ${st.who || ''}` : `Lastad · ${st.who || 'order'}`, () => {
       if (!demo) list.forEach(x => DB.unlogEvent(String(x.pickup), 'load', at));
-      list.forEach(x => cancelSend(x.pickup, 'load'));
+      list.forEach(x => { cancelSend(x.pickup, 'load'); smsCancel(String(x.pickup), 'load'); });
       setOst(o => { const n = {...o}; for (const x of list) { if (prev[x.pickup]) n[x.pickup] = prev[x.pickup]; else delete n[x.pickup]; } return n; });
     });
   }
@@ -664,6 +681,7 @@ function AppInner(): React.JSX.Element {
   // Lossad: kvittensen sparas, ordern flyttar till Klart, namnet minns till nästa gång.
   // Lossad – samma kvittens (signatur/namn/foto) gäller alla order som lossas på stället. Kollin räknas per order.
   async function onSigned(st0: any, pod0: any) {
+    if (st0.ownSign) { setSignStop(null); ownSigned(st0.ownSign, pod0); return; }
     // Ny kvittens på en order som redan är lossad: bara kvittensen, statusen rörs inte (som Opter).
     if (st0.repod) {
       setSignStop(null);
@@ -707,10 +725,11 @@ function AppInner(): React.JSX.Element {
         }
       }
     }
+    smsLater(list.map((x: any) => ({st: x, cid: String(x.drop)})), 'unload', doneT, pod0.name || '');
     if (pod0.name) setNames(n => { const nn = rememberName(n, st0.who, pod0.name); saveJSON(NAMES_KEY, nn); return nn; });
     flash(many ? `Lossad · ${list.length} order hos ${st0.who || ''}` : `Lossad · ${st0.who || 'order'}`, () => {
       if (!demo) list.forEach((x: any) => { DB.unlogEvent(String(x.drop), 'unload', doneT); DB.saveOrder(DB.ymdOf(doneT), {cid: String(x.drop), doneAt: undefined}); });
-      list.forEach((x: any) => { cancelSend(x.drop, 'unload'); if (addTimers.current[x.drop]) { clearTimeout(addTimers.current[x.drop].t); delete addTimers.current[x.drop]; } });
+      list.forEach((x: any) => { cancelSend(x.drop, 'unload'); smsCancel(String(x.drop), 'unload'); if (addTimers.current[x.drop]) { clearTimeout(addTimers.current[x.drop].t); delete addTimers.current[x.drop]; } });
       setOst(o => { const n = {...o}; for (const x of list) { if (prev[x.drop]) n[x.drop] = prev[x.drop]; else delete n[x.drop]; } return n; });
     });
   }
@@ -917,6 +936,74 @@ function AppInner(): React.JSX.Element {
     else if (id === 'tl' && jobbet.tl) { jobbet.send({name: 'Trafikledningen', num: jobbet.tl, kind: 'tl'}, t); flash('SMS till trafikledningen', null); }
   }
 
+  // ---- SMS till chefen: Lastat ✅ / Lossat ✅. Skickas när Ångra gått ut (8 s), aldrig dubbelt. ----
+  const smsTimers = useRef<Record<string, any>>({});
+  function smsLater(items: {st: any; cid: string}[], what: 'load' | 'unload', at: number, podName: string) {
+    if (demo || !chefC) return;
+    for (const {st, cid} of items) {
+      const e: Egen | null = st.own || null;
+      if (e ? !e.sms : !smsOpter) continue;
+      if (e && e.sent && e.sent[what]) continue;
+      const key = cid + ':' + what;
+      if (smsTimers.current[key]) clearTimeout(smsTimers.current[key]);
+      smsTimers.current[key] = setTimeout(() => {
+        delete smsTimers.current[key];
+        const cur = e ? egnaRef.current.find(x => x.id === e.id) || e : null;
+        const text = cur ? statusSms(cur, what, {at, podName, me: driverName}) : opterSms(st, what, {at, podName, me: driverName, pal: Number(((fullSrc && fullSrc.cargo[cid]) || {}).pal) || 0});
+        jobbet.send(chefC, text);
+        if (cur) saveEgna(l => l.map(x => (x.id === cur.id ? {...x, sent: {...(x.sent || {}), [what]: Date.now()}} : x)));
+        flash(`${what === 'load' ? 'Lastat' : 'Lossat'} ✅ skickat till ${chefC.name.split(' ')[0]}`, null);
+      }, 8600);
+    }
+  }
+  function smsCancel(cid: string, what: string) { const k = cid + ':' + what; if (smsTimers.current[k]) { clearTimeout(smsTimers.current[k]); delete smsTimers.current[k]; } }
+  const egnaRef = useRef<Egen[]>([]); egnaRef.current = egna;
+  function ownStatus(e: Egen, what: 'way' | 'here' | 'late') {
+    if (!chefC) { flash('Välj chef under Jobbet → Folk först', null); return; }
+    jobbet.send(chefC, statusSms(e, what, {me: driverName}));
+    flash(`SMS till ${chefC.name.split(' ')[0]}`, null);
+  }
+  // Kvittens på sedeln: namn, datum, tid, hämtad av och signaturen ritas på sidan (eller i en list under den).
+  async function ownSigned(e: Egen, pod: any) {
+    const SM: any = NM.RuttSms;
+    const page = e.media ? (e.media.kind === 'pdf' ? (e.media.pageUris || [])[0] : e.media.uri) : null;
+    const now = new Date(); const two = (n: number) => String(n).padStart(2, '0');
+    const date = `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}`, time = `${two(now.getHours())}:${two(now.getMinutes())}`;
+    const name = (pod && pod.name) || '';
+    let image: string | undefined;
+    if (page && SM && SM.fillSedel) {
+      try {
+        const L: any[] = (e.ocr && e.ocr.lines) || []; const W = (e.ocr && e.ocr.w) || 1400, Hh = (e.ocr && e.ocr.h) || 2000;
+        const nm = (re: RegExp, after?: any) => L.find(l => re.test(String(l.t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')) && (!after || l.y > after.y - 4));
+        const sf = nm(/^signatur f/), nf = nm(/^namnf/, sf), dt = nm(/^datum/, nf || sf), ha = nm(/^h.mtad av|^hamtad av/, sf), td = nm(/^tid\b/, nf || sf);
+        const sig = pod && pod.sig && pod.sig.strokes && pod.sig.strokes.length ? pod.sig : null;
+        if (e.kind === 'inomec-hamt' && nf && dt && ha && td) {
+          const sz = Math.max(14, nf.h * 1.05), base = (l: any) => l.y + l.h * 0.9;
+          const texts = [
+            {t: name, x: nf.x + nf.w + W * 0.02, y: base(nf), size: sz}, {t: date, x: dt.x + dt.w + W * 0.03, y: base(dt), size: sz},
+            {t: driverName || '', x: ha.x, y: base(nf), size: sz}, {t: time, x: td.x + td.w + W * 0.03, y: base(td), size: sz},
+          ].filter(x => x.t);
+          const top = (sf ? sf.y : nf.y) - Hh * 0.03, bot = dt.y + dt.h + Hh * 0.02;
+          image = await SM.fillSedel(page, texts, sig ? {...sig, box: {x: W * 0.70, y: top, w: W * 0.22, h: bot - top}} : null, null);
+        } else {
+          const foot = [`Kvitterat ${date} kl ${time}`, name ? `Namnförtydligande: ${name}` : '', `Hämtad av: ${driverName || ''}`, [e.title, e.ref].filter(Boolean).join(' ')].filter(Boolean);
+          image = await SM.fillSedel(page, [], sig, foot);
+        }
+      } catch (x) { flash('Kunde inte fylla i sedeln – kvittensen är sparad ändå', null); }
+    }
+    const signed = {name, sig: pod && pod.sig, at: Date.now(), image};
+    saveEgna(l => l.map(x => (x.id === e.id ? {...x, signed} : x)));
+    if (name) setNames(n => { const nn = rememberName(n, e.pick.name, name); saveJSON(NAMES_KEY, nn); return nn; });
+    setSedelFor({job: {...e, signed}});
+    flash(image ? 'Sedeln är ifylld – skicka den till Joel nedan' : 'Kvittensen är sparad', null);
+  }
+  function shareSigned(e: Egen) {
+    const SM: any = NM.RuttSms;
+    if (!e.signed || !e.signed.image || !SM || !SM.shareImage) return;
+    SM.shareImage(e.signed.image, chefC ? chefC.num : '', statusSms(e, 'load', {me: driverName})).catch(() => flash('Kunde inte öppna Meddelanden', null));
+  }
+  const openOwn = (cid: string) => { const e = egna.find(x => x.id === cid); if (e) setSedelFor({job: e}); };
+
   // Arbetstid → Opter (live). RST-typ + nytt visningsläge.
   async function doWork(rst: number, newState: 'igång' | 'rast' | 'lunch' | 'slut') {
     const since = Date.now();
@@ -962,7 +1049,14 @@ function AppInner(): React.JSX.Element {
 
   return (
     <SafeAreaView style={s.safe} edges={['top']} key={'root-' + mode}>
-      <MediaViewer media={shared[0] || null} title={shared.length > 1 ? `Delat till RUTT · 1 av ${shared.length}` : 'Delat till RUTT'} onClose={() => setShared(x => x.slice(1))} />
+      <MediaViewer media={shared[0] || null} title={shared.length > 1 ? `Delat till RUTT · 1 av ${shared.length}` : 'Delat till RUTT'} onClose={() => setShared(x => x.slice(1))}
+        action={shared[0] ? {label: 'Gör till jobb', icon: 'plus-circle-fill', onPress: () => { const m = shared[0]; setShared(x => x.slice(1)); setSedelFor({media: m}); }} : undefined} />
+      <SedelSheet media={sedelFor && sedelFor.media} job={sedelFor && sedelFor.job} chefName={chefC ? chefC.name : ''} me={driverName}
+        onClose={() => setSedelFor(null)}
+        onSave={(e: Egen) => { saveEgna(l => (l.some(x => x.id === e.id) ? l.map(x => (x.id === e.id ? e : x)) : [...l, e])); setSedelFor(null); flash(sedelFor && sedelFor.job ? 'Sparat' : `Lagt i planen · ${e.pick.name || e.pick.adr} → ${e.drop.name || e.drop.adr}`, null); }}
+        onRemove={(id: string) => { saveEgna(l => l.filter(x => x.id !== id)); setSedelFor(null); flash('Jobbet borttaget', null); }}
+        onSign={(e: Egen) => { const [p] = toStops(e); setSedelFor(null); setSignStop({...p, drop: e.id, ownSign: e, who: e.pick.name, suggest: e.pick.contact ? [e.pick.contact] : []}); }}
+        onStatus={ownStatus} onShareSigned={shareSigned} />
       <StatusBar barStyle={C.mode === 'light' ? 'dark-content' : 'light-content'} backgroundColor={C.bg} />
       <View style={s.head}>
         <View style={s.headTop}>
@@ -1093,7 +1187,7 @@ function AppInner(): React.JSX.Element {
             </View>
           )}
           {tab === 'klart' && klartView === 'dagbok' && <DagbokView me={driverName || 'RUTT'} onSms={chefC ? (text: string) => { jobbet.send(chefC, text); flash(`Dagrapport till ${chefC.name.split(' ')[0]}`, null); } : undefined} />}
-          {tab === 'klart' && klartView === 'idag' && <DoneView done={doneOrders} onRetry={retrySync} onOpen={(d: any) => setEditFor({cid: d.cid, st: d.st, done: true})} />}
+          {tab === 'klart' && klartView === 'idag' && <DoneView done={doneOrders} onRetry={retrySync} onOpen={(d: any) => (isEgen(d.cid) ? openOwn(d.cid) : setEditFor({cid: d.cid, st: d.st, done: true}))} />}
           {tab === 'nytt' && <NewOrdersView orders={newOrders} cargo={fullSrc ? fullSrc.cargo : {}} onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={(o: any) => setOrderStatus(o, 'reject')} onForward={(orders.perm && orders.perm.giveAway === false) ? undefined : setForwardFor} />}
           <RejectSheet o={rejectFor} onClose={() => setRejectFor(null)} onReject={(o: any) => setOrderStatus(o, 'reject')} />
           <ForwardSheet o={forwardFor} drivers={team.drivers} onClose={() => setForwardFor(null)} onForward={forwardOrder} />
@@ -1115,10 +1209,10 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && (planDay === 'idag' || !later.length) && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any, more: any[] = []) => setSignStop(more.length ? {...st, group: [st, ...more]} : st)} onEdit={(cid: string, st: any) => setEditFor({cid, st, done: false})} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any, more: any[] = []) => setSignStop(more.length ? {...st, group: [st, ...more]} : st)} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} />
           )}
           {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} laterRoute={laterRoute} />}
-          {tab === 'chat' && <JobbetView j={jobbet} live={live} opterUnread={unread} opterLast={chatList[chatList.length - 1]} onOpenOpter={markOpterRead}
+          {tab === 'chat' && <JobbetView j={jobbet} onMakeJob={(m: any) => setSedelFor({media: m})} live={live} opterUnread={unread} opterLast={chatList[chatList.length - 1]} onOpenOpter={markOpterRead}
             opterView={<ChatView msgs={chatList} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} onRetry={deliver} />} />}
           {(tab === 'plan' || tab === 'last') && route && (route as any).error && <Text style={s.errTxt}>Optimeringsfel: {(route as any).error}</Text>}
 
@@ -1176,6 +1270,11 @@ function AppInner(): React.JSX.Element {
             <Text style={[s.sheetNote, {marginTop: 2}]}>Prova allt med påhittade order. Inget skickas till Opter.</Text>
           </View>
           <View style={[s.toggle, demo && {backgroundColor: C.accent2}]}><View style={[s.toggleKnob, demo && {alignSelf: 'flex-end'}]} /></View>
+        </Pressable>
+        <Text style={s.podLabel}>SMS till chefen</Text>
+        <Pressable style={s.setRow} onPress={() => { const v = !smsOpter; setSmsOpter(v); saveJSON('rutt.smsopter.v1', v); }}>
+          <Text style={[s.sheetNote, {flex: 1, marginTop: 0}]}>Lastat ✅ / Lossat ✅ som SMS till {chefC ? chefC.name.split(' ')[0] : 'chefen'} även för Opter-order. Egna jobb från sedlar väljer du på jobbet.</Text>
+          <View style={[s.tg, smsOpter && s.tgOn]}><View style={[s.tgK, smsOpter && s.tgKOn]} /></View>
         </Pressable>
         <Text style={s.podLabel}>Rutten</Text>
         <Text style={s.sheetNote}>Körtider längs vägarna från OpenStreetMap när telefonen har nät, annars en uppskattning. {learnInfo.samples >= 5
@@ -1499,6 +1598,11 @@ const s = themed(() => StyleSheet.create({
 
   // POD
   podLabel: {color: C.dim, fontSize: 12, marginTop: 14, marginBottom: 6, fontWeight: '600'},
+  setRow: {flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.panel, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12},
+  tg: {width: 44, height: 26, borderRadius: 13, backgroundColor: C.edge, justifyContent: 'center', paddingHorizontal: 3},
+  tgOn: {backgroundColor: C.accent2},
+  tgK: {width: 20, height: 20, borderRadius: 10, backgroundColor: '#FFFFFF'},
+  tgKOn: {alignSelf: 'flex-end'},
   sigPad: {height: 170, backgroundColor: C.sigBg, borderColor: C.edge, borderWidth: 1, borderRadius: 12, overflow: 'hidden', justifyContent: 'center', alignItems: 'center'},
   sigHint: {color: C.dim, fontSize: 14},
   sigClear: {alignSelf: 'flex-end', paddingVertical: 6, paddingHorizontal: 4, marginTop: 4},

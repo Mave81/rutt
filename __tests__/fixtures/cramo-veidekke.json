@@ -1,0 +1,271 @@
+{
+"w": 2378,
+"h": 4260,
+"lines": [
+{
+"t": "o",
+"b": 2010,
+"x": 297,
+"y": 70,
+"w": 47,
+"h": 55
+},
+{
+"t": "a",
+"b": 2011,
+"x": 2072,
+"y": 108,
+"w": 71,
+"h": 8
+},
+{
+"t": "se",
+"b": 2010,
+"x": 30,
+"y": 5,
+"w": 268,
+"h": 214
+},
+{
+"t": "793054 > os. Fale",
+"b": 2011,
+"x": 1037,
+"y": 74,
+"w": 1262,
+"h": 167
+},
+{
+"t": "Forarmeddelande",
+"b": 2010,
+"x": 150,
+"y": 287,
+"w": 656,
+"h": 65
+},
+{
+"t": "Fran trafikledningen",
+"b": 2011,
+"x": 1550,
+"y": 268,
+"w": 652,
+"h": 66
+},
+{
+"t": "Glom ej att lagga in foto pa retursedel vid returer.",
+"b": 3010,
+"x": 150,
+"y": 412,
+"w": 1887,
+"h": 85
+},
+{
+"t": "Ext. meddelande",
+"b": 5010,
+"x": 152,
+"y": 549,
+"w": 612,
+"h": 63
+},
+{
+"t": "6st fodervagn, 2st dorrlyft, 1 skivvagn, L8, 1st",
+"b": 6010,
+"x": 150,
+"y": 679,
+"w": 1757,
+"h": 79
+},
+{
+"t": "glaslyft, glasrobot",
+"b": 6010,
+"x": 149,
+"y": 781,
+"w": 690,
+"h": 79
+},
+{
+"t": "tidspasning 06;50",
+"b": 7010,
+"x": 147,
+"y": 979,
+"w": 697,
+"h": 79
+},
+{
+"t": "Bekraftad",
+"b": 9010,
+"x": 152,
+"y": 1255,
+"w": 512,
+"h": 94
+},
+{
+"t": "Status",
+"b": 9011,
+"x": 2001,
+"y": 1237,
+"w": 201,
+"h": 50
+},
+{
+"t": "Vastberga Cramo 54248",
+"b": 10010,
+"x": 148,
+"y": 1566,
+"w": 1352,
+"h": 112
+},
+{
+"t": "mening",
+"b": 10011,
+"x": 1895,
+"y": 1545,
+"w": 306,
+"h": 63
+},
+{
+"t": "¥ Vretensborgsvagen 13, 12630 Hagersten",
+"b": 10010,
+"x": 150,
+"y": 1730,
+"w": 1784,
+"h": 91
+},
+{
+"t": "Kontakt",
+"b": 10010,
+"x": 152,
+"y": 1873,
+"w": 278,
+"h": 63
+},
+{
+"t": "08-619 81 60",
+"b": 10020,
+"x": 151,
+"y": 2010,
+"w": 581,
+"h": 71
+},
+{
+"t": "VEIDEKKE ENTREPRENAD AB ““\"\"\"*",
+"b": 11010,
+"x": 149,
+"y": 2277,
+"w": 2053,
+"h": 109
+},
+{
+"t": "W Strakvagen 7, 16935 Solna",
+"b": 11010,
+"x": 150,
+"y": 2453,
+"w": 1196,
+"h": 97
+},
+{
+"t": "Kontakt",
+"b": 13010,
+"x": 152,
+"y": 2603,
+"w": 278,
+"h": 63
+},
+{
+"t": "Portkod",
+"b": 13011,
+"x": 1907,
+"y": 2601,
+"w": 283,
+"h": 63
+},
+{
+"t": "0702760370",
+"b": 13010,
+"x": 151,
+"y": 2739,
+"w": 548,
+"h": 71
+},
+{
+"t": "ANNA",
+"b": 13011,
+"x": 1937,
+"y": 2740,
+"w": 257,
+"h": 69
+},
+{
+"t": "Kund",
+"b": 13010,
+"x": 2046,
+"y": 3004,
+"w": 155,
+"h": 50
+},
+{
+"t": "Vastberga Cramo 54248",
+"b": 13010,
+"x": 146,
+"y": 3094,
+"w": 1308,
+"h": 116
+},
+{
+"t": "Transporter",
+"b": 13010,
+"x": 147,
+"y": 3263,
+"w": 494,
+"h": 89
+},
+{
+"t": "2026-09-29",
+"b": 13010,
+"x": 148,
+"y": 3543,
+"w": 357,
+"h": 54
+},
+{
+"t": "Orderinfo",
+"b": 13011,
+"x": 1900,
+"y": 3527,
+"w": 303,
+"h": 51
+},
+{
+"t": "12505959 Projektnr",
+"b": 13010,
+"x": 1411,
+"y": 3699,
+"w": 784,
+"h": 82
+},
+{
+"t": "Tjanst Tidspassning",
+"b": 14010,
+"x": 147,
+"y": 3842,
+"w": 820,
+"h": 93
+},
+{
+"t": "Fordonstyp 2-Axl max 4,5 ton",
+"b": 14010,
+"x": 152,
+"y": 3986,
+"w": 1166,
+"h": 86
+},
+{
+"t": "Vikt",
+"b": 14010,
+"x": 148,
+"y": 4113,
+"w": 136,
+"h": 62
+}
+],
+"text": "o\na\nse\n793054 > os. Fale\nForarmeddelande\nFran trafikledningen\nGlom ej att lagga in foto pa retursedel vid returer.\nExt. meddelande\n6st fodervagn, 2st dorrlyft, 1 skivvagn, L8, 1st\nglaslyft, glasrobot\ntidspasning 06;50\nBekraftad\nStatus\nVastberga Cramo 54248\nmening\n¥ Vretensborgsvagen 13, 12630 Hagersten\nKontakt\n08-619 81 60\nVEIDEKKE ENTREPRENAD AB ““\"\"\"*\nW Strakvagen 7, 16935 Solna\nKontakt\nPortkod\n0702760370\nANNA\nKund\nVastberga Cramo 54248\nTransporter\n2026-09-29\nOrderinfo\n12505959 Projektnr\nTjanst Tidspassning\nFordonstyp 2-Axl max 4,5 ton\nVikt"
+}

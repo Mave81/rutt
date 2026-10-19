@@ -1,0 +1,711 @@
+{
+"w": 1640,
+"h": 2320,
+"lines": [
+{
+"t": "Foljesedel",
+"b": 2010,
+"x": 924,
+"y": 56,
+"w": 188,
+"h": 49
+},
+{
+"t": "1(1)",
+"b": 2011,
+"x": 1521,
+"y": 60,
+"w": 45,
+"h": 26
+},
+{
+"t": "\"",
+"b": 2010,
+"x": 500,
+"y": 93,
+"w": 31,
+"h": 19
+},
+{
+"t": "Datum",
+"b": 2011,
+"x": 919,
+"y": 101,
+"w": 59,
+"h": 26
+},
+{
+"t": "Avtalsnummer",
+"b": 2012,
+"x": 1294,
+"y": 101,
+"w": 122,
+"h": 26
+},
+{
+"t": "2026-10-05",
+"b": 2010,
+"x": 922,
+"y": 125,
+"w": 137,
+"h": 35
+},
+{
+"t": "01-023957",
+"b": 2011,
+"x": 1298,
+"y": 129,
+"w": 127,
+"h": 21
+},
+{
+"t": "Kundnummer",
+"b": 2010,
+"x": 1298,
+"y": 158,
+"w": 107,
+"h": 14
+},
+{
+"t": "LYFTUTHYRNING",
+"b": 2010,
+"x": 223,
+"y": 180,
+"w": 347,
+"h": 25
+},
+{
+"t": "15618",
+"b": 2011,
+"x": 1301,
+"y": 178,
+"w": 70,
+"h": 20
+},
+{
+"t": "Markell ittra",
+"b": 2010,
+"x": 923,
+"y": 207,
+"w": 93,
+"h": 12
+},
+{
+"t": "4023848-4847",
+"b": 2010,
+"x": 921,
+"y": 224,
+"w": 172,
+"h": 21
+},
+{
+"t": "Loveransadress",
+"b": 2010,
+"x": 141,
+"y": 296,
+"w": 133,
+"h": 26
+},
+{
+"t": "Adress",
+"b": 2011,
+"x": 921,
+"y": 300,
+"w": 56,
+"h": 14
+},
+{
+"t": "Hercules Grundlaggning AB",
+"b": 2010,
+"x": 148,
+"y": 324,
+"w": 296,
+"h": 24
+},
+{
+"t": "Hercules Grundlaggning AB",
+"b": 2011,
+"x": 923,
+"y": 324,
+"w": 296,
+"h": 24
+},
+{
+"t": "Strém 111 - 114, Rosersberg",
+"b": 2010,
+"x": 148,
+"y": 352,
+"w": 309,
+"h": 23
+},
+{
+"t": "C8003",
+"b": 2011,
+"x": 923,
+"y": 352,
+"w": 70,
+"h": 19
+},
+{
+"t": "0702075990",
+"b": 2010,
+"x": 147,
+"y": 375,
+"w": 135,
+"h": 34
+},
+{
+"t": "190 83 Rosersberg",
+"b": 2011,
+"x": 925,
+"y": 379,
+"w": 201,
+"h": 24
+},
+{
+"t": "195 95 Rosersberg",
+"b": 2010,
+"x": 149,
+"y": 407,
+"w": 201,
+"h": 24
+},
+{
+"t": "Loveransvillkor",
+"b": 2010,
+"x": 143,
+"y": 531,
+"w": 121,
+"h": 14
+},
+{
+"t": "Kund debiteras frakt",
+"b": 2010,
+"x": 144,
+"y": 550,
+"w": 238,
+"h": 21
+},
+{
+"t": "Loveranssatt",
+"b": 2010,
+"x": 139,
+"y": 582,
+"w": 111,
+"h": 27
+},
+{
+"t": "Fakturoreferens",
+"b": 2011,
+"x": 923,
+"y": 586,
+"w": 124,
+"h": 13
+},
+{
+"t": "Transportounkten",
+"b": 2010,
+"x": 143,
+"y": 599,
+"w": 209,
+"h": 42
+},
+{
+"t": "Jim Lind",
+"b": 2011,
+"x": 922,
+"y": 603,
+"w": 99,
+"h": 21
+},
+{
+"t": "Er referens",
+"b": 2010,
+"x": 139,
+"y": 641,
+"w": 94,
+"h": 26
+},
+{
+"t": "Leveransdatum",
+"b": 2011,
+"x": 923,
+"y": 641,
+"w": 121,
+"h": 14
+},
+{
+"t": "Jim Lind",
+"b": 2010,
+"x": 143,
+"y": 672,
+"w": 99,
+"h": 21
+},
+{
+"t": "2026-10-15",
+"b": 2011,
+"x": 922,
+"y": 662,
+"w": 137,
+"h": 20
+},
+{
+"t": "Var roferens",
+"b": 2010,
+"x": 142,
+"y": 711,
+"w": 97,
+"h": 13
+},
+{
+"t": "Bidrn Héabera",
+"b": 2010,
+"x": 144,
+"y": 731,
+"w": 171,
+"h": 22
+},
+{
+"t": "Artikel",
+"b": 2010,
+"x": 151,
+"y": 787,
+"w": 85,
+"h": 34
+},
+{
+"t": "Ant Benadmning",
+"b": 2011,
+"x": 493,
+"y": 791,
+"w": 205,
+"h": 26
+},
+{
+"t": "Fran",
+"b": 2012,
+"x": 1378,
+"y": 786,
+"w": 53,
+"h": 21
+},
+{
+"t": "70.AIH",
+"b": 2010,
+"x": 159,
+"y": 831,
+"w": 67,
+"h": 31
+},
+{
+"t": "1 Halcylinder 350 ton, haidiameter 150mm, egenvikt ca 200kg,",
+"b": 2011,
+"x": 527,
+"y": 835,
+"w": 646,
+"h": 23
+},
+{
+"t": "2026-10-16",
+"b": 2012,
+"x": 1378,
+"y": 835,
+"w": 116,
+"h": 18
+},
+{
+"t": "420mm ytterdiam. 330mm hég",
+"b": 2010,
+"x": 565,
+"y": 862,
+"w": 314,
+"h": 22
+},
+{
+"t": "4301600",
+"b": 2010,
+"x": 158,
+"y": 891,
+"w": 92,
+"h": 31
+},
+{
+"t": "1. El hydraulpump 25 liter enkel/dubbelverkande, Eco-oil",
+"b": 2011,
+"x": 527,
+"y": 895,
+"w": 580,
+"h": 23
+},
+{
+"t": "2026-10-16",
+"b": 2012,
+"x": 1379,
+"y": 895,
+"w": 115,
+"h": 18
+},
+{
+"t": "4423800",
+"b": 2010,
+"x": 154,
+"y": 926,
+"w": 96,
+"h": 32
+},
+{
+"t": "1 Hydraulsiang 5 meter, Eco-oil",
+"b": 2011,
+"x": 527,
+"y": 930,
+"w": 335,
+"h": 22
+},
+{
+"t": "2026-10-16",
+"b": 2012,
+"x": 1379,
+"y": 930,
+"w": 115,
+"h": 19
+},
+{
+"t": "4425900",
+"b": 2010,
+"x": 154,
+"y": 962,
+"w": 95,
+"h": 30
+},
+{
+"t": "1 Hydraulsiang 5 meter, Eco-oil",
+"b": 2011,
+"x": 527,
+"y": 965,
+"w": 335,
+"h": 23
+},
+{
+"t": "2026-10-16",
+"b": 2012,
+"x": 1378,
+"y": 965,
+"w": 116,
+"h": 19
+},
+{
+"t": "4422900",
+"b": 2010,
+"x": 154,
+"y": 991,
+"w": 96,
+"h": 36
+},
+{
+"t": "1 Hydraulsiang 5 meter, Eco-oil",
+"b": 2011,
+"x": 527,
+"y": 1000,
+"w": 335,
+"h": 23
+},
+{
+"t": "2026-10-16",
+"b": 2012,
+"x": 1379,
+"y": 1000,
+"w": 115,
+"h": 18
+},
+{
+"t": "4420300",
+"b": 2010,
+"x": 154,
+"y": 1031,
+"w": 96,
+"h": 32
+},
+{
+"t": "1 Hydraulslang 5 meter, Eco-oil",
+"b": 2011,
+"x": 527,
+"y": 1035,
+"w": 335,
+"h": 23
+},
+{
+"t": "2026-10-16",
+"b": 2012,
+"x": 1379,
+"y": 1035,
+"w": 115,
+"h": 19
+},
+{
+"t": "70.000",
+"b": 2010,
+"x": 159,
+"y": 1067,
+"w": 71,
+"h": 31
+},
+{
+"t": "1 Adapter hane - hane",
+"b": 2011,
+"x": 527,
+"y": 1071,
+"w": 245,
+"h": 21
+},
+{
+"t": "2026-10-16",
+"b": 2012,
+"x": 1378,
+"y": 1071,
+"w": 116,
+"h": 18
+},
+{
+"t": "FRAKT",
+"b": 2010,
+"x": 159,
+"y": 1102,
+"w": 76,
+"h": 30
+},
+{
+"t": "1 Fraktkostnad ut FM 15/10-26",
+"b": 2011,
+"x": 527,
+"y": 1106,
+"w": 329,
+"h": 18
+},
+{
+"t": "2026-10-16",
+"b": 2012,
+"x": 1378,
+"y": 1106,
+"w": 116,
+"h": 18
+},
+{
+"t": "Vi har depaer i Stockholm, Géteborg och Malmé.",
+"b": 3010,
+"x": 543,
+"y": 1181,
+"w": 633,
+"h": 27
+},
+{
+"t": "Las mer pa www.inomec.se och félj oss pa sociala medier.",
+"b": 3010,
+"x": 479,
+"y": 1212,
+"w": 762,
+"h": 27
+},
+{
+"t": "o",
+"b": 4010,
+"x": 486,
+"y": 1299,
+"w": 56,
+"h": 57
+},
+{
+"t": "oO",
+"b": 4011,
+"x": 685,
+"y": 1300,
+"w": 54,
+"h": 55
+},
+{
+"t": "Handhavande",
+"b": 5010,
+"x": 144,
+"y": 1566,
+"w": 152,
+"h": 18
+},
+{
+"t": "Undertecknad har tagit del av de anvisningar som erfordras for",
+"b": 5010,
+"x": 144,
+"y": 1598,
+"w": 647,
+"h": 23
+},
+{
+"t": "handhavande samt tagit del av Inomecs hyresvillkor",
+"b": 5010,
+"x": 144,
+"y": 1632,
+"w": 535,
+"h": 23
+},
+{
+"t": "Underskrift",
+"b": 6010,
+"x": 144,
+"y": 1676,
+"w": 87,
+"h": 14
+},
+{
+"t": "Ovanstaende material utlamnad",
+"b": 7010,
+"x": 1078,
+"y": 1598,
+"w": 330,
+"h": 18
+},
+{
+"t": "Mottagen",
+"b": 9010,
+"x": 1079,
+"y": 1743,
+"w": 95,
+"h": 23
+},
+{
+"t": "Alla hyror har minimidebitering, darefter per hyran per kalenderdag. Hyra debiteras for veckans alla dagar om inget annat avtalats. Se INOMEC hyresvilikor",
+"b": 10010,
+"x": 148,
+"y": 1925,
+"w": 1286,
+"h": 28
+},
+{
+"t": "Aganderattstorbehall",
+"b": 11010,
+"x": 148,
+"y": 1960,
+"w": 186,
+"h": 22
+},
+{
+"t": "Forsalt material eller maskin férbiir sAjarens egendom till dess detta bivit till fullo betalt",
+"b": 12010,
+"x": 148,
+"y": 1992,
+"w": 716,
+"h": 27
+},
+{
+"t": "Hyresmaterialet ar f6rsdkrat genom INOMEC hyresférsakring. Avgiften for forsAkringen laggs pa nettopriset.",
+"b": 13010,
+"x": 148,
+"y": 2026,
+"w": 916,
+"h": 20
+},
+{
+"t": "OBSERVERA! Om inte komplett skade/stdid-anmailan rapporterats till INOMEC inom 10 dagar debiteras hyra",
+"b": 13010,
+"x": 148,
+"y": 2048,
+"w": 929,
+"h": 20
+},
+{
+"t": "samt fOrlust av material,",
+"b": 14010,
+"x": 149,
+"y": 2070,
+"w": 201,
+"h": 16
+},
+{
+"t": "Inomec Stockholm",
+"b": 15010,
+"x": 148,
+"y": 2140,
+"w": 206,
+"h": 19
+},
+{
+"t": "Telefon",
+"b": 15011,
+"x": 571,
+"y": 2140,
+"w": 82,
+"h": 19
+},
+{
+"t": "Vastberga Allé 60",
+"b": 15010,
+"x": 147,
+"y": 2173,
+"w": 178,
+"h": 22
+},
+{
+"t": "+46 8-53186045",
+"b": 15011,
+"x": 572,
+"y": 2173,
+"w": 164,
+"h": 18
+},
+{
+"t": "126 30 HAGERSTEN",
+"b": 15010,
+"x": 149,
+"y": 2204,
+"w": 214,
+"h": 21
+},
+{
+"t": "Email: info@inomec.se",
+"b": 16010,
+"x": 148,
+"y": 2238,
+"w": 230,
+"h": 23
+},
+{
+"t": "1SO-certifierad 9001/14001",
+"b": 17010,
+"x": 572,
+"y": 2240,
+"w": 267,
+"h": 18
+},
+{
+"t": "Momsreg-nr",
+"b": 18010,
+"x": 984,
+"y": 2136,
+"w": 134,
+"h": 31
+},
+{
+"t": "Bankgiro",
+"b": 18011,
+"x": 1277,
+"y": 2140,
+"w": 100,
+"h": 23
+},
+{
+"t": "SE556997284601",
+"b": 18010,
+"x": 984,
+"y": 2167,
+"w": 178,
+"h": 34
+},
+{
+"t": "5021-9674",
+"b": 18011,
+"x": 1277,
+"y": 2173,
+"w": 107,
+"h": 18
+}
+],
+"text": "Foljesedel\n1(1)\n\"\nDatum\nAvtalsnummer\n2026-10-05\n01-023957\nKundnummer\nLYFTUTHYRNING\n15618\nMarkell ittra\n4023848-4847\nLoveransadress\nAdress\nHercules Grundlaggning AB\nHercules Grundlaggning AB\nStrém 111 - 114, Rosersberg\nC8003\n0702075990\n190 83 Rosersberg\n195 95 Rosersberg\nLoveransvillkor\nKund debiteras frakt\nLoveranssatt\nFakturoreferens\nTransportounkten\nJim Lind\nEr referens\nLeveransdatum\nJim Lind\n2026-10-15\nVar roferens\nBidrn Héabera\nArtikel\nAnt Benadmning\nFran\n70.AIH\n1 Halcylinder 350 ton, haidiameter 150mm, egenvikt ca 200kg,\n2026-10-16\n420mm ytterdiam. 330mm hég\n4301600\n1. El hydraulpump 25 liter enkel/dubbelverkande, Eco-oil\n2026-10-16\n4423800\n1 Hydraulsiang 5 meter, Eco-oil\n2026-10-16\n4425900\n1 Hydraulsiang 5 meter, Eco-oil\n2026-10-16\n4422900\n1 Hydraulsiang 5 meter, Eco-oil\n2026-10-16\n4420300\n1 Hydraulslang 5 meter, Eco-oil\n2026-10-16\n70.000\n1 Adapter hane - hane\n2026-10-16\nFRAKT\n1 Fraktkostnad ut FM 15/10-26\n2026-10-16\nVi har depaer i Stockholm, Géteborg och Malmé.\nLas mer pa www.inomec.se och félj oss pa sociala medier.\no\noO\nHandhavande\nUndertecknad har tagit del av de anvisningar som erfordras for\nhandhavande samt tagit del av Inomecs hyresvillkor\nUnderskrift\nOvanstaende material utlamnad\nMottagen\nAlla hyror har minimidebitering, darefter per hyran per kalenderdag. Hyra debiteras for veckans alla dagar om inget annat avtalats. Se INOMEC hyresvilikor\nAganderattstorbehall\nForsalt material eller maskin férbiir sAjarens egendom till dess detta bivit till fullo betalt\nHyresmaterialet ar f6rsdkrat genom INOMEC hyresférsakring. Avgiften for forsAkringen laggs pa nettopriset.\nOBSERVERA! Om inte komplett skade/stdid-anmailan rapporterats till INOMEC inom 10 dagar debiteras hyra\nsamt fOrlust av material,\nInomec Stockholm\nTelefon\nVastberga Allé 60\n+46 8-53186045\n126 30 HAGERSTEN\nEmail: info@inomec.se\n1SO-certifierad 9001/14001\nMomsreg-nr\nBankgiro\nSE556997284601\n5021-9674"
+}

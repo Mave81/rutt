@@ -1,0 +1,663 @@
+{
+"w": 2200,
+"h": 3080,
+"lines": [
+{
+"t": "li OM EC",
+"b": 1010,
+"x": 204,
+"y": 72,
+"w": 607,
+"h": 134
+},
+{
+"t": "Féljesedel",
+"b": 1011,
+"x": 1237,
+"y": 68,
+"w": 251,
+"h": 73
+},
+{
+"t": "1(1)",
+"b": 1012,
+"x": 2036,
+"y": 82,
+"w": 61,
+"h": 36
+},
+{
+"t": "il =a",
+"b": 1010,
+"x": 598,
+"y": 114,
+"w": 111,
+"h": 94
+},
+{
+"t": "Datum",
+"b": 1011,
+"x": 1231,
+"y": 140,
+"w": 71,
+"h": 30
+},
+{
+"t": "Avtaisnummer",
+"b": 1012,
+"x": 1737,
+"y": 140,
+"w": 159,
+"h": 30
+},
+{
+"t": "2026-10-08",
+"b": 1010,
+"x": 1234,
+"y": 175,
+"w": 183,
+"h": 28
+},
+{
+"t": "01-023831",
+"b": 1011,
+"x": 1738,
+"y": 175,
+"w": 166,
+"h": 28
+},
+{
+"t": "Kundnummer",
+"b": 2010,
+"x": 1738,
+"y": 215,
+"w": 144,
+"h": 17
+},
+{
+"t": "LYFTUTHYRNING",
+"b": 2010,
+"x": 297,
+"y": 243,
+"w": 464,
+"h": 34
+},
+{
+"t": "18676",
+"b": 2011,
+"x": 1741,
+"y": 240,
+"w": 95,
+"h": 28
+},
+{
+"t": "Marko/t ittra",
+"b": 2010,
+"x": 1235,
+"y": 279,
+"w": 124,
+"h": 16
+},
+{
+"t": "PO209994",
+"b": 2010,
+"x": 1234,
+"y": 302,
+"w": 169,
+"h": 29
+},
+{
+"t": "Leveransadress",
+"b": 2010,
+"x": 189,
+"y": 401,
+"w": 171,
+"h": 31
+},
+{
+"t": "Adress",
+"b": 2011,
+"x": 1233,
+"y": 405,
+"w": 74,
+"h": 18
+},
+{
+"t": "Andritz Hydro AB",
+"b": 2010,
+"x": 194,
+"y": 437,
+"w": 246,
+"h": 31
+},
+{
+"t": "Andritz Hydro Sverige Fililal AB",
+"b": 2011,
+"x": 1234,
+"y": 436,
+"w": 447,
+"h": 32
+},
+{
+"t": "DONJE 2044, 821 94 Bolinds Dénje Kraftverk — Google",
+"b": 2010,
+"x": 196,
+"y": 470,
+"w": 790,
+"h": 36
+},
+{
+"t": "Box 1",
+"b": 2011,
+"x": 1236,
+"y": 474,
+"w": 75,
+"h": 25
+},
+{
+"t": "Maps",
+"b": 2010,
+"x": 196,
+"y": 511,
+"w": 77,
+"h": 31
+},
+{
+"t": "835 05 Nalden",
+"b": 2011,
+"x": 1235,
+"y": 511,
+"w": 207,
+"h": 26
+},
+{
+"t": "Magnus Ekman, 073 835 48 08",
+"b": 2010,
+"x": 196,
+"y": 548,
+"w": 446,
+"h": 32
+},
+{
+"t": "Leveransvilikor",
+"b": 2010,
+"x": 189,
+"y": 715,
+"w": 162,
+"h": 17
+},
+{
+"t": "Kund debiteras frakt",
+"b": 2010,
+"x": 190,
+"y": 740,
+"w": 320,
+"h": 28
+},
+{
+"t": "Leveranssitt",
+"b": 2010,
+"x": 189,
+"y": 795,
+"w": 136,
+"h": 18
+},
+{
+"t": "Fakturareferons",
+"b": 2011,
+"x": 1235,
+"y": 787,
+"w": 166,
+"h": 18
+},
+{
+"t": "Schenker",
+"b": 2010,
+"x": 190,
+"y": 795,
+"w": 151,
+"h": 57
+},
+{
+"t": "Jakob Faaqerbera",
+"b": 2011,
+"x": 1234,
+"y": 806,
+"w": 270,
+"h": 41
+},
+{
+"t": "Er referens",
+"b": 2010,
+"x": 189,
+"y": 867,
+"w": 116,
+"h": 18
+},
+{
+"t": "Leveransdatum",
+"b": 2011,
+"x": 1235,
+"y": 862,
+"w": 162,
+"h": 17
+},
+{
+"t": "Jakob Faaerbera",
+"b": 2010,
+"x": 189,
+"y": 903,
+"w": 270,
+"h": 27
+},
+{
+"t": "2026-09-24",
+"b": 2011,
+"x": 1234,
+"y": 889,
+"w": 183,
+"h": 28
+},
+{
+"t": "Var referens",
+"b": 2010,
+"x": 188,
+"y": 956,
+"w": 129,
+"h": 18
+},
+{
+"t": "Dan Anaservd",
+"b": 2010,
+"x": 190,
+"y": 983,
+"w": 225,
+"h": 29
+},
+{
+"t": "Artikel",
+"b": 2010,
+"x": 202,
+"y": 1052,
+"w": 107,
+"h": 50
+},
+{
+"t": "Reg.nr = Ant Benamning",
+"b": 2011,
+"x": 472,
+"y": 1052,
+"w": 461,
+"h": 50
+},
+{
+"t": "Fran",
+"b": 2012,
+"x": 1846,
+"y": 1056,
+"w": 70,
+"h": 28
+},
+{
+"t": "1160700",
+"b": 2010,
+"x": 212,
+"y": 1122,
+"w": 115,
+"h": 24
+},
+{
+"t": "1 Eltelfer 6,3-12,5 ton, Radiostyrning och manéverkabel,",
+"b": 2011,
+"x": 704,
+"y": 1122,
+"w": 783,
+"h": 30
+},
+{
+"t": "2026-09-28",
+"b": 2012,
+"x": 1846,
+"y": 1122,
+"w": 154,
+"h": 24
+},
+{
+"t": "transport bur",
+"b": 2010,
+"x": 756,
+"y": 1158,
+"w": 172,
+"h": 29
+},
+{
+"t": "1160702",
+"b": 2010,
+"x": 212,
+"y": 1203,
+"w": 114,
+"h": 24
+},
+{
+"t": "1",
+"b": 2011,
+"x": 704,
+"y": 1203,
+"w": 9,
+"h": 23
+},
+{
+"t": "- 2P-block Eltelfer 12,5 ton",
+"b": 2012,
+"x": 765,
+"y": 1202,
+"w": 356,
+"h": 27
+},
+{
+"t": "2026-09-28",
+"b": 2013,
+"x": 1846,
+"y": 1203,
+"w": 154,
+"h": 24
+},
+{
+"t": "FRAKT",
+"b": 2010,
+"x": 211,
+"y": 1246,
+"w": 98,
+"h": 38
+},
+{
+"t": "1 Fraktkostnad tillkommer DSV",
+"b": 2011,
+"x": 704,
+"y": 1250,
+"w": 445,
+"h": 24
+},
+{
+"t": "2026-09-28",
+"b": 2012,
+"x": 1846,
+"y": 1250,
+"w": 154,
+"h": 24
+},
+{
+"t": "1109400",
+"b": 2010,
+"x": 212,
+"y": 1293,
+"w": 115,
+"h": 38
+},
+{
+"t": "1 Eltelfer 6,3-12,5 ton, Radiostyrning, transport bur",
+"b": 2011,
+"x": 704,
+"y": 1297,
+"w": 709,
+"h": 30
+},
+{
+"t": "2026-10-08",
+"b": 2012,
+"x": 1846,
+"y": 1297,
+"w": 154,
+"h": 24
+},
+{
+"t": "1109402",
+"b": 2010,
+"x": 212,
+"y": 1338,
+"w": 114,
+"h": 41
+},
+{
+"t": "1",
+"b": 2011,
+"x": 704,
+"y": 1344,
+"w": 9,
+"h": 23
+},
+{
+"t": "- 2P-block Eltelfer 12,5 ton",
+"b": 2012,
+"x": 765,
+"y": 1344,
+"w": 356,
+"h": 26
+},
+{
+"t": "2026-10-08",
+"b": 2013,
+"x": 1846,
+"y": 1344,
+"w": 154,
+"h": 24
+},
+{
+"t": "Vi har depaer i Stockholm, Géteborg och Malmé.",
+"b": 2010,
+"x": 725,
+"y": 1444,
+"w": 850,
+"h": 37
+},
+{
+"t": "Las mer pa www.inomec.se och f6lj oss pa sociala medier.",
+"b": 2010,
+"x": 639,
+"y": 1486,
+"w": 1023,
+"h": 36
+},
+{
+"t": "Handhavande",
+"b": 2010,
+"x": 190,
+"y": 2102,
+"w": 203,
+"h": 25
+},
+{
+"t": "Undertecknad har tagit del av de anvisningar som erfordras for",
+"b": 2010,
+"x": 191,
+"y": 2145,
+"w": 867,
+"h": 31
+},
+{
+"t": "Ovanstaende material utlamnad",
+"b": 2011,
+"x": 1443,
+"y": 2145,
+"w": 442,
+"h": 25
+},
+{
+"t": "handhavande samt tagit del av Inomecs hyresvillkor",
+"b": 2010,
+"x": 190,
+"y": 2191,
+"w": 719,
+"h": 30
+},
+{
+"t": "Underskrift",
+"b": 2010,
+"x": 190,
+"y": 2249,
+"w": 117,
+"h": 19
+},
+{
+"t": "Namn",
+"b": 2010,
+"x": 190,
+"y": 2340,
+"w": 65,
+"h": 39
+},
+{
+"t": "Mottagen",
+"b": 2011,
+"x": 1444,
+"y": 2339,
+"w": 128,
+"h": 31
+},
+{
+"t": "Datum",
+"b": 2010,
+"x": 190,
+"y": 2454,
+"w": 67,
+"h": 17
+},
+{
+"t": "Alla hyror har minimidebitering, darefter loper hyran per kalenderdag. Hyra debiteras for veckans alla dagar om inget annat avtalats. Se INOMEC hyresvillkor",
+"b": 3010,
+"x": 196,
+"y": 2589,
+"w": 1725,
+"h": 25
+},
+{
+"t": "Aganderiittsforbehall",
+"b": 3010,
+"x": 196,
+"y": 2630,
+"w": 249,
+"h": 29
+},
+{
+"t": "Férsalt material eller maskin férblir sdljarens egendom till dess detta biivit till fullo betalt",
+"b": 3010,
+"x": 197,
+"y": 2679,
+"w": 955,
+"h": 25
+},
+{
+"t": "Hyresmaterialet ar forsakrat genom INOMEC hyresférsakring. Avgiften for férsakringen laggs pa nettopriset.",
+"b": 4010,
+"x": 197,
+"y": 2720,
+"w": 1228,
+"h": 25
+},
+{
+"t": "OBSERVERA! Om inte komplett skade/stéld-anmalan rapporterats till INOMEC inom 10 dagar debiteras hyra",
+"b": 4010,
+"x": 196,
+"y": 2749,
+"w": 1245,
+"h": 26
+},
+{
+"t": "samt forlust av material.",
+"b": 5010,
+"x": 196,
+"y": 2778,
+"w": 271,
+"h": 21
+},
+{
+"t": "Inomec Stockholm",
+"b": 5020,
+"x": 196,
+"y": 2872,
+"w": 276,
+"h": 25
+},
+{
+"t": "Telefon",
+"b": 5021,
+"x": 762,
+"y": 2868,
+"w": 111,
+"h": 39
+},
+{
+"t": "Momsreg-nr",
+"b": 5022,
+"x": 1317,
+"y": 2868,
+"w": 180,
+"h": 39
+},
+{
+"t": "Bankgiro",
+"b": 5023,
+"x": 1710,
+"y": 2872,
+"w": 134,
+"h": 31
+},
+{
+"t": "Vastberga Allé 60",
+"b": 5020,
+"x": 194,
+"y": 2916,
+"w": 240,
+"h": 30
+},
+{
+"t": "+46 8-53186045",
+"b": 5021,
+"x": 764,
+"y": 2916,
+"w": 220,
+"h": 24
+},
+{
+"t": "SE556997284601",
+"b": 5022,
+"x": 1316,
+"y": 2911,
+"w": 239,
+"h": 40
+},
+{
+"t": "5021-9674",
+"b": 5023,
+"x": 1710,
+"y": 2916,
+"w": 144,
+"h": 24
+},
+{
+"t": "126 30 HAGERSTEN",
+"b": 5020,
+"x": 198,
+"y": 2957,
+"w": 286,
+"h": 28
+},
+{
+"t": "Email: info@inomec.se",
+"b": 6010,
+"x": 196,
+"y": 3004,
+"w": 309,
+"h": 30
+},
+{
+"t": "1SO-certifierad 9001/14001",
+"b": 6011,
+"x": 764,
+"y": 3006,
+"w": 358,
+"h": 25
+}
+],
+"text": "li OM EC\nFéljesedel\n1(1)\nil =a\nDatum\nAvtaisnummer\n2026-10-08\n01-023831\nKundnummer\nLYFTUTHYRNING\n18676\nMarko/t ittra\nPO209994\nLeveransadress\nAdress\nAndritz Hydro AB\nAndritz Hydro Sverige Fililal AB\nDONJE 2044, 821 94 Bolinds Dénje Kraftverk — Google\nBox 1\nMaps\n835 05 Nalden\nMagnus Ekman, 073 835 48 08\nLeveransvilikor\nKund debiteras frakt\nLeveranssitt\nFakturareferons\nSchenker\nJakob Faaqerbera\nEr referens\nLeveransdatum\nJakob Faaerbera\n2026-09-24\nVar referens\nDan Anaservd\nArtikel\nReg.nr = Ant Benamning\nFran\n1160700\n1 Eltelfer 6,3-12,5 ton, Radiostyrning och manéverkabel,\n2026-09-28\ntransport bur\n1160702\n1\n- 2P-block Eltelfer 12,5 ton\n2026-09-28\nFRAKT\n1 Fraktkostnad tillkommer DSV\n2026-09-28\n1109400\n1 Eltelfer 6,3-12,5 ton, Radiostyrning, transport bur\n2026-10-08\n1109402\n1\n- 2P-block Eltelfer 12,5 ton\n2026-10-08\nVi har depaer i Stockholm, Géteborg och Malmé.\nLas mer pa www.inomec.se och f6lj oss pa sociala medier.\nHandhavande\nUndertecknad har tagit del av de anvisningar som erfordras for\nOvanstaende material utlamnad\nhandhavande samt tagit del av Inomecs hyresvillkor\nUnderskrift\nNamn\nMottagen\nDatum\nAlla hyror har minimidebitering, darefter loper hyran per kalenderdag. Hyra debiteras for veckans alla dagar om inget annat avtalats. Se INOMEC hyresvillkor\nAganderiittsforbehall\nFérsalt material eller maskin férblir sdljarens egendom till dess detta biivit till fullo betalt\nHyresmaterialet ar forsakrat genom INOMEC hyresférsakring. Avgiften for férsakringen laggs pa nettopriset.\nOBSERVERA! Om inte komplett skade/stéld-anmalan rapporterats till INOMEC inom 10 dagar debiteras hyra\nsamt forlust av material.\nInomec Stockholm\nTelefon\nMomsreg-nr\nBankgiro\nVastberga Allé 60\n+46 8-53186045\nSE556997284601\n5021-9674\n126 30 HAGERSTEN\nEmail: info@inomec.se\n1SO-certifierad 9001/14001"
+}
