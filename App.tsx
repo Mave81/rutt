@@ -9,7 +9,7 @@ import {
   FlatList, ActivityIndicator, ScrollView, Keyboard, Share, Vibration, NativeModules, PermissionsAndroid, Platform, useColorScheme, Linking,
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
-import {C, themed, hhmm, isFutureDay, applyTheme, prettyPhone} from './src/ui/theme';
+import {C, themed, hhmm, isFutureDay, applyTheme, prettyPhone, slack} from './src/ui/theme';
 import {Bi} from './src/ui/Bi';
 import {Sheet} from './src/ui/parts';
 import OrdersView, {DoneView, setNavApp, NavApp} from './src/ui/OrdersView';
@@ -31,7 +31,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '19 okt · klara order ligger kvar under Klart hela dagen (som Opter), inloggad utan order = skarpt läge, helbild via Gmail';
+const BUILD = '19 okt · chattbubblor klipper inte sista ordet (Samsung), klara order kvar under Klart, inloggad = skarpt läge';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -1165,7 +1165,7 @@ function ChatView({msgs, msgText, setMsgText, onSend, onRetry}: any) {
               <Pressable disabled={!failed} onPress={() => onRetry && onRetry(item)} style={[s.bubbleWrap, item.received ? s.bwL : s.bwR]}>
                 <View style={[s.bubble, item.received ? s.bubbleIn : s.bubbleOut, item.local && item.state === 'sending' && {opacity: 0.6}, failed && {borderWidth: 1, borderColor: C.bad}]}>
                   {/* textBreakStrategy="simple": Samsung-typsnitt mäts olika mot hur de ritas → sista ordet ("07.00") klipptes bort. */}
-                  <Text style={s.bubbleTxt} textBreakStrategy="simple" android_hyphenationFrequency="none">{item.text}</Text>
+                  <Text style={s.bubbleTxt} textBreakStrategy="simple" android_hyphenationFrequency="none">{slack(item.text)}</Text>
                 </View>
                 <Text style={[s.bubbleStamp, item.received ? s.stampL : s.stampR, failed && {color: C.bad}]}>
                   {stamp(item)}{status}

@@ -9,7 +9,7 @@
  */
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {AppState, DeviceEventEmitter, FlatList, Linking, NativeModules, PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
-import {C, themed, hhmm, prettyPhone} from './theme';
+import {C, themed, hhmm, prettyPhone, slack} from './theme';
 import {Sheet, useKeyboardLift} from './parts';
 import {Bi} from './Bi';
 import {loadJSON, saveJSON} from '../store';
@@ -356,7 +356,7 @@ function SmsThread({j, c, onBack, onDial}: {j: ReturnType<typeof useJobbet>; c: 
             renderItem={({item: m}) => (
               <Pressable disabled={!(m.local && m.state === 'failed')} onPress={() => send(m.body)} style={[x.bw, m.out ? {alignSelf: 'flex-end'} : {alignSelf: 'flex-start'}]}>
                 <View style={[x.bb, m.out ? x.bbSms : x.bbIn, (m.state === 'failed' || m.failed) && {borderWidth: 1, borderColor: C.bad}, m.state === 'sending' && {opacity: 0.6}]}>
-                  <Text style={x.bbT} textBreakStrategy="simple">{m.body}</Text>
+                  <Text style={x.bbT} textBreakStrategy="simple">{slack(m.body)}</Text>
                 </View>
                 <Text style={[x.bst, m.out ? {textAlign: 'right', marginRight: 6} : {marginLeft: 6}, (m.state === 'failed' || m.failed) && {color: C.bad}]}>
                   {m.out ? '' : `${first} · `}{whenShort(m.date)}{status(m)}{m.local && m.state === 'failed' ? ' – tryck för att försöka igen' : ''}

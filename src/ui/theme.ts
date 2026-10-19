@@ -72,3 +72,7 @@ export function prettyPhone(n: string): string {
   for (const k of g) { out.push(r.slice(i, i + k)); i += k; }
   return `${a}-${out.filter(Boolean).join(' ')}`;
 }
+
+// Samsung ritar typsnittet en aning bredare än React Native mäter → sista ordet i en bubbla kan hamna på en
+// rad som inte syns. Några hårda mellanslag sist ger bubblan marginal (syns inte, bryts inte bort).
+export const slack = (t: string) => (t ? t + '\u00A0'.repeat(Math.min(5, 2 + Math.ceil(String(t).length / 14))) : t);
