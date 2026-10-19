@@ -31,7 +31,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '19 okt · Skicka orderdata till Claude via Gmail (RUTT-DATA)';
+const BUILD = '19 okt · klara order ligger kvar under Klart hela dagen (som Opter), inloggad utan order = skarpt läge, helbild via Gmail';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -172,18 +172,19 @@ function AppInner(): React.JSX.Element {
       const d: any = await client.dump();
       d.crashes = await loadJSON(CRASH_KEY, []);
       d.build = BUILD;
-      const json = JSON.stringify(d);
-      // Direkt till din server (forre.nu/rutt/dump.php) – Claude läser filen på datorn. Ingen delningsmeny, ingen storleksgräns.
-      let sent = '', why = '';
-      try {
-        const r = await fetch('https://forre.nu/rutt/dump.php', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: json});
-        const j: any = await r.json().catch(() => null);
-        if (r.ok && j && j.ok) sent = `${Math.round(json.length / 1024)} kB`; else why = (j && j.err) || `svar ${r.status}`;
-      } catch (e: any) { why = String(e?.message || e); }
-      if (sent) { flash(`Orderdata skickad till Claude · ${sent}`, null); return; }
-      // Reserv: dela-menyn klarar bara mindre text (Android-gräns), så skicka en kortad version.
-      const small = json.length > 400000 ? JSON.stringify({...d, rows: (d.rows || []).filter((r: any) => /^(Shipment|Address|DefaultPodType|Setting)/.test(r.t)).slice(0, 1500), trimmed: true, uploadErr: why}) : json;
-      await Share.share({title: 'RUTT orderdata', message: 'RUTT-DATA v1\n' + small.slice(0, 450000)});
+      d.sendLog = client.log;
+      let json = JSON.stringify(d);
+      // Via Gmail till dig själv (RUTT-DATA) – Claude läser mejlet. Androids gräns för delad text ~1 MB → kortas vid behov.
+      if (json.length > 190000) {
+        const keep = /^(Shipment|DefaultPodType|Office|Setting|ResourceStatusLog)/;
+        const small = {...d, rows: (d.rows || []).filter((r: any) => keep.test(r.t) && (r.t !== 'Setting' || /pod|permission|status|give/i.test(String(r.c && r.c.name || '')))), trimmed: true};
+        json = JSON.stringify(small);
+        if (json.length > 190000) json = JSON.stringify({...small, rows: small.rows.filter((r: any) => /^(Shipment|ShipmentStatusLog|ShipmentPod|ShipmentStatus|DefaultPodType)$/.test(r.t))});
+      }
+      const subj = 'RUTT-DATA helbild ' + new Date().toLocaleTimeString('sv-SE').slice(0, 5);
+      if (NativeModules.RuttSms && NativeModules.RuttSms.email) await NativeModules.RuttSms.email('kenta81@gmail.com', subj, json.slice(0, 200000));
+      else await Share.share({title: subj, message: json.slice(0, 200000)});
+      flash('Gmail öppnas – tryck Skicka', null);
     } catch (e: any) { setErr('Kunde inte skicka orderdata: ' + String(e?.message || e)); }
     finally { setDiagBusy(false); setDiag(false); }
   }
@@ -214,7 +215,35 @@ function AppInner(): React.JSX.Element {
     [resources, query],
   );
 
-  const fullSrc: any = demo ? DEMO : orders.stops.length ? orders : null; // demo går att slå på när som helst (Inställningar)
+  // Dagens order sparas i telefonen. Opter slutar skicka en order när kontoret klarmarkerat den, men Opter Driver
+  // visar den ändå under Klart resten av dagen (lokalt sparad) – RUTT gör likadant.
+  const [dayCache, setDayCache] = useState<{day: string; stops: Record<string, any>; cargo: Record<string, any>}>({day: '', stops: {}, cargo: {}});
+  const dayLoaded = useRef(false);
+  useEffect(() => { loadJSON('rutt.daystops.v1', null).then((v: any) => { if (v && v.day === new Date().toDateString()) setDayCache(c => ({day: v.day, stops: {...(v.stops || {}), ...c.stops}, cargo: {...(v.cargo || {}), ...c.cargo}})); dayLoaded.current = true; }); }, []);
+  useEffect(() => {
+    if (demo || !orders.stops.length) return;
+    setDayCache(c => {
+      const day = new Date().toDateString();
+      const base = c.day === day ? c : {day, stops: {}, cargo: {}};
+      const stops = {...base.stops}, cargo = {...base.cargo, ...orders.cargo};
+      for (const x of orders.stops) stops[(x.pickup ? 'p' : 'd') + String(x.pickup || x.drop)] = x;
+      const n = {day, stops, cargo};
+      if (dayLoaded.current) saveJSON('rutt.daystops.v1', n);
+      return n;
+    });
+  }, [orders, demo]);
+  const ordersAll: any = useMemo(() => {
+    if (demo) return orders;
+    const have = new Set(orders.stops.map((x: any) => String(x.pickup || x.drop)));
+    const extra = Object.values(dayCache.stops).filter((x: any) => {
+      const cid = String(x.pickup || x.drop);
+      if (have.has(cid)) return false;
+      const L = x.live || {};
+      return !!((ost[cid] && ost[cid].doneAt) || L.tab === 'done' || L.serverDone); // bara klara order ligger kvar
+    }).map((x: any) => ({...x, live: x.live ? {...x.live, gone: true} : x.live}));
+    return extra.length ? {...orders, cargo: {...dayCache.cargo, ...orders.cargo}, stops: [...orders.stops, ...extra]} : orders;
+  }, [orders, dayCache, ost, demo]);
+  const fullSrc: any = demo ? DEMO : ordersAll.stops.length ? ordersAll : null; // demo går att slå på när som helst (Inställningar)
   // ---- Var hör varje order hemma? Opters regler (live.tab) + dina tryck i RUTT ----
   const cidsAll: string[] = useMemo(() => (fullSrc ? [...new Set(fullSrc.stops.map((s: any) => String(s.pickup || s.drop)))] as string[] : []), [fullSrc]);
   const legs = (cid: string) => ({pick: fullSrc.stops.find((s: any) => String(s.pickup) === cid), drop: fullSrc.stops.find((s: any) => String(s.drop) === cid)});
@@ -248,7 +277,7 @@ function AppInner(): React.JSX.Element {
     }
     return {src: {cargo: fullSrc.cargo, stops: keep}, later: lat};
   }, [fullSrc, cidsAll, cls]);
-  const live = !demo && orders.stops.length > 0; // skarpt läge = riktiga jobb inloggade
+  const live = !demo && (orders.stops.length > 0 || online === 'ja'); // skarpt läge = inloggad mot Opter (även utan order)
   // Står ordern redan som Lastad i Opter (t.ex. satt i Opter Driver)?
   const serverLoaded = (s: any) => !!(s.live && s.live.loadSt && s.live.curId === s.live.loadSt.id);
   const route = useMemo(() => {
