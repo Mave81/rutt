@@ -31,7 +31,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '19 okt · Skicka orderdata till Claude: lagom stort mejl som Gmail tar emot, fel syns';
+const BUILD = '19 okt · Skicka till Claude: rad överst visar hämtar → Gmail öppnad → eller felet';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -134,6 +134,7 @@ function AppInner(): React.JSX.Element {
   const [editFor, setEditFor] = useState<{cid: string; st: any; done: boolean} | null>(null); // order som ändras (Klart eller planen)
   const addTimers = useRef<Record<string, any>>({}); // tillägg valda vid lossning – skickas när Ångra gått ut
   const [toast, setToast] = useState<{text: string; undo: (() => void) | null} | null>(null);
+  const [claudeSend, setClaudeSend] = useState<{text: string; state: 'busy' | 'ok' | 'err'} | null>(null); // Skicka till Claude – syns hela vägen
   const toastTimer = useRef<any>(null);
   const [diag, setDiag] = useState(false);
   const [driverName, setDriverName] = useState('');
@@ -167,6 +168,7 @@ function AppInner(): React.JSX.Element {
   // Skicka rådata från Opter (via telefonens dela-meny → Gmail till dig själv) så Claude kan läsa den.
   // Data till Claude via din Gmail. Android klarar ungefär 1 MB text mellan appar (och Gmail dubblar den) →
   // högst ~90 000 tecken: viktigast först (sändlogg, order, statusar, kvittenser), resten kortas bort men JSON hålls hel.
+  const withTimeout = <T,>(p: Promise<T>, ms: number, what: string) => Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error(what + ' svarade inte på ' + Math.round(ms / 1000) + ' s')), ms))]);
   async function mailToClaude(subject: string, d: any) {
     const MAX = 90000;
     const prio = ['Shipment', 'ShipmentStatusLog', 'ShipmentPod', 'ShipmentPackagePod', 'DefaultPodType', 'ShipmentStatus', 'ShipmentPodType', 'ShipmentPackage', 'Setting', 'Office', 'ResourceStatusLog'];
@@ -178,21 +180,31 @@ function AppInner(): React.JSX.Element {
     let json = pack();
     while (json.length > MAX && rows.length) { rows = rows.slice(0, Math.floor(rows.length * 0.8)); json = pack(); }
     while (json.length > MAX && log.length > 5) { log = log.slice(-Math.floor(log.length * 0.7)); json = pack(); }
-    if (NativeModules.RuttSms && NativeModules.RuttSms.email) await NativeModules.RuttSms.email('kenta81@gmail.com', subject, json);
-    else await Share.share({title: subject, message: json});
-    flash('Gmail öppnas – tryck Skicka', null);
+    setClaudeSend({text: 'Öppnar Gmail…', state: 'busy'});
+    try {
+      if (!(NativeModules.RuttSms && NativeModules.RuttSms.email)) throw new Error('mejl saknas i den här versionen');
+      await NativeModules.RuttSms.email('kenta81@gmail.com', subject, json);
+    } catch (e) {
+      await Share.share({title: subject, message: json}); // reserv: telefonens dela-meny
+    }
+    setClaudeSend({text: `Gmail öppnad (${Math.round(json.length / 1024)} kB) – tryck Skicka i Gmail`, state: 'ok'});
+    setTimeout(() => setClaudeSend(c => (c && c.state === 'ok' ? null : c)), 20000);
   }
   async function sendDump() {
-    if (!client.logon) { setErr('Logga in mot Opter först.'); setDiag(false); return; }
+    setDiag(false); // stäng Inställningar direkt så det som händer syns
+    if (!client.logon) { setClaudeSend({text: 'Inte inloggad mot Opter – logga in först', state: 'err'}); return; }
     setDiagBusy(true);
+    setClaudeSend({text: 'Hämtar data från Opter…', state: 'busy'});
     try {
-      const d: any = await client.dump();
+      let d: any;
+      try { d = await withTimeout(client.dump(), 20000, 'Opter'); } catch (e: any) { d = {app: 'RUTT', rows: [], note: 'kunde inte hämta från Opter: ' + String(e?.message || e)}; }
       d.crashes = await loadJSON(CRASH_KEY, []);
       d.build = BUILD;
       d.sendLog = client.log;
+      d.local = Object.fromEntries(Object.entries(ost).map(([k, o]: any) => [k, {...o, pod: o && o.pod ? {name: o.pod.name, typeId: o.pod.typeId, kolli: o.pod.kolli, photos: (o.pod.photos || []).length, sigStrokes: o.pod.sig ? (o.pod.sig.strokes || []).length : 0} : null}]));
       await mailToClaude('RUTT-DATA helbild ' + new Date().toLocaleTimeString('sv-SE').slice(0, 5), d);
-    } catch (e: any) { flash('Kunde inte skicka: ' + String(e?.message || e), null); }
-    finally { setDiagBusy(false); setDiag(false); }
+    } catch (e: any) { setClaudeSend({text: 'Kunde inte skicka: ' + String(e?.message || e), state: 'err'}); }
+    finally { setDiagBusy(false); }
   }
 
   const [server, setServer] = useState('foriase.opter.cloud');
@@ -416,12 +428,13 @@ function AppInner(): React.JSX.Element {
   // Kvittensen som sparades vid lossningen (signatur + namn) skickas till Opter igen, utan ny signatur.
   // En order till Claude (från Klart eller planen): serverns rader för ordern + vad RUTT skickat + det RUTT har sparat.
   async function sendOrderDump(cid: string, st: any) {
-    if (!client.logon) { flash('Logga in mot Opter först', null); return; }
-    flash('Hämtar ordern från Opter…', null);
+    if (!client.logon) { setClaudeSend({text: 'Inte inloggad mot Opter – logga in först', state: 'err'}); return; }
+    setClaudeSend({text: 'Hämtar ordern från Opter…', state: 'busy'});
     try {
       // Finns ordern inte längre i Opters lista skickas hela helbilden + hela sändloggen i stället.
       const L = st && st.live;
-      const d: any = L ? await client.orderDump(L.shiId) : await client.dump();
+      let d: any;
+      try { d = await withTimeout<any>((L ? client.orderDump(L.shiId) : client.dump()) as Promise<any>, 20000, 'Opter'); } catch (e: any) { d = {rows: [], fresh: false, note: String(e?.message || e)}; }
       if (!L) d.sendLog = client.log;
       const o = ost[cid] || {};
       const local = {...o, pod: o.pod ? {...o.pod, photos: (o.pod.photos || []).length, sig: o.pod.sig ? {strokes: (o.pod.sig.strokes || []).length, points: (o.pod.sig.strokes || []).reduce((n: number, x: any[]) => n + x.length, 0)} : null} : null};
@@ -429,7 +442,7 @@ function AppInner(): React.JSX.Element {
         live: L ? {key: L.key, curId: L.curId, unloadSt: L.unloadSt, loadSt: L.loadSt, podType: L.podType, hasSpt: L.hasSpt, packageIds: L.packageIds} : null,
         fresh: d.fresh, local, sendLog: d.sendLog, rows: d.rows});
       await mailToClaude(`RUTT-DATA order ${(st && st.orderNo) || cid}`, JSON.parse(body));
-    } catch (e: any) { flash('Kunde inte skicka: ' + String(e?.message || e), null); }
+    } catch (e: any) { setClaudeSend({text: 'Kunde inte skicka: ' + String(e?.message || e), state: 'err'}); }
   }
   async function resendSavedPod(cid: string, st: any) {
     const pod = podMem.current[cid] || (ost[cid] || {}).pod;
@@ -1117,6 +1130,16 @@ function AppInner(): React.JSX.Element {
         />
       )}
 
+      {claudeSend && (
+        <Pressable style={[s.claudeBar, claudeSend.state === 'err' && {borderColor: C.bad}]} onPress={() => claudeSend.state !== 'busy' && setClaudeSend(null)}>
+          {claudeSend.state === 'busy' ? <ActivityIndicator size="small" color={C.accent} /> : <Bi n={claudeSend.state === 'ok' ? 'check-circle-fill' : 'exclamation-triangle-fill'} size={18} color={claudeSend.state === 'ok' ? C.accent2 : C.bad} />}
+          <View style={{flex: 1, minWidth: 0}}>
+            <Text style={s.claudeT}>Skicka till Claude</Text>
+            <Text style={s.claudeS}>{claudeSend.text}</Text>
+          </View>
+          {claudeSend.state !== 'busy' ? <Bi n="x-lg" size={14} color={C.dim} /> : null}
+        </Pressable>
+      )}
       {toast && (
         <View style={s.toast} pointerEvents="box-none">
           <Bi n="check-circle-fill" size={18} color={C.accent2} />
@@ -1269,6 +1292,9 @@ const s = themed(() => StyleSheet.create({
   logoutBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 20, height: 52, borderRadius: 12, backgroundColor: C.badSoft},
   logoutTxt: {color: C.bad, fontSize: 15.5, fontWeight: '800'},
   moreNew: {color: C.accentInk, fontSize: 12.5, fontWeight: '900'},
+  claudeBar: {position: 'absolute', left: 12, right: 12, top: 8, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 14, elevation: 8, shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 10, shadowOffset: {width: 0, height: 4}},
+  claudeT: {color: C.ink, fontSize: 14.5, fontWeight: '900'},
+  claudeS: {color: C.dim, fontSize: 13, marginTop: 1},
   breakClock: {color: C.ink, fontSize: 26, fontWeight: '900', fontVariant: ['tabular-nums'], letterSpacing: 0.5, marginTop: 1},
   breakCard: {flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.badSoft, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 12},
   breakIco: {width: 42, height: 42, borderRadius: 21, backgroundColor: C.panel, alignItems: 'center', justifyContent: 'center'},

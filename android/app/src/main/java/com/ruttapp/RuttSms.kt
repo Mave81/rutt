@@ -168,7 +168,9 @@ class RuttSmsModule(private val rc: ReactApplicationContext) : ReactContextBaseJ
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
       }
       val gm = Intent(base).setPackage("com.google.android.gm")
-      try { rc.startActivity(gm) } catch (e: Throwable) { rc.startActivity(Intent.createChooser(base, subject).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+      // Från appens eget fönster när det finns (säkrast på nyare Android), annars från appen.
+      val ctx: Context = rc.currentActivity ?: rc
+      try { ctx.startActivity(gm) } catch (e: Throwable) { ctx.startActivity(Intent.createChooser(base, subject).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
       p.resolve(true)
     } catch (e: Throwable) { p.reject("email", e) }
   }
