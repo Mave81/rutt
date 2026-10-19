@@ -38,6 +38,7 @@ export function NewOrderCard({item, cargo, compact, onAccept, onReject, onForwar
         <Text style={[n.who, compact && {fontSize: 16}]} numberOfLines={1}>{s.who || '—'}</Text>
         <Text style={n.adr} numberOfLines={1}>{[s.adr, s.area].filter(Boolean).join(', ')}</Text>
         <Text style={n.time}>{[s.tEarliest && `Tidigast ${whenText(s.tEarliest)}`, s.tLatest && `Senast ${whenText(s.tLatest)}`].filter(Boolean).join('  ·  ') || 'Ingen tid angiven'}</Text>
+        {s.tidspass ? <Text style={[n.time, {color: C.accentInk, fontWeight: '900'}]}>TIDSPASSNING{s.tidspass.time ? ` kl ${s.tidspass.time}` : ' – tiden står inte i ordern'}</Text> : null}
       </View>
     </View>
   );

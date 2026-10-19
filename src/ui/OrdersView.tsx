@@ -419,6 +419,12 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
           <Bi n="clock" size={13} color={C.dim} />
           <Text style={o.fMetaTxt}>{[pl.eta ? `ca ${hhmm(pl.eta)}` : '', latest ? `senast ${whenText(latest)}` : ''].filter(Boolean).join('  ·  ') || 'Ingen tid angiven'}</Text>
         </View>
+        {all.filter(r => r.st.tidspass).slice(0, 1).map(r => (
+          <View key="tp" style={[o.avise, {backgroundColor: C.accent}]}>
+            <Bi n="alarm-fill" size={16} color={C.onAccent} />
+            <Text style={[o.aviseT, {flex: 1, fontSize: 14, color: C.onAccent}]}>{r.st.tidspass.time ? `Tidspassning kl ${r.st.tidspass.time}` : 'Tidspassning – tiden står inte i ordern'}</Text>
+          </View>
+        ))}
         {!!st.code && (
           <View style={o.fCode}><Bi n="key-fill" size={18} color={C.accentInk} /><Text style={o.fCodeT}>{st.code}</Text><Text style={o.fCodeL}>PORTKOD</Text></View>
         )}

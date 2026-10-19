@@ -29,7 +29,8 @@ export default function PlanDay({route, cargo, onReorder, starts = [], startId, 
     const late = (route && route.plan && route.plan.broken) || [];
     const nogeo = order.filter((s: any) => s.lat == null).length;
     const est = rows.filter((r: any, i: number) => i > 0 && r && r.leg && r.leg.est && !r.nogeo).length;
-    return {cids, pal, peak, blocks: sim.blocks || [], late, end: route && route.plan && route.plan.end, nogeo, est};
+    const tps = order.map((s: any, i: number) => ({s, r: rows[i]})).filter((x: any) => x.s.tidspass);
+    return {cids, pal, peak, blocks: sim.blocks || [], late, end: route && route.plan && route.plan.end, nogeo, est, tps};
   }, [route, cargo]);
   if (!route || !order.length) return <View style={p.empty}><Bi n="calendar-event" size={30} color={C.faint} /><Text style={p.emptyT}>Inga order för imorgon än.</Text></View>;
   const date = route.day ? new Date(route.day + 'T12:00').toLocaleDateString('sv-SE', {weekday: 'long', day: 'numeric', month: 'long'}) : '';
@@ -54,6 +55,12 @@ export default function PlanDay({route, cargo, onReorder, starts = [], startId, 
           {info.late.length ? <Text style={[p.sumS, {color: C.bad}]}>{info.late.length} stopp blir sena: {info.late.map((x: any) => `${x.s.who || '—'} (${x.late} min)`).join(', ')}</Text> : null}
           {info.blocks.length ? <Text style={[p.sumS, {color: C.bad}]}>Måste lasta om: {info.blocks.length} gång{info.blocks.length > 1 ? 'er' : ''} – gods står i vägen</Text> : null}
           {ok ? <Text style={p.sumS}>Alla tider hålls · inget behöver lastas om · som mest {info.peak} pall ombord</Text> : null}
+          {info.tps.map((x: any) => (
+            <View key={'tp' + (x.s.pickup || x.s.drop)} style={p.tp}>
+              <Bi n="alarm-fill" size={14} color={C.onAccent} />
+              <Text style={p.tpT}>Tidspassning {x.s.who || ''}{x.s.tidspass.time ? ` kl ${x.s.tidspass.time}` : ' – tiden står inte i ordern, kolla med kontoret'}{x.s.tidspass.time && x.r && x.r.eta ? ` · du är där ca ${hhmm(new Date(x.r.eta))}` : ''}</Text>
+            </View>
+          ))}
           {info.nogeo ? <Text style={[p.sumS, {color: C.bad}]}>{info.nogeo} stopp hittas inte på kartan – körtiden dit är okänd, ordningen kan bli fel</Text>
             : info.est ? <Text style={p.sumS}>Körtider uppskattade (inget svar från kartan än)</Text>
             : <Text style={p.sumS}>Körtider längs vägarna (OpenStreetMap)</Text>}
@@ -70,6 +77,7 @@ export default function PlanDay({route, cargo, onReorder, starts = [], startId, 
               <Bi n={s.pickup ? 'box-arrow-up-right' : 'check2'} size={15} color={s.pickup ? C.accentInk : C.accent2} />
               <View style={{flex: 1, minWidth: 0}}>
                 <Text style={p.who} numberOfLines={1}>{s.who || s.adr || '—'}</Text>
+                {s.tidspass ? <Text style={p.tpS} numberOfLines={1}>TIDSPASSNING{s.tidspass.time ? ` kl ${s.tidspass.time}` : ' – tid saknas'}</Text> : null}
                 <Text style={p.sub} numberOfLines={1}>{sub}</Text>
               </View>
               <Text style={[p.tm, r.late ? {color: C.bad} : null]}>{r.eta ? `ca ${hhmm(new Date(r.eta))}` : ''}</Text>
@@ -112,5 +120,8 @@ const p = themed(() => StyleSheet.create({
   chipOn: {backgroundColor: C.accent},
   chipT: {color: C.ink, fontSize: 13, fontWeight: '700'},
   chipTOn: {color: C.onAccent},
+  tp: {flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.accent, borderRadius: 8, paddingVertical: 7, paddingHorizontal: 10, marginTop: 5},
+  tpT: {color: C.onAccent, fontSize: 13, fontWeight: '800', flex: 1},
+  tpS: {color: C.accentInk, fontSize: 11.5, fontWeight: '900', letterSpacing: 0.4, marginTop: 1},
   note: {color: C.faint, fontSize: 12, marginTop: 10, paddingHorizontal: 2},
 }));
