@@ -22,10 +22,11 @@ import {loadJSON, saveJSON, ORDERS_KEY, NAMES_KEY, companyKey, rememberName} fro
 import * as DB from './src/dagbok';
 import DagbokView from './src/ui/DagbokView';
 import PlanDay from './src/ui/PlanDay';
+import MediaViewer from './src/ui/MediaViewer';
 const TRAVEL = require('./src/opter/travel');
 import {baseDriveMin, SERVICE_MIN, PAL_MIN} from './src/opter/optimizer';
 import {Buffer} from 'buffer';
-import {PixelRatio, BackHandler, AppState} from 'react-native';
+import {PixelRatio, BackHandler, AppState, DeviceEventEmitter, NativeModules as NM} from 'react-native';
 // @ts-ignore
 import P from './src/opter/protocol';
 // @ts-ignore
@@ -39,7 +40,7 @@ const STARTS = [
   {id: 'vb', lat: 59.2938, lng: 18.0127, label: 'Västberga', end: '15:00'},
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
-// Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
+const BUILD = '19 okt · 3.28 · bilder och PDF från Joel i Jobbet, Dela → RUTT, tidspasning med ett s';
 const BUILD = '19 okt · 3.27 · tidspassning visas (Plan, Imorgon, nya order) och styr tiden när den står i ordern';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
@@ -132,6 +133,16 @@ function AppInner(): React.JSX.Element {
   const [manualLater, setManualLater] = useState<{day: string; keys: string[]} | null>(null); // din ordning för en kommande dag (yyyy-mm-dd)
   const [travelVer, setTravelVer] = useState(0); // nya riktiga körtider / ny inlärd faktor → räkna om rutten
   const [planDay, setPlanDay] = useState<'idag' | 'imorgon'>('idag');
+  // Dela → RUTT: bild eller PDF från en annan app (t.ex. Inomecs sedel i Meddelanden) öppnas direkt.
+  const [shared, setShared] = useState<any[]>([]);
+  useEffect(() => {
+    const SMSM: any = NM.RuttSms; if (!SMSM || !SMSM.getShared) return;
+    const take = () => SMSM.getShared().then((l: any[]) => { if (l && l.length) setShared(x => [...x, ...l.filter(m => m.kind !== 'text')]); }).catch(() => {});
+    take();
+    const a = DeviceEventEmitter.addListener('ruttSms', (ev: any) => { if (ev && ev.type === 'shared') take(); });
+    const b = AppState.addEventListener('change', (st: string) => { if (st === 'active') take(); });
+    return () => { a.remove(); b.remove(); };
+  }, []);
   const [klartView, setKlartView] = useState<'idag' | 'dagbok'>('idag');
 
   // Arbetstid, stopp-status och POD
@@ -951,6 +962,7 @@ function AppInner(): React.JSX.Element {
 
   return (
     <SafeAreaView style={s.safe} edges={['top']} key={'root-' + mode}>
+      <MediaViewer media={shared[0] || null} title={shared.length > 1 ? `Delat till RUTT · 1 av ${shared.length}` : 'Delat till RUTT'} onClose={() => setShared(x => x.slice(1))} />
       <StatusBar barStyle={C.mode === 'light' ? 'dark-content' : 'light-content'} backgroundColor={C.bg} />
       <View style={s.head}>
         <View style={s.headTop}>

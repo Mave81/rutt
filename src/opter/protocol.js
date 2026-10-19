@@ -679,12 +679,12 @@ function extractPhones(text) {
  * Tiden letas i texten nära ordet ("tidspassning 09:00", "tidspass kl 9"), annars orderns senast-tid. time null = tiden saknas. */
 function tidspass(names, texts, tLatest) {
   const all = [...(names || []), ...(texts || [])].map(x => String(x || ''));
-  if (!all.some(x => /tidspass/i.test(x))) return null;
+  if (!all.some(x => /tids?pas/i.test(x))) return null;
   let time = null;
   for (const x of all) {
-    const i = x.toLowerCase().indexOf('tidspass'); if (i < 0) continue;
+    const mm = x.toLowerCase().match(/tids?pas/); if (!mm) continue; const i = mm.index;
     const near = x.slice(Math.max(0, i - 25), i + 60);
-    const m = near.match(/\b([01]?\d|2[0-3])[:.]([0-5]\d)\b/) || near.match(/\bkl\.?\s*([01]?\d|2[0-3])(?:[:.]([0-5]\d))?\b/i);
+    const m = near.match(/\b([01]?\d|2[0-3])[:.;]([0-5]\d)\b/) || near.match(/\bkl\.?\s*([01]?\d|2[0-3])(?:[:.]([0-5]\d))?\b/i);
     if (m) { time = String(m[1]).padStart(2, '0') + ':' + (m[2] || '00'); break; }
   }
   if (!time && tLatest && tLatest.hhmm) time = tLatest.hhmm;

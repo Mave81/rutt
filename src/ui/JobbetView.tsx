@@ -5,14 +5,15 @@
  *  - Folk: Lägg till kontakt · Egna (verkstad, lager, kunder …) · Förare från Opter (aktiva förare, samma lista som "Ge bort").
  * Förarnas nummer finns inte i Opter – du lägger in dem en gång (skriv eller välj ur kontakterna). Allt sparas i telefonen.
  * SMS: vanliga SMS via telefonen (RuttSms). Opter-meddelanden är orange, SMS blå, så det syns vilken väg det går.
- * Chattmeddelanden (RCS) och bilder (MMS) syns inte här – "Öppna i SMS-appen" finns alltid.
+ * Bilder och PDF:er som kommit som MMS syns i tråden (tryck = helskärm). Chattmeddelanden (RCS) syns inte – då Dela → RUTT.
  */
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {AppState, DeviceEventEmitter, FlatList, Linking, NativeModules, PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
+import {AppState, DeviceEventEmitter, FlatList, Image, Linking, NativeModules, PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {C, themed, hhmm, prettyPhone, slack} from './theme';
 import {Sheet, useKeyboardLift} from './parts';
 import {Bi} from './Bi';
 import {loadJSON, saveJSON} from '../store';
+import MediaViewer, {Media} from './MediaViewer';
 
 const SMS = NativeModules.RuttSms;
 const BOOK_KEY = 'rutt.jobbet.v1';
@@ -73,7 +74,11 @@ export function useJobbet({team, me, enabled}: {team: {drivers: {name: string}[]
   const numsKey = withNum.map(c => numKey(c.num)).sort().join(',');
   const refresh = useCallback(async () => {
     if (perm !== 'ja' || !SMS || !numsKey) return;
-    try { const list = await SMS.read(numsKey.split(','), 1500); setMsgs(list || []); } catch (e) {}
+    try {
+      const nums = numsKey.split(',');
+      const [list, mms] = await Promise.all([SMS.read(nums, 1500), SMS.readMms ? SMS.readMms(nums, 200).catch(() => []) : Promise.resolve([])]);
+      setMsgs([...(list || []), ...(mms || [])]);
+    } catch (e) {}
   }, [perm, numsKey]);
   useEffect(() => {
     if (perm !== 'ja' || !enabled) return;
@@ -94,7 +99,7 @@ export function useJobbet({team, me, enabled}: {team: {drivers: {name: string}[]
   // Trådar per nummer: telefonens SMS + det som skickas just nu (tills telefonens egen kopia finns).
   const threads = useMemo(() => {
     const by: Record<string, any[]> = {};
-    for (const m of msgs) (by[m.key] = by[m.key] || []).push({id: m.id, body: m.body, date: m.date, out: m.type !== 1, failed: m.type === 5, read: m.read});
+    for (const m of msgs) (by[m.key] = by[m.key] || []).push({id: m.id, body: m.body, date: m.date, out: m.type !== 1, failed: m.type === 5, read: m.read, media: m.media || null});
     for (const p of pending) {
       const list = by[p.key] || [];
       const dup = list.some(m => m.out && m.body === p.body && Math.abs(m.date - p.date) < 5 * 60000);
@@ -174,7 +179,7 @@ export default function JobbetView({j, opterView, opterUnread, opterLast, onOpen
         <Avatar c={c} chef={c.name === j.chef} />
         <View style={{flex: 1, minWidth: 0}}>
           <View style={x.rowTop}><Text style={x.pn} numberOfLines={1}>{shortName(c.name)}</Text><View style={[x.via, {backgroundColor: C.peopleSoft}]}><Text style={[x.viaT, {color: C.people}]}>SMS</Text></View><View style={{flex: 1}} /><Text style={x.when}>{last ? whenShort(last.date) : ''}</Text></View>
-          <Text style={[x.ps, un ? {color: C.ink, fontWeight: '800'} : null]} numberOfLines={1}>{last ? (last.out ? 'Du: ' : '') + last.body : 'Inga SMS än – tryck för att skriva'}</Text>
+          <Text style={[x.ps, un ? {color: C.ink, fontWeight: '800'} : null]} numberOfLines={1}>{last ? (last.out ? 'Du: ' : '') + (last.body || (last.media && last.media.length ? (last.media[0].kind === 'pdf' ? 'PDF' : 'Bild') : '')) : 'Inga SMS än – tryck för att skriva'}</Text>
         </View>
         {un ? <View style={x.badge}><Text style={x.badgeT}>{un}</Text></View> : null}
       </Pressable>
@@ -330,8 +335,10 @@ function SmsThread({j, c, onBack, onDial}: {j: ReturnType<typeof useJobbet>; c: 
   const send = (t: string) => { j.send(c, t); setText(''); };
   const status = (m: any) => (m.state === 'sending' ? '  Skickar…' : m.state === 'failed' || m.failed ? '  Inte skickat' : m.state === 'delivered' ? '  Levererat' : m.out ? '  Skickat' : '');
   const first = shortName(c.name).split(' ')[0];
+  const [view, setView] = useState<{md: Media; who: string; date: number} | null>(null);
   return (
     <View style={{flex: 1, paddingBottom: lift}}>
+      <MediaViewer media={view && view.md} title={view ? `${view.who} · ${whenShort(view.date)}` : ''} onClose={() => setView(null)} />
       <View style={x.chd}>
         <Pressable hitSlop={12} onPress={onBack}><Bi n="chevron-left" size={18} color={C.dim} /></Pressable>
         <Avatar c={c} chef={c.name === j.chef} />
@@ -355,9 +362,19 @@ function SmsThread({j, c, onBack, onDial}: {j: ReturnType<typeof useJobbet>; c: 
             ListEmptyComponent={<Text style={[x.hint, {textAlign: 'center', marginTop: 40, transform: [{scaleY: -1}]}]}>Inga SMS med {first} än. Skriv det första nedan.</Text>}
             renderItem={({item: m}) => (
               <Pressable disabled={!(m.local && m.state === 'failed')} onPress={() => send(m.body)} style={[x.bw, m.out ? {alignSelf: 'flex-end'} : {alignSelf: 'flex-start'}]}>
+                {(m.media || []).map((md: Media) => (
+                  <Pressable key={md.uri} onPress={() => setView({md, who: m.out ? 'Du' : first, date: m.date})} style={x.mm}>
+                    <Image source={{uri: md.kind === 'pdf' ? (md.pageUris || [])[0] : md.uri}} style={md.kind === 'pdf' ? x.mmPdf : x.mmImg} resizeMode={md.kind === 'pdf' ? 'contain' : 'cover'} />
+                    {md.kind === 'pdf' ? (
+                      <View style={x.mmBar}><Bi n="file-earmark-pdf-fill" size={14} color={C.bad} /><Text style={x.mmT} numberOfLines={1}>{md.name || 'PDF'}{md.pages ? ` · ${md.pages} s` : ''}</Text></View>
+                    ) : null}
+                  </Pressable>
+                ))}
+                {m.body ? (
                 <View style={[x.bb, m.out ? x.bbSms : x.bbIn, (m.state === 'failed' || m.failed) && {borderWidth: 1, borderColor: C.bad}, m.state === 'sending' && {opacity: 0.6}]}>
                   <Text style={x.bbT} textBreakStrategy="simple">{slack(m.body)}</Text>
                 </View>
+                ) : null}
                 <Text style={[x.bst, m.out ? {textAlign: 'right', marginRight: 6} : {marginLeft: 6}, (m.state === 'failed' || m.failed) && {color: C.bad}]}>
                   {m.out ? '' : `${first} · `}{whenShort(m.date)}{status(m)}{m.local && m.state === 'failed' ? ' – tryck för att försöka igen' : ''}
                 </Text>
@@ -479,6 +496,11 @@ const x = themed(() => StyleSheet.create({
   chd: {flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingBottom: 10, borderBottomColor: C.edge, borderBottomWidth: StyleSheet.hairlineWidth},
   bw: {maxWidth: '82%', marginBottom: 12},
   bb: {borderRadius: 16, paddingHorizontal: 13, paddingVertical: 10},
+  mm: {borderRadius: 14, overflow: 'hidden', backgroundColor: C.panel, marginBottom: 4},
+  mmImg: {width: 230, height: 230},
+  mmPdf: {width: 210, height: 270, backgroundColor: '#FFFFFF'},
+  mmBar: {flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 8, maxWidth: 210},
+  mmT: {color: C.ink, fontSize: 12.5, fontWeight: '700', flexShrink: 1},
   bbIn: {backgroundColor: C.bubbleIn, borderBottomLeftRadius: 5},
   bbSms: {backgroundColor: C.peopleSoft, borderBottomRightRadius: 5},
   bbT: {color: C.ink, fontSize: 15, lineHeight: 21},

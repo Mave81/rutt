@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.ContactsContract
 import android.provider.Telephony
+import java.io.File
 import android.telephony.SmsManager
 import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.Arguments
@@ -37,7 +38,18 @@ class RuttSmsModule(private val rc: ReactApplicationContext) : ReactContextBaseJ
 
   override fun getName() = "RuttSms"
 
-  init { rc.addActivityEventListener(this) }
+  init {
+    rc.addActivityEventListener(this)
+    RuttFiles.onShared = { emit("shared", null, true) }
+  }
+
+  /** Det som delats till RUTT sedan sist (töms när det hämtas). */
+  @ReactMethod
+  fun getShared(p: Promise) {
+    val a = Arguments.createArray()
+    synchronized(RuttFiles) { RuttFiles.pending.forEach { a.pushMap(RuttFiles.toMap(it)) }; RuttFiles.pending.clear() }
+    p.resolve(a)
+  }
 
   private fun emit(type: String, id: String?, ok: Boolean, extra: String? = null) {
     try {
@@ -126,6 +138,69 @@ class RuttSmsModule(private val rc: ReactApplicationContext) : ReactContextBaseJ
       }
       p.resolve(out)
     } catch (e: Throwable) { p.reject("read", e) }
+  }
+
+  /**
+   * MMS (bilder, PDF) från samma nummer. Delarna sparas i appens cache (mms/<id>.<ext>) och PDF:er ritas
+   * som bilder sida för sida (högst 6) så de kan visas i appen utan annan läsare.
+   * RCS-chatt syns inte här – den ligger i Meddelanden-appen. Då används Dela → RUTT.
+   */
+  @ReactMethod
+  fun readMms(nums: ReadableArray, limit: Int, p: Promise) {
+    Thread {
+      try {
+        val want = HashSet<String>()
+        for (i in 0 until nums.size()) { val k = key(nums.getString(i)); if (k.length >= 6) want.add(k) }
+        val out = Arguments.createArray()
+        if (want.isEmpty()) { p.resolve(out); return@Thread }
+        val cr = rc.contentResolver
+        val dir = File(rc.cacheDir, "mms"); dir.mkdirs()
+        val cur = cr.query(Uri.parse("content://mms"), arrayOf("_id", "date", "msg_box", "read"), null, null, "date DESC")
+        var seen = 0; var n = 0
+        cur?.use { c ->
+          while (c.moveToNext() && seen < 300 && n < limit) {
+            seen++
+            val id = c.getLong(0); val box = c.getInt(2)
+            // Avsändare (137) för inkomna, mottagare (151) för skickade.
+            var addr: String? = null
+            cr.query(Uri.parse("content://mms/$id/addr"), arrayOf("address", "type"), null, null, null)?.use { a ->
+              while (a.moveToNext()) { val t = a.getInt(1); if ((box == 1 && t == 137) || (box != 1 && t == 151)) { addr = a.getString(0); break } }
+            }
+            val k = key(addr)
+            if (!want.contains(k)) continue
+            val text = StringBuilder(); val media = Arguments.createArray()
+            cr.query(Uri.parse("content://mms/part"), arrayOf("_id", "ct", "text", "name", "cl", "fn"), "mid=?", arrayOf(id.toString()), null)?.use { q ->
+              while (q.moveToNext()) {
+                val pid = q.getLong(0); val ct = (q.getString(1) ?: "").lowercase()
+                val name = q.getString(3) ?: q.getString(4) ?: q.getString(5) ?: ""
+                if (ct == "text/plain") { val t = q.getString(2); if (!t.isNullOrBlank()) { if (text.isNotEmpty()) text.append("\n"); text.append(t) }; continue }
+                val isImg = ct.startsWith("image/"); val isPdf = ct == "application/pdf" || name.lowercase().endsWith(".pdf")
+                if (!isImg && !isPdf) continue
+                val ext = if (isPdf) "pdf" else ct.substringAfter("/").replace("jpeg", "jpg").take(4)
+                val f = File(dir, "$pid.$ext")
+                if (!f.exists() || f.length() == 0L) {
+                  try { cr.openInputStream(Uri.parse("content://mms/part/$pid"))?.use { ins -> f.outputStream().use { ins.copyTo(it) } } } catch (_: Throwable) { continue }
+                }
+                val m = Arguments.createMap()
+                m.putString("kind", if (isPdf) "pdf" else "image"); m.putString("uri", "file://" + f.absolutePath); m.putString("name", name)
+                if (isPdf) {
+                  val (cnt, pages) = RuttFiles.pdfPages(f, dir, pid.toString())
+                  m.putInt("pages", cnt); val a = Arguments.createArray(); pages.forEach { a.pushString(it) }; m.putArray("pageUris", a)
+                }
+                media.pushMap(m)
+              }
+            }
+            if (text.isEmpty() && media.size() == 0) continue
+            val o = Arguments.createMap()
+            o.putString("id", "mms$id"); o.putString("key", k); o.putString("body", text.toString())
+            o.putDouble("date", c.getLong(1) * 1000.0); o.putInt("type", if (box == 1) 1 else 2); o.putBoolean("read", c.getInt(3) == 1)
+            o.putArray("media", media)
+            out.pushMap(o); n++
+          }
+        }
+        p.resolve(out)
+      } catch (e: Throwable) { p.reject("mms", e) }
+    }.start()
   }
 
   @ReactMethod

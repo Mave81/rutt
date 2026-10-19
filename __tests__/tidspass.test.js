@@ -6,3 +6,7 @@ test('tidspassning hittas i Opters produktrad och i fritext', () => {
   expect(tidspass([], ['Tidspass kl 8 vid porten'])).toEqual({time: '08:00'});
   expect(tidspass(['Trängselavgift'], ['lossa 1100 kg'])).toBeNull();
 });
+test('felstavat och semikolon som i Cramo-ordern', () => {
+  expect(tidspass([], ['6st fodervagn, 2st dörrlyft\n\ntidspasning 06;50'])).toEqual({time: '06:50'});
+  expect(tidspass([], ['Tidspassning'])).toEqual({time: null}); // tjänsten heter Tidspassning
+});
