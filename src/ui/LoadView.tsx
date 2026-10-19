@@ -100,7 +100,7 @@ export default function LoadView({orders, cargo, route, laterRoute}: {orders: Lo
       ) : null}
       <View style={l.sumRow}>
         <Text style={l.sum}><Text style={l.sumB}>{Math.min(sel ? sel.cnt : plan.pallets, TOTAL)}</Text> av {TOTAL} pallplatser{sel ? '' : plan.multiPick ? ' när bilen är fullast' : ''}</Text>
-        <Text style={l.sumDim}>{sel ? '' : '1 = första stället · en färg per ställe'}</Text>
+        <Text style={l.sumDim}>{sel ? '' : 'Siffran = ordern i listan nedan'}</Text>
       </View>
       {stepTxt ? <Text style={l.stepInfo}>{stepTxt}</Text> : null}
       {plan.over > 0 && (
@@ -167,7 +167,7 @@ export default function LoadView({orders, cargo, route, laterRoute}: {orders: Lo
 const l = themed(() => StyleSheet.create({
   empty: {flex: 1, alignItems: 'center', paddingTop: 60, gap: 10},
   emptyTxt: {color: C.dim, fontSize: 15},
-  sumRow: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10, paddingHorizontal: 2},
+  sumRow: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', columnGap: 10, rowGap: 2, marginBottom: 10, paddingHorizontal: 2},
   sum: {color: C.dim, fontSize: 14},
   sumB: {color: C.ink, fontSize: 18, fontWeight: '800'},
   sumDim: {color: C.faint, fontSize: 12, fontWeight: '600'},
