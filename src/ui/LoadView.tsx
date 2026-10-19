@@ -7,8 +7,8 @@
  * Platserna räknas fram i den ordning du hämtar (rutten), inte tvärtom: det som hämtas först står längst in.
  * Rutten väljer hämtordning så att inget står i vägen när det ska av; går det inte syns en varning.
  */
-import React, {useMemo} from 'react';
-import {ScrollView, StyleSheet, Text, View} from 'react-native';
+import React, {useMemo, useState} from 'react';
+import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, themed, hhmm, whenText, todayYmd} from './theme';
 import {Bi} from './Bi';
@@ -29,6 +29,7 @@ type LoadOrder = {cid: string; pick: any; drop: any; onboard: boolean};
 
 export default function LoadView({orders, cargo, route, laterRoute}: {orders: LoadOrder[]; cargo: any; route: any; laterRoute?: any}) {
   const bottom = useSafeAreaInsets().bottom + 24;
+  const [step, setStep] = useState<number>(-1); // -1 = fullast
 
   const plan = useMemo(() => {
     // Hela körningen i ordning: dagens rutt, sen kommande dagars (också optimerad). Samma simulering som optimeraren använder:
@@ -36,7 +37,7 @@ export default function LoadView({orders, cargo, route, laterRoute}: {orders: Lo
     const want = new Set(orders.filter(o => o.drop).map(o => o.cid));
     const seq = [...((route && route.order) || []), ...((laterRoute && laterRoute.order) || [])].filter((s: any) => want.has(String(s.pickup || s.drop)));
     const onboard = new Set(orders.filter(o => o.onboard && o.drop).map(o => o.cid));
-    const sim: any = simulateLoad(seq, onboard, cargo);
+    const sim: any = simulateLoad(seq, onboard, cargo, true);
     const etaDrop: Record<string, any> = {}, etaPick: Record<string, any> = {};
     for (const R of [route, laterRoute]) ((R && R.order) || []).forEach((s: any, i: number) => {
       const eta = R.plan && R.plan.rows && R.plan.rows[i] && R.plan.rows[i].eta;
@@ -56,7 +57,13 @@ export default function LoadView({orders, cargo, route, laterRoute}: {orders: Lo
     const slots = sim.peak.map((c: any) => (c ? {cid: c, loose: !(Number((cargo[c] || {}).pal) > 0)} : null));
     const pallets = sim.peak.filter(Boolean).length;
     const blockOf: Record<string, any> = {}; sim.blocks.forEach((b: any) => { blockOf[b.cid] = b; });
-    return {list, slots, num, over: sim.over, pallets, rowsOf, etaDrop, etaPick, pickNo, blockOf, multiPick: pn > 1};
+    // Steg för steg: bilen före första stoppet ("Nu") och efter varje stopp, i den ordning du kör (din eller RUTT:s).
+    const steps = (sim.steps || []).map((x: any, i: number) => {
+      const st = x.stop; const cnt = x.slots.filter(Boolean).length;
+      const label = !st ? 'Nu' : `Efter ${String(st.who || (st.pickup ? 'hämtning' : 'lossning')).split(/[\s/,]/)[0]}`;
+      return {i, label, stop: st, cnt, slots: x.slots.map((c: any) => (c ? {cid: c, loose: !(Number((cargo[c] || {}).pal) > 0)} : null))};
+    });
+    return {list, slots, num, over: sim.over, pallets, rowsOf, etaDrop, etaPick, pickNo, blockOf, multiPick: pn > 1, steps};
   }, [orders, cargo, route, laterRoute]);
 
   if (!plan.list.length) {
@@ -76,12 +83,26 @@ export default function LoadView({orders, cargo, route, laterRoute}: {orders: Lo
     return `${a === b ? `rad ${a}` : `rad ${a}–${b}`} · ${where}`;
   };
 
+  const sel = step >= 0 && plan.steps[step] ? plan.steps[step] : null;
+  const shown = sel ? sel.slots : plan.slots;
+  const stepTxt = sel ? (sel.stop ? `${sel.stop.pickup ? 'Hämtat' : 'Lossat'} hos ${sel.stop.who || '—'}${(plan.etaPick[sel.stop.pickup] || plan.etaDrop[sel.stop.drop]) ? ` · ca ${hhmm(new Date(plan.etaPick[sel.stop.pickup] || plan.etaDrop[sel.stop.drop]))}` : ''}` : 'Så ser bilen ut nu') : null;
   return (
     <ScrollView contentContainerStyle={{paddingHorizontal: 14, paddingBottom: bottom}}>
+      {plan.steps.length > 2 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={l.steps}>
+          {[{i: -1, label: 'Fullast', cnt: plan.pallets}, ...plan.steps].map((x: any) => (
+            <Pressable key={x.i} onPress={() => setStep(x.i)} style={[l.stepChip, step === x.i && l.stepOn]}>
+              <Text style={[l.stepTxt, step === x.i && l.stepTxtOn]} numberOfLines={1}>{x.label}</Text>
+              <Text style={[l.stepN, step === x.i && l.stepTxtOn]}>{x.cnt} pl</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      ) : null}
       <View style={l.sumRow}>
-        <Text style={l.sum}><Text style={l.sumB}>{Math.min(plan.pallets, TOTAL)}</Text> av {TOTAL} pallplatser{plan.multiPick ? ' när bilen är fullast' : ''}</Text>
-        <Text style={l.sumDim}>1 = första stället · en färg per ställe</Text>
+        <Text style={l.sum}><Text style={l.sumB}>{Math.min(sel ? sel.cnt : plan.pallets, TOTAL)}</Text> av {TOTAL} pallplatser{sel ? '' : plan.multiPick ? ' när bilen är fullast' : ''}</Text>
+        <Text style={l.sumDim}>{sel ? '' : '1 = första stället · en färg per ställe'}</Text>
       </View>
+      {stepTxt ? <Text style={l.stepInfo}>{stepTxt}</Text> : null}
       {plan.over > 0 && (
         <View style={l.warn}><Bi n="exclamation-triangle-fill" size={15} color={C.bad} /><Text style={l.warnTxt}>{plan.over} pall får inte plats – prata med kontoret.</Text></View>
       )}
@@ -93,7 +114,7 @@ export default function LoadView({orders, cargo, route, laterRoute}: {orders: Lo
             <View key={r} style={l.gridRow}>
               <Text style={l.rowNo}>{r + 1}</Text>
               {Array.from({length: WIDE}).map((__, c) => {
-                const sl = plan.slots[r * WIDE + c];
+                const sl = shown[r * WIDE + c];
                 if (!sl) return <View key={c} style={[l.cell, l.cellEmpty]} />;
                 const n = plan.num[sl.cid];
                 const sh = shade(n);
@@ -172,4 +193,11 @@ const l = themed(() => StyleSheet.create({
   st: {color: C.faint, fontSize: 12, fontWeight: '600', flexShrink: 1},
   pal: {color: C.ink, fontSize: 14, fontWeight: '800'},
   rows: {color: C.faint, fontSize: 11, marginTop: 2},
+  steps: {gap: 6, paddingBottom: 10, paddingRight: 8},
+  stepChip: {backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, borderRadius: 18, paddingHorizontal: 12, paddingVertical: 6, alignItems: 'center', minWidth: 64},
+  stepOn: {backgroundColor: C.accent, borderColor: C.accent},
+  stepTxt: {color: C.ink, fontSize: 13, fontWeight: '800'},
+  stepN: {color: C.faint, fontSize: 10.5, fontWeight: '700'},
+  stepTxtOn: {color: C.onAccent},
+  stepInfo: {color: C.ink, fontSize: 13.5, fontWeight: '700', marginBottom: 8, paddingHorizontal: 2},
 }));

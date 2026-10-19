@@ -25,11 +25,16 @@ const km = (a, b) => {
   return 2 * R * Math.asin(Math.sqrt(x)) * ROUTE_FACTOR;
 };
 const driveMin = d => d / SPEED_KMH * 60;
-const driveInfo = (a, b) => {
+const T = require('./travel');
+// Körtid: riktig längs vägarna (OpenStreetMap) när den finns, annars uppskattning. Båda × din inlärda faktor.
+function baseDrive(a, b) {
   if (!a || !b || a.lat == null || b.lat == null) return {km: 0, min: 0, est: true};
+  const t = T.travel(a, b);
+  if (t) return {km: t.km != null ? t.km : km(a, b), min: t.min, est: false};
   const d = km(a, b);
   return {km: d, min: driveMin(d), est: true};
-};
+}
+const driveInfo = (a, b) => { const x = baseDrive(a, b); const f = T.getFactor(); return f === 1 ? x : {...x, min: x.min * f}; };
 
 const activeStops = () => STOPS.filter(s => !s.done);
 function preOnboard() {
@@ -152,7 +157,7 @@ function scoreOrder(order, ctx) {
  * Det som redan är ombord antas stå bäst möjligt: det som lossas sist längst in.
  * Returnerar var varje order står, hur bilen ser ut när den är fullast och vad som blockerar vad.
  */
-function simulateLoad(order, onboardIds, cargo) {
+function simulateLoad(order, onboardIds, cargo, wantSteps) {
   const C0 = cargo || CARGO;
   const palOf = cid => Math.max(1, Math.round((C0[cid] && C0[cid].pal) || 0) || 1);
   const slots = Array(TOTAL_SLOTS).fill(null);
@@ -162,8 +167,9 @@ function simulateLoad(order, onboardIds, cargo) {
   [...onboardIds].map(String).sort((a, b) => (dropIdx.get(b) ?? 1e9) - (dropIdx.get(a) ?? 1e9)).forEach(put);
   const snap = () => { const n = slots.filter(Boolean).length; if (n > peakN) { peakN = n; peak = [...slots]; } };
   snap();
+  const steps = wantSteps ? [{stop: null, slots: [...slots]}] : null; // bilen före första stoppet, sen efter varje stopp
   for (const s of order) {
-    if (s.pickup) { put(String(s.pickup)); snap(); }
+    if (s.pickup) { put(String(s.pickup)); snap(); steps && steps.push({stop: s, slots: [...slots]}); }
     else if (s.drop) {
       const cid = String(s.drop), mine = at[cid] || [];
       if (!mine.length) continue;
@@ -172,9 +178,10 @@ function simulateLoad(order, onboardIds, cargo) {
       slots.forEach((c, i) => { if (c && c !== cid && Math.floor(i / SLOTS_WIDE) > myRow) { by.add(c); n++; } });
       if (n) { blocks.push({cid, by: [...by], pal: n}); blockPal += n; }
       mine.forEach(i => { if (slots[i] === cid) slots[i] = null; });
+      steps && steps.push({stop: s, slots: [...slots]});
     }
   }
-  return {at, peak: peak || [...slots], over, blocks, blockPal};
+  return {at, peak: peak || [...slots], over, blocks, blockPal, steps};
 }
 
 function okOrder(order, onboard) {
@@ -336,5 +343,6 @@ function computeRoute(stops, cargo, start, now, fixed) {
   return {order, plan: p, load, slotWhere, TOTAL_SLOTS, SLOTS_LONG, SLOTS_WIDE, CAP_SLOTS, manual: !!(fixed && fixed.length)};
 }
 
-export {computeRoute, simulateLoad, slotWhere, stopKey, TOTAL_SLOTS, SLOTS_LONG, CAP_SLOTS};
+const baseDriveMin = (a, b) => { const x = baseDrive(a, b); return x.min; };
+export {computeRoute, simulateLoad, slotWhere, stopKey, baseDriveMin, servOf, TOTAL_SLOTS, SLOTS_LONG, CAP_SLOTS, SERVICE_MIN, PAL_MIN};
 export default computeRoute;

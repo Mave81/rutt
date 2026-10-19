@@ -19,6 +19,11 @@ import JobbetView, {useJobbet} from './src/ui/JobbetView';
 import NewOrdersView, {NewOrderCard, RejectSheet, ForwardSheet} from './src/ui/NewOrdersView';
 import LoadView from './src/ui/LoadView';
 import {loadJSON, saveJSON, ORDERS_KEY, NAMES_KEY, companyKey, rememberName} from './src/store';
+import * as DB from './src/dagbok';
+import DagbokView from './src/ui/DagbokView';
+import PlanDay from './src/ui/PlanDay';
+const TRAVEL = require('./src/opter/travel');
+import {baseDriveMin, SERVICE_MIN, PAL_MIN} from './src/opter/optimizer';
 import {Buffer} from 'buffer';
 import {PixelRatio, BackHandler, AppState} from 'react-native';
 // @ts-ignore
@@ -31,7 +36,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '19 okt · tiderna i planen = när du kan börja (efter öppning), inte när du kommer fram';
+const BUILD = '19 okt · Imorgon-planering med dra och släpp, Last steg för steg, riktiga körtider, lär sig dina tider, Dagbok';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -116,6 +121,10 @@ function AppInner(): React.JSX.Element {
   const [status, setStatus] = useState('');
   const [demo, setDemo] = useState(false);
   const [manual, setManual] = useState<{day: string; keys: string[]} | null>(null);
+  const [manualLater, setManualLater] = useState<{day: string; keys: string[]} | null>(null); // din ordning för en kommande dag (yyyy-mm-dd)
+  const [travelVer, setTravelVer] = useState(0); // nya riktiga körtider / ny inlärd faktor → räkna om rutten
+  const [planDay, setPlanDay] = useState<'idag' | 'imorgon'>('idag');
+  const [klartView, setKlartView] = useState<'idag' | 'dagbok'>('idag');
 
   // Arbetstid, stopp-status och POD
   const [work, setWork] = useState<'igång' | 'rast' | 'lunch' | 'slut'>('igång');
@@ -326,7 +335,7 @@ function AppInner(): React.JSX.Element {
     } catch (e: any) {
       return {error: String(e?.message || e)};
     }
-  }, [src, ost, gpsRoutePos, manual]);
+  }, [src, ost, gpsRoutePos, manual, travelVer]);
 
   // Kommande dagars order planeras också (från startadressen, första dagens morgon) – så lastplanen vet i vilken
   // ordning du hämtar och kan ställa godset rätt. Samma optimerare som idag, med omlastning inräknad.
@@ -335,8 +344,10 @@ function AppInner(): React.JSX.Element {
     const days = later.map((s: any) => (s.tEarliest && s.tEarliest.date) || (s.tLatest && s.tLatest.date)).filter(Boolean).sort();
     const t0 = days.length ? new Date(days[0] + 'T06:00').getTime() : Date.now() + 86400000;
     const stops = later.map((s: any) => { const o = ost[s.pickup || s.drop] || {}; return {...s, done: s.pickup ? !!(o.loadedAt || serverLoaded(s)) : !!o.doneAt}; });
-    try { return computeRoute(stops, fullSrc.cargo, {...START, cur: null}, t0, null); } catch (e) { return null; }
-  }, [later, ost, fullSrc]);
+    const day = days.length ? days[0] : '';
+    const keys = manualLater && manualLater.day === day ? manualLater.keys : null;
+    try { const r: any = computeRoute(stops, fullSrc.cargo, {...START, cur: null}, t0, keys); r.day = day; return r; } catch (e) { return null; }
+  }, [later, ost, fullSrc, manualLater, travelVer]);
 
   // Lastplanen: allt som ska med i bilen – ombord, dagens hämtningar och kommande dagars order.
   const loadOrders = useMemo(() => {
@@ -352,7 +363,39 @@ function AppInner(): React.JSX.Element {
   const ostLoaded = useRef<string | null>(null);
   // Din egen körordning (dragen med handen). Gäller dagen ut, demo separat. null = smart ordning.
   const MANUAL_KEY = demo ? 'rutt.manual.demo' : 'rutt.manual.v1';
-  useEffect(() => { loadJSON(MANUAL_KEY, null).then((v: any) => setManual(v && v.day === new Date().toDateString() ? v : null)); }, [MANUAL_KEY]);
+  useEffect(() => {
+    Promise.all([loadJSON(MANUAL_KEY, null), loadJSON(MANUAL_KEY + '.later', null)]).then(([v, l]: any) => {
+      // Ordningen du lade kvällen innan blir dagens ordning när dagen kommer.
+      if (v && v.day === new Date().toDateString()) setManual(v);
+      else if (l && l.day === DB.ymdOf()) { const t = {day: new Date().toDateString(), keys: l.keys}; setManual(t); saveJSON(MANUAL_KEY, t); }
+      else setManual(null);
+      setManualLater(l && l.day > DB.ymdOf() ? l : null);
+    });
+  }, [MANUAL_KEY]);
+  function saveManualLater(keys: string[] | null) {
+    const day = laterRoute && laterRoute.day; if (!day) return;
+    const v = keys ? {day, keys} : null;
+    setManualLater(v); saveJSON(MANUAL_KEY + '.later', v);
+    flash(keys ? 'Din ordning för imorgon sparad' : 'Smart ordning igen', null);
+  }
+  // Riktiga körtider (OpenStreetMap) för alla adresser i dagens och kommande dagars plan. Utan nät: uppskattning.
+  useEffect(() => { TRAVEL.init({load: loadJSON, save: saveJSON}).then(() => setTravelVer(v => v + 1)); }, []);
+  const travelPts = useMemo(() => {
+    const pts: any[] = [{lat: START.lat, lng: START.lng}];
+    for (const x of [...((src && src.stops) || []), ...later]) if (x && x.lat != null) pts.push({lat: x.lat, lng: x.lng});
+    if (gpsRoutePos) pts.push({lat: gpsRoutePos.lat, lng: gpsRoutePos.lng});
+    return pts;
+  }, [src, later, gpsRoutePos && Math.round(gpsRoutePos.lat * 200), gpsRoutePos && Math.round(gpsRoutePos.lng * 200)]);
+  useEffect(() => { if (demo) return; let alive = true; TRAVEL.ensure(travelPts).then((ch: boolean) => { if (alive && ch) setTravelVer(v => v + 1); }); return () => { alive = false; }; }, [travelPts, demo]);
+  // RUTT lär sig av dina riktiga tider (dagboken, senaste 30 dagarna).
+  const [learnInfo, setLearnInfo] = useState<{factor: number; samples: number}>({factor: 1, samples: 0});
+  const relearn = async () => {
+    const idx = (await DB.listDays()).slice(-30);
+    const days = await Promise.all(idx.map(DB.loadDay));
+    const res = TRAVEL.learn(DB.legsFrom(days, (pal: number) => SERVICE_MIN + Math.round(PAL_MIN * pal)), baseDriveMin);
+    setLearnInfo(res); setTravelVer(v => v + 1);
+  };
+  useEffect(() => { relearn(); const off = DB.onChange(() => { relearn(); }); return off; }, [travelVer > 0]);
   function saveManual(keys: string[] | null) {
     const v = keys ? {day: new Date().toDateString(), keys} : null;
     setManual(v); saveJSON(MANUAL_KEY, v);
@@ -515,13 +558,24 @@ function AppInner(): React.JSX.Element {
   }
 
   // Lastad – en eller flera order på samma ställe på en gång. Ångra tar tillbaka alla.
+  // Dagboken: ordern som den såg ut när du körde.
+  function dayOrderOf(cid: string): any {
+    const {pick, drop} = fullSrc ? legs(cid) : ({} as any);
+    const c = (fullSrc && fullSrc.cargo && fullSrc.cargo[cid]) || {};
+    const s = drop || pick || {};
+    return {cid, orderNo: s.orderNo || null, freightBill: s.freightBill || null, pickWho: pick ? pick.who : '', pickAdr: pick ? [pick.adr, pick.area].filter(Boolean).join(', ') : '',
+      dropWho: drop ? drop.who : '', dropAdr: drop ? [drop.adr, drop.area].filter(Boolean).join(', ') : '', pal: Number(c.pal) || 0, kg: Number(c.kg) || 0};
+  }
   function onLoaded(st: any, more: any[] = []) {
     const list = [st, ...more];
     const prev: Record<string, any> = {};
     for (const x of list) prev[x.pickup] = ost[x.pickup];
-    setOst(o => { const n = {...o}; for (const x of list) n[x.pickup] = {...(o[x.pickup] || {}), loadedAt: Date.now()}; return n; });
+    const at = Date.now();
+    setOst(o => { const n = {...o}; for (const x of list) n[x.pickup] = {...(o[x.pickup] || {}), loadedAt: at}; return n; });
     list.forEach(x => sendLoad(x));
+    if (!demo) for (const x of list) { const cid = String(x.pickup); const d = dayOrderOf(cid); DB.logEvent({t: at, kind: 'load', cid, who: x.who, lat: x.lat, lng: x.lng, pal: d.pal}); DB.saveOrder(DB.ymdOf(at), {...d, loadedAt: at}); }
     flash(list.length > 1 ? `Lastad · ${list.length} order hos ${st.who || ''}` : `Lastad · ${st.who || 'order'}`, () => {
+      if (!demo) list.forEach(x => DB.unlogEvent(String(x.pickup), 'load', at));
       list.forEach(x => cancelSend(x.pickup, 'load'));
       setOst(o => { const n = {...o}; for (const x of list) { if (prev[x.pickup]) n[x.pickup] = prev[x.pickup]; else delete n[x.pickup]; } return n; });
     });
@@ -614,10 +668,12 @@ function AppInner(): React.JSX.Element {
       }
       return n;
     });
+    const doneT = Date.now();
     for (const st of list) {
       const pod = many ? {...pod0, kolli: st.kolli != null ? st.kolli : null} : pod0;
       podMem.current[st.drop] = pod;
       sendUnload(st, pod);
+      if (!demo) { const cid = String(st.drop); const d = dayOrderOf(cid); DB.logEvent({t: doneT, kind: 'unload', cid, who: st.who, lat: st.lat, lng: st.lng, pal: d.pal}); DB.saveOrder(DB.ymdOf(doneT), {...d, doneAt: doneT, podName: pod.name || '', kolli: pod.kolli != null ? pod.kolli : null}); }
       // Tillägg valda i kvittensen skickas när Ångra gått ut (samma väntan som Lossad).
       const adds = (pod0.adds || []).filter((a: any) => a.satId);
       // Gäller hela stoppet → läggs på första ordern (en väntetid debiteras en gång), som när man gör det i Opter.
@@ -632,6 +688,7 @@ function AppInner(): React.JSX.Element {
     }
     if (pod0.name) setNames(n => { const nn = rememberName(n, st0.who, pod0.name); saveJSON(NAMES_KEY, nn); return nn; });
     flash(many ? `Lossad · ${list.length} order hos ${st0.who || ''}` : `Lossad · ${st0.who || 'order'}`, () => {
+      if (!demo) list.forEach((x: any) => { DB.unlogEvent(String(x.drop), 'unload', doneT); DB.saveOrder(DB.ymdOf(doneT), {cid: String(x.drop), doneAt: undefined}); });
       list.forEach((x: any) => { cancelSend(x.drop, 'unload'); if (addTimers.current[x.drop]) { clearTimeout(addTimers.current[x.drop].t); delete addTimers.current[x.drop]; } });
       setOst(o => { const n = {...o}; for (const x of list) { if (prev[x.drop]) n[x.drop] = prev[x.drop]; else delete n[x.drop]; } return n; });
     });
@@ -691,6 +748,8 @@ function AppInner(): React.JSX.Element {
     try {
       const {rutt} = await client.startWork(resId);
       setOrders(rutt); setMsgs(client.messages()); setStep('route');
+      // Dagboken: första inloggningen för dagen = Start.
+      DB.loadDay(DB.ymdOf()).then(d => { if (!d.events.some(e => e.kind === 'start')) DB.logEvent({t: Date.now(), kind: 'start'}); });
       const nm = name || (savedLogin.current && savedLogin.current.name) || '';
       setDriverName(nm);
       savedLogin.current = {...(savedLogin.current || {}), resId, name: nm};
@@ -842,6 +901,7 @@ function AppInner(): React.JSX.Element {
     const since = Date.now();
     setWork(newState); setWorkSince(since); setNowTick(since);
     saveJSON('rutt.work.v1', {day: new Date().toDateString(), state: newState, since});
+    DB.logEvent({t: since, kind: newState});
     setWorkSheet(false);
     if (live) { try { await client.workStatus(rst); } catch (e) {} }
   }
@@ -1003,12 +1063,28 @@ function AppInner(): React.JSX.Element {
             );
           })()}
 
-          {tab === 'klart' && <DoneView done={doneOrders} onRetry={retrySync} onOpen={(d: any) => setEditFor({cid: d.cid, st: d.st, done: true})} />}
+          {tab === 'klart' && (
+            <View style={s.segRow}>
+              {([['idag', 'Idag'], ['dagbok', 'Dagbok']] as const).map(([k, t]) => (
+                <Pressable key={k} style={[s.segB, klartView === k && s.segOn2]} onPress={() => setKlartView(k)}><Text style={[s.segT, klartView === k && s.segTOn]}>{t}</Text></Pressable>
+              ))}
+            </View>
+          )}
+          {tab === 'klart' && klartView === 'dagbok' && <DagbokView me={driverName || 'RUTT'} onSms={chefC ? (text: string) => { jobbet.send(chefC, text); flash(`Dagrapport till ${chefC.name.split(' ')[0]}`, null); } : undefined} />}
+          {tab === 'klart' && klartView === 'idag' && <DoneView done={doneOrders} onRetry={retrySync} onOpen={(d: any) => setEditFor({cid: d.cid, st: d.st, done: true})} />}
           {tab === 'nytt' && <NewOrdersView orders={newOrders} cargo={fullSrc ? fullSrc.cargo : {}} onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={(o: any) => setOrderStatus(o, 'reject')} onForward={(orders.perm && orders.perm.giveAway === false) ? undefined : setForwardFor} />}
           <RejectSheet o={rejectFor} onClose={() => setRejectFor(null)} onReject={(o: any) => setOrderStatus(o, 'reject')} />
           <ForwardSheet o={forwardFor} drivers={team.drivers} onClose={() => setForwardFor(null)} onForward={forwardOrder} />
 
-          {tab === 'plan' && !orders.stops.length && !demo && (
+          {tab === 'plan' && later.length > 0 && (
+            <View style={s.segRow}>
+              {([['idag', 'Idag'], ['imorgon', laterRoute && laterRoute.day ? 'Imorgon · ' + new Date(laterRoute.day + 'T12:00').toLocaleDateString('sv-SE', {weekday: 'short', day: 'numeric'}) : 'Imorgon']] as const).map(([k, t]) => (
+                <Pressable key={k} style={[s.segB, planDay === k && s.segOn2]} onPress={() => setPlanDay(k)}><Text style={[s.segT, planDay === k && s.segTOn]}>{t}</Text></Pressable>
+              ))}
+            </View>
+          )}
+          {tab === 'plan' && planDay === 'imorgon' && later.length > 0 && <PlanDay route={laterRoute} cargo={fullSrc ? fullSrc.cargo : {}} onReorder={saveManualLater} />}
+          {tab === 'plan' && (planDay === 'idag' || !later.length) && !orders.stops.length && !demo && (
             <View style={s.emptyBox}>
               <Bi n="inbox-fill" size={30} color={C.faint} />
               <Text style={s.empty}>Inga aktiva jobb just nu.</Text>
@@ -1016,7 +1092,7 @@ function AppInner(): React.JSX.Element {
             </View>
           )}
 
-          {tab === 'plan' && route && !(route as any).error && (
+          {tab === 'plan' && (planDay === 'idag' || !later.length) && route && !(route as any).error && (
             <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any, more: any[] = []) => setSignStop(more.length ? {...st, group: [st, ...more]} : st)} onEdit={(cid: string, st: any) => setEditFor({cid, st, done: false})} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} />
           )}
           {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} laterRoute={laterRoute} />}
@@ -1079,6 +1155,10 @@ function AppInner(): React.JSX.Element {
           </View>
           <View style={[s.toggle, demo && {backgroundColor: C.accent2}]}><View style={[s.toggleKnob, demo && {alignSelf: 'flex-end'}]} /></View>
         </Pressable>
+        <Text style={s.podLabel}>Rutten</Text>
+        <Text style={s.sheetNote}>Körtider längs vägarna från OpenStreetMap när telefonen har nät, annars en uppskattning. {learnInfo.samples >= 5
+          ? `RUTT har lärt sig av ${learnInfo.samples} av dina resor: du kör ${Math.abs(Math.round((1 - learnInfo.factor) * 100))} % ${learnInfo.factor <= 1 ? 'snabbare' : 'långsammare'} än kartan, och planen räknar med det.`
+          : `RUTT lär sig av dina riktiga tider mellan stoppen – efter 5 resor (nu ${learnInfo.samples}) börjar planen räkna med hur du faktiskt kör.`}</Text>
         <Text style={s.podLabel}>Felsök</Text>
         <Text style={s.sheetNote}>Skickar Opters rådata för dina jobb (order, adresser, kolli, statustyper, kvittenstyper) så Claude kan läsa den. Gmail öppnas med ett färdigt mejl till dig själv – tryck Skicka, sen läser Claude det.</Text>
         <Pressable style={[s.primaryBtn, diagBusy && {opacity: 0.5}]} disabled={diagBusy} onPress={sendDump}>
@@ -1291,6 +1371,11 @@ const s = themed(() => StyleSheet.create({
   statusCard: {marginTop: 14, backgroundColor: C.panel2, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12},
   logoutBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 20, height: 52, borderRadius: 12, backgroundColor: C.badSoft},
   logoutTxt: {color: C.bad, fontSize: 15.5, fontWeight: '800'},
+  segRow: {flexDirection: 'row', gap: 4, backgroundColor: C.panel, borderRadius: 12, padding: 4, marginHorizontal: 14, marginBottom: 8},
+  segB: {flex: 1, alignItems: 'center', justifyContent: 'center', height: 34, borderRadius: 9},
+  segOn2: {backgroundColor: C.panel2},
+  segT: {color: C.dim, fontSize: 13.5, fontWeight: '800'},
+  segTOn: {color: C.ink},
   moreNew: {color: C.accentInk, fontSize: 12.5, fontWeight: '900'},
   claudeBar: {position: 'absolute', left: 12, right: 12, top: 8, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 14, elevation: 8, shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 10, shadowOffset: {width: 0, height: 4}},
   claudeT: {color: C.ink, fontSize: 14.5, fontWeight: '900'},
