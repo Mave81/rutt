@@ -14,7 +14,7 @@ const OVER_COST = 2.0, SPEED_KMH = 30, ROUTE_FACTOR = 1.35;
 const SLOTS_WIDE = 3, SLOTS_LONG = 6, TOTAL_SLOTS = SLOTS_WIDE * SLOTS_LONG, CAP_SLOTS = TOTAL_SLOTS - 1;
 const OPT_MS = 140, TIGHT_MIN = 15, GRACE_MIN = 5, NICK_COST = 4, WAIT_COST = 0.8, MAX_WAIT = 240;
 // Omlastning: varje pall som står i vägen (lastad senare, närmare lyften) när en order ska av kostar så här många minuter.
-const BLOCK_MIN = 4;
+const BLOCK_MIN = 4, HOME_W = 0.3;
 
 let CARGO = {}, START = {}, NOW = Date.now(), STOPS = [];
 
@@ -143,7 +143,8 @@ function scoreOrder(order, ctx) {
     t += servOf(s);
   }
   let over = 0;
-  if (order.length && ctx.homePos) { const h = driveInfo(pos, ctx.homePos).min; drive += h; t += h; }
+  // Hemresan väger lätt: nya jobb kommer under dagen, så sista lossningen ska inte styras av vägen hem.
+  if (order.length && ctx.homePos) { const h = driveInfo(pos, ctx.homePos).min; drive += h * HOME_W; t += h; }
   if (ctx.endMin != null && t > ctx.endMin) over = t - ctx.endMin;
   if (late > 1000) late = 1000;
   // Ordning som tvingar fram omlastning kostar (hämta det som ska av sist först, så hamnar det längst in).
@@ -153,7 +154,7 @@ function scoreOrder(order, ctx) {
 
 /*
  * Lastsimulering – bilen är 3 bred × 6 lång, du lastar alltid mot hytten (lägsta lediga plats först)
- * och lossar via bakgavellyften. Gods som står i en rad närmare lyften än det som ska av står I VÄGEN.
+ * och lossar via bakgavellyften. Bilen har tre filer; gods i samma fil närmare lyften än det som ska av står I VÄGEN.
  * Det som redan är ombord antas stå bäst möjligt: det som lossas sist längst in.
  * Returnerar var varje order står, hur bilen ser ut när den är fullast och vad som blockerar vad.
  */
@@ -162,8 +163,25 @@ function simulateLoad(order, onboardIds, cargo, wantSteps) {
   const palOf = cid => Math.max(1, Math.round((C0[cid] && C0[cid].pal) || 0) || 1);
   const slots = Array(TOTAL_SLOTS).fill(null);
   const at = {}; let over = 0, peak = null, peakN = -1, blockPal = 0; const blocks = [];
-  const put = cid => { at[cid] = []; for (let i = 0; i < palOf(cid); i++) { const f = slots.indexOf(null); if (f < 0) { over++; continue; } slots[f] = cid; at[cid].push(f); } };
   const dropIdx = new Map(); order.forEach((s, i) => { if (s.drop) dropIdx.set(String(s.drop), i); });
+  const dOf = (c) => dropIdx.get(c) ?? 1e9;
+  // Varje pall ställs i den fil (av tre) där den står i vägen för minst gods som ska av före den – som du gör själv
+  // när bilen är halvtom. Lika bra → längst in mot hytten.
+  const put = cid => {
+    at[cid] = [];
+    for (let i = 0; i < palOf(cid); i++) {
+      let best = -1, bv = Infinity;
+      for (let col = 0; col < SLOTS_WIDE; col++) {
+        let row = 0; while (row < SLOTS_LONG && slots[row * SLOTS_WIDE + col]) row++;
+        if (row >= SLOTS_LONG) continue;
+        let blocks = 0; for (let r = 0; r < row; r++) { const c = slots[r * SLOTS_WIDE + col]; if (c !== cid && dOf(c) < dOf(cid)) blocks++; }
+        const v = blocks * 100 + row;
+        if (v < bv) { bv = v; best = row * SLOTS_WIDE + col; }
+      }
+      if (best < 0) { over++; continue; }
+      slots[best] = cid; at[cid].push(best);
+    }
+  };
   [...onboardIds].map(String).sort((a, b) => (dropIdx.get(b) ?? 1e9) - (dropIdx.get(a) ?? 1e9)).forEach(put);
   const snap = () => { const n = slots.filter(Boolean).length; if (n > peakN) { peakN = n; peak = [...slots]; } };
   snap();
@@ -173,9 +191,9 @@ function simulateLoad(order, onboardIds, cargo, wantSteps) {
     else if (s.drop) {
       const cid = String(s.drop), mine = at[cid] || [];
       if (!mine.length) continue;
-      const myRow = Math.max(...mine.map(i => Math.floor(i / SLOTS_WIDE)));
+      // I vägen = annat gods i samma fil, närmare lyften.
       const by = new Set(); let n = 0;
-      slots.forEach((c, i) => { if (c && c !== cid && Math.floor(i / SLOTS_WIDE) > myRow) { by.add(c); n++; } });
+      slots.forEach((c, i) => { if (c && c !== cid && mine.some(m => m % SLOTS_WIDE === i % SLOTS_WIDE && i > m)) { by.add(c); n++; } });
       if (n) { blocks.push({cid, by: [...by], pal: n}); blockPal += n; }
       mine.forEach(i => { if (slots[i] === cid) slots[i] = null; });
       steps && steps.push({stop: s, slots: [...slots]});

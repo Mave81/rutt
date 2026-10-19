@@ -34,7 +34,11 @@ import OpterClient from './src/opter/OpterClient';
 import computeRoute from './src/opter/optimizer';
 
 const client = new OpterClient();
-const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
+// Var dagen börjar (rutten räknas därifrån tills du klarat första stoppet). Väljs under Plan → Imorgon.
+const STARTS = [
+const BUILD = '19 okt · 3.26 · startplats (Västberga), smartare lastning i tre filer, hemresan styr inte sista lossningen';
+  {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
+];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
 const BUILD = '19 okt · 3.25 · adresser slås upp på kartan så körtider räknas (Imorgon, Plan)';
 // Arbetstids-typer (RST) – matchar protokollet.
@@ -121,6 +125,10 @@ function AppInner(): React.JSX.Element {
   const [status, setStatus] = useState('');
   const [demo, setDemo] = useState(false);
   const [manual, setManual] = useState<{day: string; keys: string[]} | null>(null);
+  const [startId, setStartId] = useState('vb');
+  const START = STARTS.find(x => x.id === startId) || STARTS[0];
+  useEffect(() => { loadJSON('rutt.start.v1', null).then((v: any) => { if (v && STARTS.some(x => x.id === v)) setStartId(v); }); }, []);
+  const pickStart = (id: string) => { setStartId(id); saveJSON('rutt.start.v1', id); };
   const [manualLater, setManualLater] = useState<{day: string; keys: string[]} | null>(null); // din ordning för en kommande dag (yyyy-mm-dd)
   const [travelVer, setTravelVer] = useState(0); // nya riktiga körtider / ny inlärd faktor → räkna om rutten
   const [planDay, setPlanDay] = useState<'idag' | 'imorgon'>('idag');
@@ -335,7 +343,7 @@ function AppInner(): React.JSX.Element {
     } catch (e: any) {
       return {error: String(e?.message || e)};
     }
-  }, [src, ost, gpsRoutePos, manual, travelVer]);
+  }, [src, ost, gpsRoutePos, manual, travelVer, startId]);
 
   // Kommande dagars order planeras också (från startadressen, första dagens morgon) – så lastplanen vet i vilken
   // ordning du hämtar och kan ställa godset rätt. Samma optimerare som idag, med omlastning inräknad.
@@ -347,7 +355,7 @@ function AppInner(): React.JSX.Element {
     const day = days.length ? days[0] : '';
     const keys = manualLater && manualLater.day === day ? manualLater.keys : null;
     try { const r: any = computeRoute(stops, fullSrc.cargo, {...START, cur: null}, t0, keys); r.day = day; return r; } catch (e) { return null; }
-  }, [later, ost, fullSrc, manualLater, travelVer]);
+  }, [later, ost, fullSrc, manualLater, travelVer, startId]);
 
   // Lastplanen: allt som ska med i bilen – ombord, dagens hämtningar och kommande dagars order.
   const loadOrders = useMemo(() => {
@@ -387,7 +395,7 @@ function AppInner(): React.JSX.Element {
     for (const x of TRAVEL.withGeo([...((src && src.stops) || []), ...later])) if (x && x.lat != null) pts.push({lat: x.lat, lng: x.lng});
     if (gpsRoutePos) pts.push({lat: gpsRoutePos.lat, lng: gpsRoutePos.lng});
     return pts;
-  }, [src, later, travelVer, gpsRoutePos && Math.round(gpsRoutePos.lat * 200), gpsRoutePos && Math.round(gpsRoutePos.lng * 200)]);
+  }, [src, later, travelVer, startId, gpsRoutePos && Math.round(gpsRoutePos.lat * 200), gpsRoutePos && Math.round(gpsRoutePos.lng * 200)]);
   useEffect(() => { if (demo) return; let alive = true; TRAVEL.ensure(travelPts).then((ch: boolean) => { if (alive && ch) setTravelVer(v => v + 1); }); return () => { alive = false; }; }, [travelPts, demo]);
   // RUTT lär sig av dina riktiga tider (dagboken, senaste 30 dagarna).
   const [learnInfo, setLearnInfo] = useState<{factor: number; samples: number}>({factor: 1, samples: 0});
@@ -1085,7 +1093,7 @@ function AppInner(): React.JSX.Element {
               ))}
             </View>
           )}
-          {tab === 'plan' && planDay === 'imorgon' && later.length > 0 && <PlanDay route={laterRoute} cargo={fullSrc ? fullSrc.cargo : {}} onReorder={saveManualLater} />}
+          {tab === 'plan' && planDay === 'imorgon' && later.length > 0 && <PlanDay route={laterRoute} cargo={fullSrc ? fullSrc.cargo : {}} onReorder={saveManualLater} starts={STARTS} startId={startId} onStart={pickStart} />}
           {tab === 'plan' && (planDay === 'idag' || !later.length) && !orders.stops.length && !demo && (
             <View style={s.emptyBox}>
               <Bi n="inbox-fill" size={30} color={C.faint} />

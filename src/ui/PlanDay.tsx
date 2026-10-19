@@ -14,7 +14,7 @@ import {simulateLoad} from '../opter/optimizer';
 const SHADES = ['#FF9117', '#FFC27A', '#B85F00', '#FFE0B8', '#7A3F00', '#E87A00', '#FFAA45', '#4F2900'];
 const INK = ['#000', '#000', '#FFF', '#000', '#FFF', '#000', '#000', '#FFF'];
 
-export default function PlanDay({route, cargo, onReorder}: {route: any; cargo: any; onReorder: (keys: string[] | null) => void}) {
+export default function PlanDay({route, cargo, onReorder, starts = [], startId, onStart}: {route: any; cargo: any; onReorder: (keys: string[] | null) => void; starts?: {id: string; label: string}[]; startId?: string; onStart?: (id: string) => void}) {
   const bottom = useSafeAreaInsets().bottom + 30;
   const [open, setOpen] = useState(false);
   const order: any[] = (route && route.order) || [];
@@ -39,6 +39,16 @@ export default function PlanDay({route, cargo, onReorder}: {route: any; cargo: a
     <View style={{flex: 1}}>
       <ScrollView contentContainerStyle={{paddingHorizontal: 14, paddingBottom: bottom}}>
         <Text style={p.date}>{date.charAt(0).toUpperCase() + date.slice(1)} · {route.manual ? 'din ordning' : 'RUTT:s förslag'}</Text>
+        {starts.length > 1 && onStart ? (
+          <View style={p.startRow}>
+            <Text style={p.startL}>Startar från</Text>
+            {starts.map(x => (
+              <Pressable key={x.id} onPress={() => onStart(x.id)} style={[p.chip, x.id === startId && p.chipOn]}>
+                <Text style={[p.chipT, x.id === startId && p.chipTOn]}>{x.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
         <View style={[p.sum, !ok && {backgroundColor: C.badSoft}]}>
           <Text style={p.sumT}>{info.cids.length} order · {info.pal} pall{info.end ? ` · klar ca ${hhmm(new Date(info.end))}` : ''}</Text>
           {info.late.length ? <Text style={[p.sumS, {color: C.bad}]}>{info.late.length} stopp blir sena: {info.late.map((x: any) => `${x.s.who || '—'} (${x.late} min)`).join(', ')}</Text> : null}
@@ -96,5 +106,11 @@ const p = themed(() => StyleSheet.create({
   btnT: {color: C.onAccent, fontSize: 15, fontWeight: '900'},
   btn2: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.panel2, borderRadius: 12, paddingVertical: 12, marginTop: 8},
   btn2T: {color: C.ink, fontSize: 14, fontWeight: '800'},
+  startRow: {flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 8},
+  startL: {color: C.dim, fontSize: 12.5, fontWeight: '700', marginRight: 2},
+  chip: {backgroundColor: C.panel, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12},
+  chipOn: {backgroundColor: C.accent},
+  chipT: {color: C.ink, fontSize: 13, fontWeight: '700'},
+  chipTOn: {color: C.onAccent},
   note: {color: C.faint, fontSize: 12, marginTop: 10, paddingHorizontal: 2},
 }));
