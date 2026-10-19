@@ -20,7 +20,7 @@ import NewOrdersView, {NewOrderCard, RejectSheet, ForwardSheet} from './src/ui/N
 import LoadView from './src/ui/LoadView';
 import {loadJSON, saveJSON, ORDERS_KEY, NAMES_KEY, companyKey, rememberName} from './src/store';
 import {Buffer} from 'buffer';
-import {PixelRatio, BackHandler} from 'react-native';
+import {PixelRatio, BackHandler, AppState} from 'react-native';
 // @ts-ignore
 import P from './src/opter/protocol';
 // @ts-ignore
@@ -31,7 +31,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '19 okt · rast: tid som tickar + Avsluta rasten, ny order under rasten: Acceptera, Skicka vidare, Neka';
+const BUILD = '19 okt · skickas direkt när RUTT går i bakgrunden, osänt skickas efter omstart, Skicka orderdata till Claude på varje order';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -60,6 +60,24 @@ const CRASH_KEY = 'rutt.crashes.v1';
 // Sändloggen (vad som skickades till Opter och vad Opter svarade) sparas i telefonen och följer med i Skicka orderdata.
 const SENDLOG_KEY = 'rutt.sendlog.v1';
 client.onLog = (l: any) => { saveJSON(SENDLOG_KEY, l); };
+// Efter varje Lossad skickas bevisen (vad RUTT skickade, vad Opter svarade, serverns rader för ordern) till din dator
+// (forre.nu/rutt/dump.php → rutt/dumps), så Claude kan kontrollera själv. Högst en var 10:e sekund → kö.
+const diagQ: any[] = []; let diagBusy = false;
+async function diagPump() {
+  if (diagBusy) return; diagBusy = true;
+  while (diagQ.length) {
+    const body = JSON.stringify(diagQ[0]);
+    let ok = false;
+    for (let i = 0; i < 3 && !ok; i++) {
+      try { const r = await fetch('https://forre.nu/rutt/dump.php', {method: 'POST', headers: {'Content-Type': 'application/json'}, body}); ok = r.ok; } catch (e) {}
+      if (!ok) await new Promise<void>(res => setTimeout(() => res(), 11000));
+    }
+    diagQ.shift();
+    if (diagQ.length) await new Promise<void>(res => setTimeout(() => res(), 11000));
+  }
+  diagBusy = false;
+}
+client.onDiag = (entry: any, rows: any[]) => { diagQ.push({app: 'RUTT', kind: 'auto-lossning', at: new Date().toISOString(), build: BUILD, sendLog: [entry], rows}); diagPump(); };
 loadJSON(SENDLOG_KEY, []).then((l: any) => { if (Array.isArray(l) && !client.log.length) client.log = l; }).catch(() => {});
 async function logCrash(e: any, where: string) {
   try {
@@ -327,11 +345,16 @@ function AppInner(): React.JSX.Element {
   const sendChain = useRef<Promise<any>>(Promise.resolve());
   const setSync = (cid: string, step: 'load' | 'unload', state: string) =>
     setOst(o => ({...o, [cid]: {...(o[cid] || {}), sync: {...((o[cid] && o[cid].sync) || {}), [step]: state}}}));
+  // Lossad/Lastad väntar 8 s (Ångra) och skickas sen. Går RUTT i bakgrunden (t.ex. du byter till Opter) skickas allt
+  // som väntar DIREKT – Android pausar annars RUTT:s klockor i bakgrunden och då skulle inget gå iväg.
   function queueSend(cid: string, step: 'load' | 'unload', run: () => Promise<any>) {
-    if (sendTimers.current[cid + step]) clearTimeout(sendTimers.current[cid + step]);
+    const key = cid + step;
+    if (sendTimers.current[key]) clearTimeout(sendTimers.current[key].t);
     setSync(cid, step, 'waiting');
-    sendTimers.current[cid + step] = setTimeout(async () => {
-      delete sendTimers.current[cid + step];
+    const fire = () => {
+      if (!sendTimers.current[key] || sendTimers.current[key].fire !== fire) return;
+      clearTimeout(sendTimers.current[key].t);
+      delete sendTimers.current[key];
       setSync(cid, step, 'sending');
       // En sändning i taget mot Opter – 14 order på en gång köas i stället för att skickas samtidigt.
       sendChain.current = sendChain.current.catch(() => {}).then(async () => {
@@ -341,9 +364,18 @@ function AppInner(): React.JSX.Element {
           if (r.rutt && r.rutt.stops && r.rutt.stops.length) setOrders(r.rutt);
         } catch (e) { setSync(cid, step, 'failed'); }
       });
-    }, 8200);
+    };
+    sendTimers.current[key] = {t: setTimeout(fire, 8200), fire};
   }
-  const cancelSend = (cid: string, step: string) => { if (sendTimers.current[cid + step]) { clearTimeout(sendTimers.current[cid + step]); delete sendTimers.current[cid + step]; } };
+  const cancelSend = (cid: string, step: string) => { const x = sendTimers.current[cid + step]; if (x) { clearTimeout(x.t); delete sendTimers.current[cid + step]; } };
+  const flushSends = () => {
+    for (const k of Object.keys(sendTimers.current)) { const x = sendTimers.current[k]; if (x) x.fire(); }
+    for (const k of Object.keys(addTimers.current)) { const x = addTimers.current[k]; if (x) x.fire(); }
+  };
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st: string) => { if (st !== 'active') flushSends(); });
+    return () => sub.remove();
+  }, []);
   function sendLoad(st: any) {
     const L = st.live;
     if (!live || !L || !L.loadSt) return;
@@ -360,6 +392,25 @@ function AppInner(): React.JSX.Element {
     queueSend(st.drop, 'unload', async () => { const r = await client.setStatus(L, L.unloadSt.id, podData); return (!podData && hadPod && r.confirmed) ? {...r, noPod: true} : r; });
   }
   // Kvittensen som sparades vid lossningen (signatur + namn) skickas till Opter igen, utan ny signatur.
+  // En order till Claude (från Klart eller planen): serverns rader för ordern + vad RUTT skickat + det RUTT har sparat.
+  async function sendOrderDump(cid: string, st: any) {
+    if (!client.logon) { flash('Logga in mot Opter först', null); return; }
+    flash('Hämtar ordern från Opter…', null);
+    try {
+      // Finns ordern inte längre i Opters lista skickas hela helbilden + hela sändloggen i stället.
+      const L = st && st.live;
+      const d: any = L ? await client.orderDump(L.shiId) : await client.dump();
+      if (!L) d.sendLog = client.log;
+      const o = ost[cid] || {};
+      const local = {...o, pod: o.pod ? {...o.pod, photos: (o.pod.photos || []).length, sig: o.pod.sig ? {strokes: (o.pod.sig.strokes || []).length, points: (o.pod.sig.strokes || []).reduce((n: number, x: any[]) => n + x.length, 0)} : null} : null};
+      const body = JSON.stringify({app: 'RUTT', kind: 'order', at: new Date().toISOString(), build: BUILD, cid, shiId: L ? L.shiId : null, orderNo: (st && st.orderNo) || null,
+        live: L ? {key: L.key, curId: L.curId, unloadSt: L.unloadSt, loadSt: L.loadSt, podType: L.podType, hasSpt: L.hasSpt, packageIds: L.packageIds} : null,
+        fresh: d.fresh, local, sendLog: d.sendLog, rows: d.rows});
+      const r = await fetch('https://forre.nu/rutt/dump.php', {method: 'POST', headers: {'Content-Type': 'application/json'}, body});
+      const j: any = await r.json().catch(() => null);
+      flash(r.ok && j && j.ok ? `Orderdata skickad till Claude · ${Math.round(body.length / 1024)} kB` : `Kunde inte skicka: ${(j && j.err) || 'svar ' + r.status}`, null);
+    } catch (e: any) { flash('Kunde inte skicka: ' + String(e?.message || e), null); }
+  }
   async function resendSavedPod(cid: string, st: any) {
     const pod = podMem.current[cid] || (ost[cid] || {}).pod;
     if (!pod) { flash('Ingen sparad kvittens på ordern', null); return; }
@@ -368,6 +419,25 @@ function AppInner(): React.JSX.Element {
     if (live && L && !pd) { flash('Ordern saknar kvittenstyp i Opter', null); return; }
     sendEdit(cid, st, {pod: pd}, `Sparad kvittens${pod.name ? ' · ' + pod.name : ''}`);
   }
+  // Blev något liggande osänt (RUTT stängdes under Ångra-väntan eller mitt i)? Skicka när vi är inloggade igen –
+  // men bara om Opter inte redan har statusen (då blir inget dubbelt).
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (!live || resumed.current || !orders.stops.length) return;
+    resumed.current = true;
+    for (const cid of Object.keys(ost)) {
+      const o = ost[cid] || {}, sy = o.sync || {};
+      if (sendTimers.current[cid + 'unload'] || sendTimers.current[cid + 'load']) continue;
+      const left = (v: any) => v === 'waiting' || v === 'sending';
+      const drop = orders.stops.find((x: any) => String(x.drop) === String(cid));
+      const pick = orders.stops.find((x: any) => String(x.pickup) === String(cid));
+      if (o.doneAt && left(sy.unload) && drop && drop.live) {
+        if (drop.live.unloadSt && drop.live.curId === drop.live.unloadSt.id) setSync(cid, 'unload', 'ok'); else retrySync(cid);
+      } else if (o.loadedAt && !o.doneAt && left(sy.load) && pick && pick.live) {
+        if (pick.live.loadSt && pick.live.curId === pick.live.loadSt.id) setSync(cid, 'load', 'ok'); else retrySync(cid);
+      }
+    }
+  }, [live, orders]);
   function retrySync(cid: string) {
     const o = ost[cid] || {};
     const pick = fullSrc && fullSrc.stops.find((s: any) => String(s.pickup) === String(cid));
@@ -521,14 +591,15 @@ function AppInner(): React.JSX.Element {
       if (adds.length && st === list[0]) {
         const mine = adds;
         {
-          if (addTimers.current[st.drop]) clearTimeout(addTimers.current[st.drop]);
-          addTimers.current[st.drop] = setTimeout(() => { delete addTimers.current[st.drop]; sendEdit(st.drop, st, {addServices: mine.map((a: any) => ({satId: a.satId, number: a.number, descr: ''}))}, 'Tillägg: ' + mine.map((a: any) => a.name + (a.number ? ' ' + a.number : '')).join(', ')); }, 8400);
+          if (addTimers.current[st.drop]) clearTimeout(addTimers.current[st.drop].t);
+          const fireAdd = () => { if (!addTimers.current[st.drop] || addTimers.current[st.drop].fire !== fireAdd) return; clearTimeout(addTimers.current[st.drop].t); delete addTimers.current[st.drop]; sendEdit(st.drop, st, {addServices: mine.map((a: any) => ({satId: a.satId, number: a.number, descr: ''}))}, 'Tillägg: ' + mine.map((a: any) => a.name + (a.number ? ' ' + a.number : '')).join(', ')); };
+          addTimers.current[st.drop] = {t: setTimeout(fireAdd, 8400), fire: fireAdd};
         }
       }
     }
     if (pod0.name) setNames(n => { const nn = rememberName(n, st0.who, pod0.name); saveJSON(NAMES_KEY, nn); return nn; });
     flash(many ? `Lossad · ${list.length} order hos ${st0.who || ''}` : `Lossad · ${st0.who || 'order'}`, () => {
-      list.forEach((x: any) => { cancelSend(x.drop, 'unload'); if (addTimers.current[x.drop]) { clearTimeout(addTimers.current[x.drop]); delete addTimers.current[x.drop]; } });
+      list.forEach((x: any) => { cancelSend(x.drop, 'unload'); if (addTimers.current[x.drop]) { clearTimeout(addTimers.current[x.drop].t); delete addTimers.current[x.drop]; } });
       setOst(o => { const n = {...o}; for (const x of list) { if (prev[x.drop]) n[x.drop] = prev[x.drop]; else delete n[x.drop]; } return n; });
     });
   }
@@ -1014,6 +1085,7 @@ function AppInner(): React.JSX.Element {
         onRepod={editFor && editFor.done && editFor.st && editFor.st.drop ? () => { const st = editFor.st; setEditFor(null); setSignStop({...st, repod: true}); } : undefined}
         saved={editFor ? (() => { const p = podMem.current[editFor.cid] || (ost[editFor.cid] || {}).pod; return p ? {name: p.name || '', hasSig: !!(p.sig && p.sig.strokes && p.sig.strokes.length)} : null; })() : null}
         onResend={editFor && editFor.done && editFor.st && editFor.st.drop ? () => { const f = editFor; setEditFor(null); resendSavedPod(f.cid, f.st); } : undefined}
+        onDump={editFor ? () => { const f = editFor; setEditFor(null); sendOrderDump(f.cid, f.st); } : undefined}
       />
       {signStop && (
         <SignScreen

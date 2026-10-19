@@ -35,7 +35,7 @@ const DEMO_STATUS = [{id: 11, name: 'Lastad', userOption: true, pickup: true}, {
 
 const numOk = (v: string) => /^\d+([.,]\d+)?$/.test(String(v).trim());
 
-export default function EditSheet({item, opts, history, onClose, onSend, onRepod, saved, onResend}: {
+export default function EditSheet({item, opts, history, onClose, onSend, onRepod, saved, onResend, onDump}: {
   item: {cid: string; st: any; done: boolean} | null;
   opts: any; history: any[];
   onClose: () => void;
@@ -43,6 +43,7 @@ export default function EditSheet({item, opts, history, onClose, onSend, onRepod
   onRepod?: () => void;
   saved?: {name?: string; hasSig?: boolean} | null; // kvittensen från lossningen, sparad i telefonen
   onResend?: () => void;
+  onDump?: () => void; // skicka orderns data till Claude (felsökning)
 }) {
   const [scr, setScr] = useState<Screen>('menu');
   const [statusId, setStatusId] = useState<number | null>(null);
@@ -284,6 +285,7 @@ export default function EditSheet({item, opts, history, onClose, onSend, onRepod
         <Item on={perm.changes} icon="input-cursor-text" t="Ändring" s={(O.fields || []).slice(0, 4).map((f: any) => f.label.replace(/\s*\(.*\)/, '')).join(', ') || 'Kolli, vikt …'} go={() => setScr('change')} />
         <Item on={perm.damages} icon="exclamation-triangle-fill" t="Avvikelse" s="Skada, fel antal, saknas …" go={() => setScr('damage')} tint={C.bad} />
       </View>
+      {onDump ? <Item on icon="send-fill" t="Skicka orderdata till Claude" s="Vad RUTT skickade, Opters svar och orderns rader i Opter" go={() => { onClose(); onDump(); }} /> : null}
       {history && history.length ? (
         <View style={{marginTop: 16}}>
           <Text style={e.lbl}>SKICKAT PÅ ORDERN</Text>

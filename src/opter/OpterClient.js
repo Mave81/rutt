@@ -43,6 +43,7 @@ export default class OpterClient {
     this._relogin = null;
     this.log = [];      // sändlogg: vad RUTT skickade och vad Opter svarade (följer med i Skicka orderdata)
     this.onLog = null;  // appen sparar loggen i telefonen
+    this.onDiag = null; // efter statusbyte: bevis till din dator (forre.nu/rutt/dump.php)
   }
   _log(e) {
     this.log = [...this.log, {at: new Date().toISOString(), ...e}].slice(-80);
@@ -55,6 +56,13 @@ export default class OpterClient {
       kolli: pod.packageCount, img: pod.image ? pod.image.length : 0, pos: pod.lat != null};
   }
   _podsOf(shiId) { return this._count('ShipmentPod', shiId); }
+  // Serverns rader för en order (för felsökning): ordern, dess underrader, kvittenstyper och kvittensinställningar.
+  _rowsFor(shiId) {
+    const rows = (this.lastDecoded && this.lastDecoded.rows) || [];
+    const mine = (x) => (x.table === 'Shipment' && x.key.xxxId === shiId) || x.columns.shiId === shiId || (x.parent && x.parent.table === 'Shipment' && x.parent.key.xxxId === shiId);
+    return rows.filter(x => mine(x) || x.table === 'DefaultPodType' || (x.table === 'Setting' && /pod|permission|status/i.test(String(x.columns.name || ''))))
+      .map(x => ({t: x.table, k: [x.key.identityId, x.key.offId, x.key.xxxId], p: x.parent ? x.parent.table : null, c: x.columns}));
+  }
 
   async connect(cfg) {
     this.cfg = cfg;
@@ -269,7 +277,8 @@ export default class OpterClient {
         return false; // kan ha kommit fram – kontrolleras nedan
       }
     };
-    const check = async () => { try { await this._fullSync(); } catch (e) {} const cur = this._statusOf(live.shiId); return {cur, ok: cur === statusId || cur === null}; };
+    // Bekräftelse bara mot en färsk helbild från servern. Misslyckas den räknas "ordern borta" INTE som klart.
+    const check = async () => { let fresh = false; try { await this._fullSync(); fresh = true; } catch (e) {} const cur = this._statusOf(live.shiId); return {cur, fresh, ok: cur === statusId || (fresh && cur === null)}; };
     let imageDropped = false, sent = false, c;
     try {
       sent = await attempt(pod, 'kvittens');
@@ -301,8 +310,9 @@ export default class OpterClient {
       if (pod) { try { sent = await attempt(null, 'bara status (reserv)'); } catch (e2) {} }
       c = await check();
     }
-    entry.to = c.cur; entry.confirmed = c.ok; entry.podsAfter = this._podsOf(live.shiId);
+    entry.to = c.cur; entry.fresh = c.fresh; entry.confirmed = c.ok; entry.podsAfter = this._podsOf(live.shiId);
     this._log(entry);
+    try { this.onDiag && this.onDiag(entry, this._rowsFor(live.shiId)); } catch (e) {}
     return {confirmed: c.ok, imageDropped, podSeen: entry.podsAfter > entry.podsBefore, rutt: P.toRutt(this.lastDecoded)};
   }
 
@@ -371,6 +381,13 @@ export default class OpterClient {
   }
 
   // Felsökning: färsk full synk, allt utom förarlista/loggar, som JSON-vänligt objekt.
+  // En order till Claude: färsk helbild från servern, ordern med alla underrader, och sändloggen för den.
+  async orderDump(shiId) {
+    let fresh = false;
+    try { await this._fullSync(); fresh = true; } catch (e) {}
+    return {fresh, rows: this._rowsFor(shiId), sendLog: this.log.filter(e => e.shiId === shiId)};
+  }
+
   async dump() {
     let d = this.lastDecoded || {rows: []}, note = 'senaste synk';
     try {
