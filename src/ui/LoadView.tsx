@@ -52,10 +52,13 @@ export default function LoadView({orders, cargo, route, laterRoute}: {orders: Lo
     // Samma ställe = samma nummer och färg (t.ex. 14 order till samma mottagare).
     const num: Record<string, number> = {}; const heads: any[] = [];
     list.forEach(o => { let i = heads.findIndex(h => samePlace(h, o.drop)); if (i < 0) { heads.push(o.drop); i = heads.length - 1; } num[o.cid] = i + 1; });
+    // Huvudbilden: ALLA order i bilen på en gång, där de ska stå (det som lossas sist längst in mot hytten).
+    const dropOnly = list.map(o => ({drop: o.cid}));
+    const all: any = simulateLoad(dropOnly, new Set(list.map(o => o.cid)), cargo);
     const rowsOf: Record<string, number[]> = {};
-    for (const c of Object.keys(sim.at)) rowsOf[c] = sim.at[c].map((i: number) => Math.floor(i / WIDE) + 1);
-    const slots = sim.peak.map((c: any) => (c ? {cid: c, loose: !(Number((cargo[c] || {}).pal) > 0)} : null));
-    const pallets = sim.peak.filter(Boolean).length;
+    for (const c of Object.keys(all.at)) rowsOf[c] = all.at[c].map((i: number) => Math.floor(i / WIDE) + 1);
+    const slots = all.peak.map((c: any) => (c ? {cid: c, loose: !(Number((cargo[c] || {}).pal) > 0)} : null));
+    const pallets = all.peak.filter(Boolean).length;
     const blockOf: Record<string, any> = {}; sim.blocks.forEach((b: any) => { blockOf[b.cid] = b; });
     // Steg för steg: bilen före första stoppet ("Nu") och efter varje stopp, i den ordning du kör (din eller RUTT:s).
     const steps = (sim.steps || []).map((x: any, i: number) => {
@@ -64,7 +67,7 @@ export default function LoadView({orders, cargo, route, laterRoute}: {orders: Lo
       return {i, label, stop: st, cnt, slots: x.slots.map((c: any) => (c ? {cid: c, loose: !(Number((cargo[c] || {}).pal) > 0)} : null))};
     });
     const total = list.reduce((n: number, o: any) => n + Math.max(1, Math.round(Number((cargo[o.cid] || {}).pal) || 0) || 1), 0);
-    return {list, slots, num, over: sim.over, pallets, total, rowsOf, etaDrop, etaPick, pickNo, blockOf, multiPick: pn > 1, steps};
+    return {list, slots, num, over: all.over, pallets, total, rowsOf, etaDrop, etaPick, pickNo, blockOf, multiPick: pn > 1, steps};
   }, [orders, cargo, route, laterRoute]);
 
   if (!plan.list.length) {
@@ -93,7 +96,7 @@ export default function LoadView({orders, cargo, route, laterRoute}: {orders: Lo
     <ScrollView contentContainerStyle={{paddingHorizontal: 14, paddingBottom: bottom}}>
       {plan.steps.length > 2 ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={l.steps}>
-          {[{i: -1, label: 'Fullast', cnt: plan.pallets}, ...plan.steps].map((x: any) => (
+          {[{i: -1, label: 'Alla order', cnt: plan.pallets}, ...plan.steps].map((x: any) => (
             <Pressable key={x.i} onPress={() => setStep(x.i)} style={[l.stepChip, step === x.i && l.stepOn]}>
               <Text style={[l.stepTxt, step === x.i && l.stepTxtOn]} numberOfLines={1}>{x.label}</Text>
               <Text style={[l.stepN, step === x.i && l.stepTxtOn]}>{x.cnt} pl</Text>
@@ -102,8 +105,8 @@ export default function LoadView({orders, cargo, route, laterRoute}: {orders: Lo
         </ScrollView>
       ) : null}
       <View style={l.sumRow}>
-        <Text style={l.sum}><Text style={l.sumB}>{Math.min(sel ? sel.cnt : plan.pallets, TOTAL)}</Text> av {TOTAL} pallplatser{sel ? ' i bilen' : plan.multiPick ? ' som mest samtidigt' : ''}</Text>
-        <Text style={l.sumDim}>{sel ? 'En ruta = en pall · namnet = vart den ska' : `${plan.total} pall totalt${plan.total > plan.pallets ? ` – ${plan.total - plan.pallets} är redan av innan resten lastas` : ''} · en ruta = en pall`}</Text>
+        <Text style={l.sum}><Text style={l.sumB}>{Math.min(sel ? sel.cnt : plan.pallets, TOTAL)}</Text> av {TOTAL} pallplatser{sel ? ' i bilen just då' : ' upptagna'}</Text>
+        <Text style={l.sumDim}>En ruta = en pall · namnet = vart den ska</Text>
       </View>
       {stepTxt ? <Text style={l.stepInfo}>{stepTxt}</Text> : null}
       {plan.over > 0 && (
