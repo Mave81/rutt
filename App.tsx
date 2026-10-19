@@ -31,7 +31,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '17 okt · status-lampor, rast-ruta, logga ut stänger';
+const BUILD = '19 okt · kvittensen (signatur + namn) kommer fram i Opter, skicka sparad kvittens igen';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -331,7 +331,7 @@ function AppInner(): React.JSX.Element {
       sendChain.current = sendChain.current.catch(() => {}).then(async () => {
         try {
           const r = await run();
-          setSync(cid, step, r.confirmed ? (r.imageDropped ? 'ok-noimg' : 'ok') : 'unconfirmed');
+          setSync(cid, step, r.confirmed ? (r.noPod ? 'nopod' : r.imageDropped ? 'ok-noimg' : 'ok') : 'unconfirmed');
           if (r.rutt && r.rutt.stops && r.rutt.stops.length) setOrders(r.rutt);
         } catch (e) { setSync(cid, step, 'failed'); }
       });
@@ -348,7 +348,19 @@ function AppInner(): React.JSX.Element {
     const L = st.live;
     if (!live || !L || !L.unloadSt) return;
     const podData = await podPayload(L, pod);
-    queueSend(st.drop, 'unload', () => client.setStatus(L, L.unloadSt.id, podData));
+    const hadPod = !!(pod && (pod.name || (pod.sig && pod.sig.strokes && pod.sig.strokes.length)));
+    // Opter tar bara emot en kvittens med en kvittenstyp. Saknas den → säg det, låtsas inte att den kom fram.
+    if (!podData && hadPod) flash('Kvittensen kom inte med – ordern saknar kvittenstyp i Opter', null);
+    queueSend(st.drop, 'unload', async () => { const r = await client.setStatus(L, L.unloadSt.id, podData); return (!podData && hadPod && r.confirmed) ? {...r, noPod: true} : r; });
+  }
+  // Kvittensen som sparades vid lossningen (signatur + namn) skickas till Opter igen, utan ny signatur.
+  async function resendSavedPod(cid: string, st: any) {
+    const pod = podMem.current[cid] || (ost[cid] || {}).pod;
+    if (!pod) { flash('Ingen sparad kvittens på ordern', null); return; }
+    const L = st && st.live;
+    const pd = live && L ? await podPayload(L, pod) : null;
+    if (live && L && !pd) { flash('Ordern saknar kvittenstyp i Opter', null); return; }
+    sendEdit(cid, st, {pod: pd}, `Sparad kvittens${pod.name ? ' · ' + pod.name : ''}`);
   }
   function retrySync(cid: string) {
     const o = ost[cid] || {};
@@ -943,6 +955,8 @@ function AppInner(): React.JSX.Element {
         onClose={() => setEditFor(null)}
         onSend={(edit: any, label: string) => editFor && sendEdit(editFor.cid, editFor.st, edit, label)}
         onRepod={editFor && editFor.done && editFor.st && editFor.st.drop ? () => { const st = editFor.st; setEditFor(null); setSignStop({...st, repod: true}); } : undefined}
+        saved={editFor ? (() => { const p = podMem.current[editFor.cid] || (ost[editFor.cid] || {}).pod; return p ? {name: p.name || '', hasSig: !!(p.sig && p.sig.strokes && p.sig.strokes.length)} : null; })() : null}
+        onResend={editFor && editFor.done && editFor.st && editFor.st.drop ? () => { const f = editFor; setEditFor(null); resendSavedPod(f.cid, f.st); } : undefined}
       />
       {signStop && (
         <SignScreen

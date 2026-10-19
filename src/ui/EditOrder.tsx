@@ -35,12 +35,14 @@ const DEMO_STATUS = [{id: 11, name: 'Lastad', userOption: true, pickup: true}, {
 
 const numOk = (v: string) => /^\d+([.,]\d+)?$/.test(String(v).trim());
 
-export default function EditSheet({item, opts, history, onClose, onSend, onRepod}: {
+export default function EditSheet({item, opts, history, onClose, onSend, onRepod, saved, onResend}: {
   item: {cid: string; st: any; done: boolean} | null;
   opts: any; history: any[];
   onClose: () => void;
   onSend: (edit: Edit, label: string) => void;
   onRepod?: () => void;
+  saved?: {name?: string; hasSig?: boolean} | null; // kvittensen från lossningen, sparad i telefonen
+  onResend?: () => void;
 }) {
   const [scr, setScr] = useState<Screen>('menu');
   const [statusId, setStatusId] = useState<number | null>(null);
@@ -275,6 +277,7 @@ export default function EditSheet({item, opts, history, onClose, onSend, onRepod
       ) : null}
       <View style={locked ? {opacity: 0.4} : null}>
         <Item on={canStatus} icon="arrow-counterclockwise" t="Ändra status" s={`T.ex. tillbaka till ${(pickable.find((x: any) => x.pickup) || pickable[0] || {}).name || 'Lastad'}`} go={() => setScr('status')} />
+        <Item on={item.done && perm.pod && !!onResend && !!saved && (!!saved.hasSig || !!saved.name)} icon="cloud-arrow-up-fill" t="Skicka sparad kvittens" s={[saved && saved.hasSig ? 'Signaturen' : '', saved && saved.name ? (saved.hasSig ? 'och ' : '') + 'namnet ' + saved.name : ''].filter(Boolean).join(' ') + ' från lossningen, till Opter igen'} go={() => { onClose(); onResend && onResend(); }} tint={C.accent2} />
         <Item on={item.done && perm.pod && !!onRepod} icon="pen-fill" t="Ny kvittens" s="Signatur, namn eller foto igen" go={() => { onClose(); onRepod && onRepod(); }} />
         <Item on={perm.addImage} icon="camera-fill" t="Lägg till bild" s="Bild på ordern, utan ny kvittens" go={() => setScr('image')} />
         <Item on={perm.addService} icon="plus-circle-fill" t="Tillägg" s={addTypes.length ? addTypes.slice(0, 3).map((a: any) => a.name).join(', ') + (addTypes.length > 3 ? '…' : '') : 'Väntetid, inbärning …'} go={() => setScr('add')} tint={C.accentInk} />

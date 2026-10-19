@@ -100,12 +100,12 @@ const initials = (s: string) => String(s || '').replace(/\(.*?\)/g, '').trim().s
 // Hur långt sändningen till Opter kommit.
 const SYNC_TXT: Record<string, string> = {
   waiting: 'Skickas till Opter om några sekunder…', sending: 'Skickar till Opter…',
-  ok: 'Uppdaterad i Opter', 'ok-noimg': 'Uppdaterad i Opter (bilden kom inte med)',
+  ok: 'Uppdaterad i Opter', 'ok-noimg': 'Uppdaterad i Opter (bilden kom inte med)', nopod: 'Lossad i Opter – kvittensen kom inte med',
   unconfirmed: 'Opter har inte bekräftat – tryck för att försöka igen', failed: 'Kunde inte nå Opter – tryck för att försöka igen',
 };
 function SyncLine({state, label, onRetry}: {state?: string; label: string; onRetry: () => void}) {
   if (!state) return null;
-  const bad = state === 'unconfirmed' || state === 'failed';
+  const bad = state === 'unconfirmed' || state === 'failed' || state === 'nopod';
   const ok = state === 'ok' || state === 'ok-noimg';
   const col = ok ? C.accent2 : bad ? C.bad : C.faint;
   return (

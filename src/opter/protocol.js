@@ -705,7 +705,10 @@ function toRutt(decoded) {
 
   // Orderns egna statusar och kvittenstyper (ligger som underrader i orderns block).
   const belongs = (r, shiId) => (r.columns.shiId === shiId) || (r.parent && r.parent.table === 'Shipment' && r.parent.key.xxxId === shiId);
-  const defPods = decoded.rows.filter(r => r.table === 'DefaultPodType' && r.columns.active !== false).map(r => ({id: r.key.xxxId, ...r.columns}));
+  // Opters standardvärden (DefaultPodType.java): Active, AllowBeforePickup och AllowAfterPickup är SANNA
+  // från början, och servern skickar bara fält som skiljer sig från standard → saknat fält = ja.
+  const defPods = decoded.rows.filter(r => r.table === 'DefaultPodType' && r.columns.active !== false)
+    .map(r => ({id: r.key.xxxId, ...r.columns, active: true, allowBeforePickup: r.columns.allowBeforePickup !== false, allowAfterPickup: r.columns.allowAfterPickup !== false}));
   const podTypesFor = (beforePickup) => {
     const ok = defPods.filter(d => beforePickup ? d.allowBeforePickup : d.allowAfterPickup);
     return {main: ok.filter(d => !d.mainId), sub: ok.filter(d => d.mainId)};

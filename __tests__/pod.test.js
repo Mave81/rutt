@@ -10,7 +10,7 @@ test('krav = orderns krav OCH kvittenstypens krav; typer från DefaultPodType', 
     row('ShipmentPackage', 501, {quantity: 3}, ship),
     row('DefaultPodType', 3, {name: 'Signatur', sigReq: true, picReq: true, commentReq: true, isDefault: true, active: true, allowAfterPickup: true}),
     row('DefaultPodType', 4, {name: 'Foto', picReq: true, active: true, allowAfterPickup: true}),
-    row('DefaultPodType', 5, {name: 'Före hämtning', active: true, allowBeforePickup: true})];
+    row('DefaultPodType', 5, {name: 'Före hämtning', active: true, allowBeforePickup: true, allowAfterPickup: false})];
   const drop = P.toRutt({rows}).stops.find(s => s.drop);
   expect(drop.req).toEqual({name: false, sig: true, remark: false, comment: false, pic: false});
   expect(drop.pod.types.map(t => t.name)).toEqual(['Signatur', 'Foto']);
@@ -33,4 +33,17 @@ test('Lossad-paketet: status + logg + kvittens + kollikvittenser, nya rader med 
   expect(pod.columns.shiId).toBeUndefined();
   expect(pod.columns.lat).toBeCloseTo(59.33); expect(pod.columns.lng).toBeCloseTo(18.06);
   expect(pp.columns.spaId).toBe(501); expect(pp.parent.table).toBe('ShipmentPod');
+});
+
+test('kvittenstyp utan "tillåt efter hämtning"-fält räknas som tillåten (Opters standard = sant)', () => {
+  // Servern skickar bara fält som skiljer sig från standard – så ser det ut på riktigt.
+  const ship = row('Shipment', 100, {orderId: 555, adrFrom: 1, adrTo: 2, shsId: 12, podSigReq: true, podNameReq: true});
+  const rows = [row('Address', 1, {company: 'A'}), row('Address', 2, {company: 'B'}), ship,
+    row('ShipmentStatus', 12, {name: 'Bekräftad', accepted: true, order: 1}, ship),
+    row('ShipmentStatus', 13, {name: 'Lossad', delivery: true, pod: true, order: 3}, ship),
+    row('DefaultPodType', 7, {name: 'Kvittens', sigReq: true, nameReq: true, isDefault: true})];
+  const drop = P.toRutt({rows}).stops.find(s => s.drop);
+  expect(drop.pod.types.map(t => t.name)).toEqual(['Kvittens']);
+  expect(drop.live.podType).toEqual({id: 7, name: 'Kvittens'});
+  expect(drop.req.sig).toBe(true); expect(drop.req.name).toBe(true);
 });
