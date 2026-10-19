@@ -16,7 +16,7 @@ import OrdersView, {DoneView, setNavApp, NavApp} from './src/ui/OrdersView';
 import SignScreen from './src/ui/SignScreen';
 import EditSheet, {DEMO_OPTS} from './src/ui/EditOrder';
 import JobbetView, {useJobbet} from './src/ui/JobbetView';
-import NewOrdersView from './src/ui/NewOrdersView';
+import NewOrdersView, {NewOrderCard, RejectSheet, ForwardSheet} from './src/ui/NewOrdersView';
 import LoadView from './src/ui/LoadView';
 import {loadJSON, saveJSON, ORDERS_KEY, NAMES_KEY, companyKey, rememberName} from './src/store';
 import {Buffer} from 'buffer';
@@ -31,7 +31,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '19 okt · Säg till: hämtar 4 pall hos …, gata, ordernummer → Kontoret, chefen, trafikledningen eller stället';
+const BUILD = '19 okt · rast: tid som tickar + Avsluta rasten, ny order under rasten: Acceptera, Skicka vidare, Neka';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -122,11 +122,13 @@ function AppInner(): React.JSX.Element {
   const [workSince, setWorkSince] = useState<number>(0); // när rasten/lunchen började
   const [nowTick, setNowTick] = useState(Date.now());
   useEffect(() => { loadJSON('rutt.work.v1', null).then((v: any) => { if (v && v.day === new Date().toDateString() && v.state) { setWork(v.state); setWorkSince(v.since || 0); } }); }, []);
-  useEffect(() => { if (work === 'igång') return; const t = setInterval(() => setNowTick(Date.now()), 15000); return () => clearInterval(t); }, [work]);
+  useEffect(() => { if (work === 'igång') return; const t = setInterval(() => setNowTick(Date.now()), work === 'slut' ? 15000 : 1000); return () => clearInterval(t); }, [work]);
   const [workSheet, setWorkSheet] = useState(false);
   // Orderstatus per order (cid): {loadedAt, doneAt, pod}. Sparas lokalt per dag.
   const [ost, setOst] = useState<Record<string, any>>({});
-  const [newState, setNewState] = useState<Record<string, 'sending' | 'failed'>>({});
+  const [newState, setNewState] = useState<Record<string, 'sending' | 'failed' | 'forwarding'>>({});
+  const [rejectFor, setRejectFor] = useState<any>(null);
+  const [forwardFor, setForwardFor] = useState<any>(null);
   const [names, setNames] = useState<Record<string, string[]>>({}); // sparade mottagarnamn per företag
   const [signStop, setSignStop] = useState<any>(null); // stopp som signeras just nu
   const [editFor, setEditFor] = useState<{cid: string; st: any; done: boolean} | null>(null); // order som ändras (Klart eller planen)
@@ -218,7 +220,7 @@ function AppInner(): React.JSX.Element {
   const legs = (cid: string) => ({pick: fullSrc.stops.find((s: any) => String(s.pickup) === cid), drop: fullSrc.stops.find((s: any) => String(s.drop) === cid)});
   const classOf = (cid: string): 'new' | 'todo' | 'done' | 'hidden' => {
     const o = ost[cid] || {};
-    if (o.rejectedAt) return 'hidden';
+    if (o.rejectedAt || o.givenAt) return 'hidden';
     const {pick, drop} = legs(cid);
     const L = (pick && pick.live) || (drop && drop.live);
     const t0 = L ? L.tab : 'todo'; // demo: allt är att göra
@@ -390,6 +392,23 @@ function AppInner(): React.JSX.Element {
         if (which === 'accept') setTab('plan');
       } else setNewState(s => ({...s, [o.cid]: 'failed'}));
     } catch (e) { setNewState(s => ({...s, [o.cid]: 'failed'})); }
+  }
+
+  // Skicka vidare (Opters "Ge bort") till en annan förare i åkeriet.
+  async function forwardOrder(o: any, d: any) {
+    const L = (o.pick && o.pick.live) || (o.drop && o.drop.live);
+    const first = d.name.split(' ')[0];
+    const mark = () => setOst(x => ({...x, [o.cid]: {...(x[o.cid] || {}), givenAt: Date.now(), givenTo: d.name}}));
+    if (!live || !L) { mark(); flash(`Demo · skickad till ${first}`, null); return; }
+    setNewState(s => ({...s, [o.cid]: 'forwarding'}));
+    try {
+      const r = await client.giveAway(L, d);
+      if (r.confirmed) {
+        mark(); setNewState(s => { const n = {...s}; delete n[o.cid]; return n; });
+        if (r.rutt && r.rutt.stops) setOrders(r.rutt);
+        flash(`Skickad till ${first} i Opter`, null);
+      } else { setNewState(s => ({...s, [o.cid]: 'failed'})); flash('Opter tog inte emot – ordern ligger kvar hos dig', null); }
+    } catch (e) { setNewState(s => ({...s, [o.cid]: 'failed'})); flash('Kunde inte nå Opter – ordern ligger kvar hos dig', null); }
   }
 
   // Lastad – en eller flera order på samma ställe på en gång. Ångra tar tillbaka alla.
@@ -841,7 +860,7 @@ function AppInner(): React.JSX.Element {
               <Text style={s.demoGo}>Avsluta</Text>
             </Pressable>
           )}
-          {newOrders.length > 0 && tab !== 'nytt' && (
+          {newOrders.length > 0 && tab !== 'nytt' && (work === 'igång' || work === 'slut') && (
             <Pressable style={s.banner} onPress={() => setTab('nytt')}>
               <Bi n="bell-fill" size={16} color={C.onAccent} />
               <Text style={s.bannerTxt}>{newOrders.length === 1 ? '1 ny order' : `${newOrders.length} nya order`} väntar på svar</Text>
@@ -849,26 +868,41 @@ function AppInner(): React.JSX.Element {
             </Pressable>
           )}
           {work !== 'igång' && (() => {
-            // Rast / lunch: syns på alla flikar med hur länge den pågått. Röd lampa = du är inte i tjänst.
-            const min = workSince ? Math.max(0, Math.floor((nowTick - workSince) / 60000)) : 0;
-            const dur = min >= 60 ? `${Math.floor(min / 60)} h ${min % 60} min` : `${min} min`;
+            // Rast / lunch: liten ruta på alla flikar – tid som går, knapp för att avsluta. Röd lampa = inte i tjänst.
+            const sec = workSince ? Math.max(0, Math.floor((nowTick - workSince) / 1000)) : 0;
+            const two = (x: number) => String(x).padStart(2, '0');
+            const clock = sec >= 3600 ? `${Math.floor(sec / 3600)}:${two(Math.floor(sec / 60) % 60)}:${two(sec % 60)}` : `${Math.floor(sec / 60)}:${two(sec % 60)}`;
             const what = work === 'rast' ? 'Rast' : work === 'lunch' ? 'Lunch' : 'Arbetsdagen avslutad';
+            const onBreak = work === 'rast' || work === 'lunch';
+            const top = onBreak && tab !== 'nytt' ? newOrders[0] : null;
             return (
-              <View style={s.breakCard}>
-                <View style={s.breakIco}><Bi n={work === 'slut' ? 'power' : 'cup-hot-fill'} size={20} color={C.bad} /></View>
-                <View style={{flex: 1, minWidth: 0}}>
-                  <View style={{flexDirection: 'row', alignItems: 'center', gap: 6}}><Lamp col={C.bad} size={8} /><Text style={s.breakT}>{what}</Text></View>
-                  <Text style={s.breakS}>{work === 'slut' ? (workSince ? `sedan ${hhmm(new Date(workSince))}` : '') : `${dur}${workSince ? `  ·  sedan ${hhmm(new Date(workSince))}` : ''}`}{live ? '' : '  ·  demo'}</Text>
+              <View style={{marginHorizontal: 14, marginBottom: 8}}>
+                {top ? (
+                  <NewOrderCard compact item={top} cargo={fullSrc ? fullSrc.cargo : {}}
+                    extra={newOrders.length > 1 ? <Pressable onPress={() => setTab('nytt')}><Text style={s.moreNew}>+{newOrders.length - 1} till</Text></Pressable> : null}
+                    onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={setRejectFor}
+                    onForward={(orders.perm && orders.perm.giveAway === false) ? undefined : setForwardFor} />
+                ) : null}
+                <View style={s.breakCard}>
+                  <View style={s.breakIco}><Bi n={work === 'slut' ? 'power' : 'cup-hot-fill'} size={20} color={C.bad} /></View>
+                  <View style={{flex: 1, minWidth: 0}}>
+                    <View style={{flexDirection: 'row', alignItems: 'center', gap: 6}}><Lamp col={C.bad} size={8} /><Text style={s.breakT}>{what}</Text></View>
+                    {onBreak ? <Text style={s.breakClock}>{clock}</Text> : null}
+                    <Text style={s.breakS}>{workSince ? `sedan ${hhmm(new Date(workSince))}` : ''}{live ? '' : '  ·  demo'}</Text>
+                  </View>
+                  <Pressable style={s.breakBtn} onPress={() => (work === 'rast' ? doWork(RST.EndBreak, 'igång') : work === 'lunch' ? doWork(RST.EndLunch, 'igång') : doWork(1, 'igång'))} android_ripple={{color: C.edge}}>
+                    <Bi n={work === 'slut' ? 'play-circle' : 'stopwatch-fill'} size={16} color="#FFFFFF" />
+                    <Text style={s.breakBtnT}>{work === 'slut' ? 'Återuppta' : `Avsluta ${work === 'rast' ? 'rasten' : 'lunchen'}`}</Text>
+                  </Pressable>
                 </View>
-                <Pressable style={s.breakBtn} onPress={() => (work === 'rast' ? doWork(RST.EndBreak, 'igång') : work === 'lunch' ? doWork(RST.EndLunch, 'igång') : doWork(1, 'igång'))}>
-                  <Text style={s.breakBtnT}>{work === 'slut' ? 'Återuppta' : `Avsluta ${work}`}</Text>
-                </Pressable>
               </View>
             );
           })()}
 
           {tab === 'klart' && <DoneView done={doneOrders} onRetry={retrySync} onOpen={(d: any) => setEditFor({cid: d.cid, st: d.st, done: true})} />}
-          {tab === 'nytt' && <NewOrdersView orders={newOrders} onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={(o: any) => setOrderStatus(o, 'reject')} />}
+          {tab === 'nytt' && <NewOrdersView orders={newOrders} cargo={fullSrc ? fullSrc.cargo : {}} onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={(o: any) => setOrderStatus(o, 'reject')} onForward={(orders.perm && orders.perm.giveAway === false) ? undefined : setForwardFor} />}
+          <RejectSheet o={rejectFor} onClose={() => setRejectFor(null)} onReject={(o: any) => setOrderStatus(o, 'reject')} />
+          <ForwardSheet o={forwardFor} drivers={team.drivers} onClose={() => setForwardFor(null)} onForward={forwardOrder} />
 
           {tab === 'plan' && !orders.stops.length && !demo && (
             <View style={s.emptyBox}>
@@ -1142,11 +1176,13 @@ const s = themed(() => StyleSheet.create({
   statusCard: {marginTop: 14, backgroundColor: C.panel2, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 12},
   logoutBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 20, height: 52, borderRadius: 12, backgroundColor: C.badSoft},
   logoutTxt: {color: C.bad, fontSize: 15.5, fontWeight: '800'},
-  breakCard: {flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 14, marginBottom: 8, backgroundColor: C.badSoft, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 12},
+  moreNew: {color: C.accentInk, fontSize: 12.5, fontWeight: '900'},
+  breakClock: {color: C.ink, fontSize: 26, fontWeight: '900', fontVariant: ['tabular-nums'], letterSpacing: 0.5, marginTop: 1},
+  breakCard: {flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.badSoft, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 12},
   breakIco: {width: 42, height: 42, borderRadius: 21, backgroundColor: C.panel, alignItems: 'center', justifyContent: 'center'},
   breakT: {color: C.ink, fontSize: 16, fontWeight: '900'},
   breakS: {color: C.dim, fontSize: 13, marginTop: 2, fontWeight: '600'},
-  breakBtn: {backgroundColor: C.bad, borderRadius: 10, paddingHorizontal: 12, height: 40, justifyContent: 'center'},
+  breakBtn: {flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.bad, borderRadius: 12, paddingHorizontal: 14, height: 46, justifyContent: 'center'},
   breakBtnT: {color: '#FFFFFF', fontSize: 13.5, fontWeight: '800'},
   stFix: {color: C.accentInk, fontSize: 12.5, fontWeight: '700'},
   build: {color: C.accentInk, fontSize: 11, opacity: 0.8},

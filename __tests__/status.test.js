@@ -55,3 +55,19 @@ test('anslutningen bryts mitt i → skickas igen och bekräftas mot servern', as
   expect(r.confirmed).toBe(true);
   expect(c.log[0].tries[0].err).toBe('avbrott');
 });
+
+test('Skicka vidare: samma text som Opters Ge bort, "1" = klart', async () => {
+  expect(P.encodeGiveAway({offId: 1, shiId: 9001, toOffId: 1, toResId: 77, vhcOffId: 1}).toString('utf8')).toBe('1\n9001\n1\n77\n1\n0');
+  const c = new OpterClient(); c.logon = {acdOffId: 1, vhcId: 5};
+  let got = null;
+  c.send = async (type, buf) => { got = {type, txt: buf.toString('utf8')}; return {type: 7, payload: Buffer.from('1')}; };
+  c._fullSync = async () => { c.lastDecoded = {rows: []}; };
+  const r = await c.giveAway(live, {resId: 77, name: 'Joel'});
+  expect(got).toEqual({type: 7, txt: '1\n9001\n1\n77\n1\n0'});
+  expect(r.confirmed).toBe(true);
+});
+
+test('förarlistan har kontor (OFF_Id) för Skicka vidare', () => {
+  const rows = [{table: 'Resource', key: {identityId: 1, offId: 3, xxxId: 77}, columns: {name: 'Joel A'}}];
+  expect(P.team({rows}, {resId: 1, supplierId: 0}).drivers).toEqual([{resId: 77, offId: 3, name: 'Joel A'}]);
+});

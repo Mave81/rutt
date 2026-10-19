@@ -338,6 +338,26 @@ export default class OpterClient {
     return {confirmed: (sent || confirmed) && ok2, sent, imageDropped, error: err ? String(err.message || err) : null, rutt: P.toRutt(this.lastDecoded)};
   }
 
+  // Skicka vidare (Opters "Ge bort"): ordern till en annan förare. Opter svarar "1" när det gått igenom;
+  // sen kollas mot servern att ordern inte längre ligger hos dig.
+  async giveAway(live, to) {
+    if (!this.logon) throw new Error('inte inloggad');
+    const vhcOffId = this.logon.vhcId ? this.logon.acdOffId : 0;
+    const payload = P.encodeGiveAway({offId: live.key.offId, shiId: live.shiId, toOffId: to.offId || this.logon.acdOffId, toResId: to.resId, vhcOffId});
+    const entry = {kind: 'skicka vidare', shiId: live.shiId, to: to.resId};
+    let answer = '';
+    try {
+      const res = await this.send(P.MessageType.AssignShipmentToAnotherResource, payload, {once: true});
+      answer = Buffer.from(res.payload || []).toString('utf8').trim();
+      entry.resp = res.type; entry.answer = answer;
+    } catch (e) { entry.err = String(e && e.message || e); try { await this.relogin(); } catch (e2) {} }
+    try { await this._fullSync(); } catch (e) {}
+    const gone = this._statusOf(live.shiId) === null;
+    entry.gone = gone; entry.confirmed = answer === '1' || gone;
+    this._log(entry);
+    return {confirmed: entry.confirmed, rutt: P.toRutt(this.lastDecoded)};
+  }
+
   // GPS-position → Opter (som Opter Driver). Skickas utan full synk tillbaka (lätt anrop).
   async sendPosition(loc) {
     if (!this.logon) return false;

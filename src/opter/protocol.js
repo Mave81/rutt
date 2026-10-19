@@ -11,7 +11,7 @@ const CHARSET = 'utf8';
 
 const MessageType = {
   NoData: 0, Corrupt: 1, NotLoggedOn: 2, Logon: 3, VerifyLogon: 4,
-  Synchronize: 5, Disconnect: 19, GetEmployees: 25, GetVehicles: 26,
+  Synchronize: 5, AssignShipmentToAnotherResource: 7, Disconnect: 19, GetEmployees: 25, GetVehicles: 26,
   ServerNotificationPush: 16,
 };
 
@@ -455,7 +455,7 @@ function editOptions(decoded) {
   }).sort(byOrder);
   return {
     perm: {
-      pod: sBool('ProofOfDeliveryPermission', true), addService: sBool('AddServicePermission', true),
+      pod: sBool('ProofOfDeliveryPermission', true), addService: sBool('AddServicePermission', true), giveAway: sBool('GiveAwayPermission', true),
       changes: sBool('ChangesPermission', true), damages: sBool('DamagesPermission', true),
       addImage: sBool('AddImagePermission', true), status: sBool('SetArbitraryStatusPermission', true),
       statusDone: sBool('SetArbitraryStatusDoneTabPermission', true),
@@ -603,6 +603,13 @@ function resourceList(decoded, logon) {
   return out;
 }
 
+/* "Ge bort" / Skicka vidare – exakt som Opter Driver (MethodsSocketProxy.assignShipmentToResource):
+ * eget meddelande (typ 7), text med radbrytningar: ordern OFF_Id, SHI_Id, förarens OFF_Id, RES_Id, bilens OFF_Id, VHC_Id (0 = ingen bil).
+ * Servern svarar "1" när ordern bytt förare. */
+function encodeGiveAway({offId, shiId, toOffId, toResId, vhcOffId}) {
+  return Buffer.from([offId || 0, shiId, toOffId || 0, toResId, vhcOffId || 0, 0].join('\n'), 'utf8');
+}
+
 /* Folket på jobbet (Opter: samma lista som "Ge bort" – aktiva förare, Resources.giveAwayShipmentChooser)
  * + trafikledningens nummer om kontoret lagt in det (Office.OFF_PhoneNoDispatch). Inga telefonnummer finns för förarna. */
 function team(decoded, logon) {
@@ -621,7 +628,7 @@ function team(decoded, logon) {
     if (!id || seen.has(id) || c.active === false || c.driver === false || !c.name) continue;
     if (onlySup && (c.supplierId || 0) !== sup) continue;
     if (me && id === me) continue;
-    seen.add(id); drivers.push({resId: id, name: String(c.name).trim()});
+    seen.add(id); drivers.push({resId: id, offId: r.key.offId || 0, name: String(c.name).trim()});
   }
   drivers.sort((a, b) => a.name.localeCompare(b.name, 'sv'));
   const off = rows.find(r => r.table === 'Office' && (r.columns.phoneDispatch || r.columns.emailDispatch));
@@ -844,6 +851,7 @@ function toRutt(decoded) {
     multi: sBool('SetMultipleStatusPermission', true),
     pickup: sBool('ManualStatusChangePickUpPermission', true),
     delivery: sBool('ManualStatusChangeDeliveryPermission', true),
+    giveAway: sBool('GiveAwayPermission', true),
   };
   return { cargo, stops, perm, opts: editOptions(decoded) };
 }
@@ -851,5 +859,5 @@ function toRutt(decoded) {
 module.exports = {
   MessageType, Table, DT, RST, F, frame, unframe, decodeSync, ticksToDate,
   logonPayload, parseLogon, resourceList, encodeStartWork, encodeWorkStatus, toRutt,
-  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering, palFromText, team, encodeShipmentStatus, encodeShipmentEdit, editOptions, CET, CHANGE_FIELDS, signatureString, encodePosition, setting,
+  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering, palFromText, team, encodeShipmentStatus, encodeShipmentEdit, encodeGiveAway, editOptions, CET, CHANGE_FIELDS, signatureString, encodePosition, setting,
 };
