@@ -27,7 +27,9 @@ export default function PlanDay({route, cargo, onReorder}: {route: any; cargo: a
     const pal = cids.reduce((n, c) => n + (Number((cargo[c] || {}).pal) || 0), 0);
     const peak = (sim.peak || []).filter(Boolean).length;
     const late = (route && route.plan && route.plan.broken) || [];
-    return {cids, pal, peak, blocks: sim.blocks || [], late, end: route && route.plan && route.plan.end};
+    const nogeo = order.filter((s: any) => s.lat == null).length;
+    const est = rows.filter((r: any, i: number) => i > 0 && r && r.leg && r.leg.est && !r.nogeo).length;
+    return {cids, pal, peak, blocks: sim.blocks || [], late, end: route && route.plan && route.plan.end, nogeo, est};
   }, [route, cargo]);
   if (!route || !order.length) return <View style={p.empty}><Bi n="calendar-event" size={30} color={C.faint} /><Text style={p.emptyT}>Inga order för imorgon än.</Text></View>;
   const date = route.day ? new Date(route.day + 'T12:00').toLocaleDateString('sv-SE', {weekday: 'long', day: 'numeric', month: 'long'}) : '';
@@ -42,6 +44,9 @@ export default function PlanDay({route, cargo, onReorder}: {route: any; cargo: a
           {info.late.length ? <Text style={[p.sumS, {color: C.bad}]}>{info.late.length} stopp blir sena: {info.late.map((x: any) => `${x.s.who || '—'} (${x.late} min)`).join(', ')}</Text> : null}
           {info.blocks.length ? <Text style={[p.sumS, {color: C.bad}]}>Måste lasta om: {info.blocks.length} gång{info.blocks.length > 1 ? 'er' : ''} – gods står i vägen</Text> : null}
           {ok ? <Text style={p.sumS}>Alla tider hålls · inget behöver lastas om · som mest {info.peak} pall ombord</Text> : null}
+          {info.nogeo ? <Text style={[p.sumS, {color: C.bad}]}>{info.nogeo} stopp hittas inte på kartan – körtiden dit är okänd, ordningen kan bli fel</Text>
+            : info.est ? <Text style={p.sumS}>Körtider uppskattade (inget svar från kartan än)</Text>
+            : <Text style={p.sumS}>Körtider längs vägarna (OpenStreetMap)</Text>}
         </View>
         {order.map((s: any, i: number) => {
           const cid = String(s.pickup || s.drop), n = num(cid), r = rows[i] || {};

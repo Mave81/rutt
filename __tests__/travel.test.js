@@ -35,3 +35,16 @@ test('lär sig: kör du snabbare än gissningen blir faktorn under 1 (minst 5 re
   const r1 = computeRoute([{pickup: 'X', lat: 59.3, lng: 18.0}, {drop: 'X', lat: 59.4, lng: 18.1}], {X: {pal: 1}}, {lat: 59.3, lng: 18.0}, Date.now(), null);
   expect(r.plan.rows[1].leg.min / r1.plan.rows[1].leg.min).toBeCloseTo(0.8);
 });
+
+test('adress utan koordinater slås upp och används i rutten; okänd adress sparas som miss', async () => {
+  const calls = [];
+  const fake = async (u) => { calls.push(u); return {json: async () => (u.includes('L%C3%A4nna') || u.includes('Lännavägen') ? [{lat: '59.2299', lon: '18.1312'}] : [])}; };
+  const stops = [{pickup: 'A', adr: 'Lännavägen 1', zip: '142 50', area: 'Länna'}, {drop: 'A', adr: 'Okändgatan 9', zip: '', area: 'Ingenstans'}];
+  const n = await T.geocode(stops, fake);
+  expect(n).toBe(1);
+  expect(calls[0]).toContain('nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=se&street=L%C3%A4nnav%C3%A4gen%201&postalcode=14250&city=L%C3%A4nna');
+  const g = T.withGeo(stops);
+  expect(g[0]).toMatchObject({lat: 59.2299, lng: 18.1312, geo: true});
+  expect(g[1].lat).toBeUndefined();
+  expect(await T.geocode(stops, async () => { throw new Error('ska inte anropas igen'); })).toBe(0); // båda sparade
+}, 15000);

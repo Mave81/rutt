@@ -95,6 +95,57 @@ function learn(legs, predict) {
 }
 const getFactor = () => factor;
 const learned = () => ({factor, samples});
-const _reset = () => { pairs.clear(); factor = 1; samples = 0; lastCall = 0; };
+const _reset0 = () => { pairs.clear(); factor = 1; samples = 0; lastCall = 0; };
 
-module.exports = {travel, ensure, init, learn, getFactor, learned, _reset};
+/*
+ * Adresser utan koordinater (Opter skickar inte alltid lat/lng): slå upp gata + postnr + ort i
+ * OpenStreetMaps adressök (Nominatim). Högst ett anrop per sekund, svaret sparas i telefonen – även "hittades inte".
+ *  GET https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=se&street=…&postalcode=…&city=…
+ */
+const NOMI = 'https://nominatim.openstreetmap.org/search';
+const geo = new Map(); // adressnyckel → {lat,lng} | {miss:true, at}
+let lastGeo = 0;
+const geoKey = s => [s.adr, s.zip, s.area].map(x => String(x || '').trim().toLowerCase().replace(/\s+/g, ' ')).join('|');
+function geoOf(s) {
+  if (!s) return null;
+  const g = geo.get(geoKey(s));
+  return g && !g.miss ? g : null;
+}
+async function geocode(stops, fetchImpl) {
+  const f = fetchImpl || fetch;
+  let found = 0;
+  const todo = [];
+  for (const s of stops || []) {
+    if (!s || (s.lat != null && s.lng != null) || !(s.adr || s.zip)) continue;
+    const k = geoKey(s); if (todo.some(x => geoKey(x) === k)) continue;
+    const g = geo.get(k);
+    if (g && (!g.miss || Date.now() - g.at < 7 * 86400000)) continue; // "hittades inte" provas igen efter en vecka
+    todo.push(s);
+  }
+  for (const s of todo.slice(0, 25)) {
+    const tries = [
+      `street=${encodeURIComponent(s.adr || '')}&postalcode=${encodeURIComponent(String(s.zip || '').replace(/\s/g, ''))}&city=${encodeURIComponent(s.area || '')}`,
+      `q=${encodeURIComponent([s.adr, [String(s.zip || '').trim(), s.area].filter(Boolean).join(' ')].filter(Boolean).join(', '))}`,
+    ];
+    let hit = null;
+    for (const qs of tries) {
+      const wait = lastGeo + 1100 - Date.now();
+      if (wait > 0) await new Promise(r => setTimeout(r, wait));
+      lastGeo = Date.now();
+      try {
+        const r = await f(`${NOMI}?format=jsonv2&limit=1&countrycodes=se&${qs}`, {headers: {'User-Agent': 'RUTT/1 (forre.nu)', 'Accept-Language': 'sv'}});
+        const j = await r.json();
+        if (Array.isArray(j) && j[0] && j[0].lat) { hit = {lat: Number(j[0].lat), lng: Number(j[0].lon)}; break; }
+      } catch (e) { return found; } // inget nät → försök nästa gång
+    }
+    geo.set(geoKey(s), hit || {miss: true, at: Date.now()});
+    if (hit) found++;
+  }
+  if (todo.length && store) store.save('rutt.geo.v1', [...geo.entries()].slice(-3000));
+  return found;
+}
+async function initGeo() { if (!store) return; try { const v = await store.load('rutt.geo.v1', null); if (Array.isArray(v)) for (const [k, x] of v) geo.set(k, x); } catch (e) {} }
+// Stoppen med koordinater ifyllda där Opter saknade dem. geo:true = uppslagen adress.
+const withGeo = stops => (stops || []).map(s => { if (!s || (s.lat != null && s.lng != null)) return s; const g = geoOf(s); return g ? {...s, lat: g.lat, lng: g.lng, geo: true} : s; });
+
+module.exports = {travel, ensure, init, learn, getFactor, learned, geocode, initGeo, withGeo, _reset: () => { _reset0(); geo.clear(); lastGeo = 0; }};
