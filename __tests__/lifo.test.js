@@ -20,3 +20,13 @@ test('simuleringen ser när godset står i vägen', () => {
   expect(sim.blocks[0]).toMatchObject({cid: 'N', by: ['F']});
   expect(sim.at.N).toEqual([0, 1]);
 });
+
+test('tiden som visas är när du kan börja (efter väntan på öppning), inte när du rullar in', () => {
+  const {computeRoute} = require('../src/opter/optimizer');
+  const d = '2026-10-20';
+  const stops = [{pickup: 'A', lat: 59.33, lng: 18.06, open: '06:30', openDate: d, who: 'Alcro'}, {drop: 'A', lat: 59.34, lng: 18.05, who: 'Fräsen'}];
+  const r = computeRoute(stops, {A: {pal: 2}}, {lat: 59.33, lng: 18.06}, new Date(d + 'T06:00').getTime(), null);
+  const first = r.plan.rows[0];
+  expect(first.eta.getHours() * 60 + first.eta.getMinutes()).toBe(6 * 60 + 30);
+  expect(first.arrive.getHours() * 60 + first.arrive.getMinutes()).toBeLessThan(6 * 60 + 30);
+});

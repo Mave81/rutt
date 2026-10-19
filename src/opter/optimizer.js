@@ -97,9 +97,11 @@ function plan(order) {
       const op = stopTime(s.open, s.openDate || s.dlDate, s0.t0);
       if (eta < op) { early = Math.round((op - eta) / 60000); const w = Math.min(early, MAX_WAIT); waitCap = early > MAX_WAIT; totWait += w; t = new Date(t.getTime() + w * 60000); }
     }
+    // Tiden som visas = när du kan börja på stället (efter väntan på öppning), inte när du rullar in.
+    const arrive = eta, at = new Date(t);
     t = new Date(t.getTime() + servOf(s) * 60000);
     if (!nogeo) pos = s;
-    return {s, eta, late, early, waitCap, nogeo, leg, rest: idx === restAt, serv: servOf(s)};
+    return {s, eta: at, arrive, late, early, waitCap, nogeo, leg, rest: idx === restAt, serv: servOf(s)};
   });
   if (order.length && (restAt < 0 || restAt >= order.length)) { restTime = new Date(t); t = new Date(t.getTime() + REST_MIN * 60000); }
   let end = t, backKm = 0, back = null;
