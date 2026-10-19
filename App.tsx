@@ -31,7 +31,7 @@ import computeRoute from './src/opter/optimizer';
 const client = new OpterClient();
 const START = {lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'};
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '19 okt · Klart visar också lossningar som Opter slutat skicka (ur det RUTT sparat), chattbubblor klipper inte';
+const BUILD = '19 okt · Skicka orderdata till Claude: lagom stort mejl som Gmail tar emot, fel syns';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -165,6 +165,23 @@ function AppInner(): React.JSX.Element {
     return () => { a.remove(); b.remove(); };
   }, []);
   // Skicka rådata från Opter (via telefonens dela-meny → Gmail till dig själv) så Claude kan läsa den.
+  // Data till Claude via din Gmail. Android klarar ungefär 1 MB text mellan appar (och Gmail dubblar den) →
+  // högst ~90 000 tecken: viktigast först (sändlogg, order, statusar, kvittenser), resten kortas bort men JSON hålls hel.
+  async function mailToClaude(subject: string, d: any) {
+    const MAX = 90000;
+    const prio = ['Shipment', 'ShipmentStatusLog', 'ShipmentPod', 'ShipmentPackagePod', 'DefaultPodType', 'ShipmentStatus', 'ShipmentPodType', 'ShipmentPackage', 'Setting', 'Office', 'ResourceStatusLog'];
+    let rows: any[] = (d.rows || []).filter((r: any) => prio.includes(r.t || r.table));
+    rows.sort((x: any, y: any) => prio.indexOf(x.t || x.table) - prio.indexOf(y.t || y.table));
+    rows = rows.filter((r: any) => (r.t || r.table) !== 'Setting' || /pod|permission|status|give/i.test(String((r.c && r.c.name) || '')));
+    let log = (d.sendLog || []).slice(-40);
+    const pack = () => JSON.stringify({...d, rows, sendLog: log, rowsLeft: (d.rows || []).length - rows.length});
+    let json = pack();
+    while (json.length > MAX && rows.length) { rows = rows.slice(0, Math.floor(rows.length * 0.8)); json = pack(); }
+    while (json.length > MAX && log.length > 5) { log = log.slice(-Math.floor(log.length * 0.7)); json = pack(); }
+    if (NativeModules.RuttSms && NativeModules.RuttSms.email) await NativeModules.RuttSms.email('kenta81@gmail.com', subject, json);
+    else await Share.share({title: subject, message: json});
+    flash('Gmail öppnas – tryck Skicka', null);
+  }
   async function sendDump() {
     if (!client.logon) { setErr('Logga in mot Opter först.'); setDiag(false); return; }
     setDiagBusy(true);
@@ -173,19 +190,8 @@ function AppInner(): React.JSX.Element {
       d.crashes = await loadJSON(CRASH_KEY, []);
       d.build = BUILD;
       d.sendLog = client.log;
-      let json = JSON.stringify(d);
-      // Via Gmail till dig själv (RUTT-DATA) – Claude läser mejlet. Androids gräns för delad text ~1 MB → kortas vid behov.
-      if (json.length > 190000) {
-        const keep = /^(Shipment|DefaultPodType|Office|Setting|ResourceStatusLog)/;
-        const small = {...d, rows: (d.rows || []).filter((r: any) => keep.test(r.t) && (r.t !== 'Setting' || /pod|permission|status|give/i.test(String(r.c && r.c.name || '')))), trimmed: true};
-        json = JSON.stringify(small);
-        if (json.length > 190000) json = JSON.stringify({...small, rows: small.rows.filter((r: any) => /^(Shipment|ShipmentStatusLog|ShipmentPod|ShipmentStatus|DefaultPodType)$/.test(r.t))});
-      }
-      const subj = 'RUTT-DATA helbild ' + new Date().toLocaleTimeString('sv-SE').slice(0, 5);
-      if (NativeModules.RuttSms && NativeModules.RuttSms.email) await NativeModules.RuttSms.email('kenta81@gmail.com', subj, json.slice(0, 200000));
-      else await Share.share({title: subj, message: json.slice(0, 200000)});
-      flash('Gmail öppnas – tryck Skicka', null);
-    } catch (e: any) { setErr('Kunde inte skicka orderdata: ' + String(e?.message || e)); }
+      await mailToClaude('RUTT-DATA helbild ' + new Date().toLocaleTimeString('sv-SE').slice(0, 5), d);
+    } catch (e: any) { flash('Kunde inte skicka: ' + String(e?.message || e), null); }
     finally { setDiagBusy(false); setDiag(false); }
   }
 
@@ -422,12 +428,7 @@ function AppInner(): React.JSX.Element {
       const body = JSON.stringify({app: 'RUTT', kind: 'order', at: new Date().toISOString(), build: BUILD, cid, shiId: L ? L.shiId : null, orderNo: (st && st.orderNo) || null,
         live: L ? {key: L.key, curId: L.curId, unloadSt: L.unloadSt, loadSt: L.loadSt, podType: L.podType, hasSpt: L.hasSpt, packageIds: L.packageIds} : null,
         fresh: d.fresh, local, sendLog: d.sendLog, rows: d.rows});
-      // Till din Gmail (kenta81@gmail.com, ämne RUTT-DATA) – Claude läser mejlet därifrån. Du trycker bara Skicka.
-      const text = body.length > 200000 ? body.slice(0, 200000) : body; // Androids gräns för delad text ~1 MB
-      const subj = `RUTT-DATA order ${(st && st.orderNo) || cid}`;
-      if (NativeModules.RuttSms && NativeModules.RuttSms.email) await NativeModules.RuttSms.email('kenta81@gmail.com', subj, text);
-      else await Share.share({title: subj, message: text});
-      flash('Gmail öppnas – tryck Skicka', null);
+      await mailToClaude(`RUTT-DATA order ${(st && st.orderNo) || cid}`, JSON.parse(body));
     } catch (e: any) { flash('Kunde inte skicka: ' + String(e?.message || e), null); }
   }
   async function resendSavedPod(cid: string, st: any) {
@@ -1066,7 +1067,7 @@ function AppInner(): React.JSX.Element {
           <View style={[s.toggle, demo && {backgroundColor: C.accent2}]}><View style={[s.toggleKnob, demo && {alignSelf: 'flex-end'}]} /></View>
         </Pressable>
         <Text style={s.podLabel}>Felsök</Text>
-        <Text style={s.sheetNote}>Skickar Opters rådata för dina jobb (order, adresser, kolli, statustyper, kvittenstyper) så Claude kan läsa den. Den skickas direkt till din server, Claude läser den därifrån.</Text>
+        <Text style={s.sheetNote}>Skickar Opters rådata för dina jobb (order, adresser, kolli, statustyper, kvittenstyper) så Claude kan läsa den. Gmail öppnas med ett färdigt mejl till dig själv – tryck Skicka, sen läser Claude det.</Text>
         <Pressable style={[s.primaryBtn, diagBusy && {opacity: 0.5}]} disabled={diagBusy} onPress={sendDump}>
           <Text style={s.primaryBtnTxt}>{diagBusy ? 'Hämtar från Opter…' : 'Skicka orderdata till Claude'}</Text>
         </Pressable>
