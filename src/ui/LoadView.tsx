@@ -63,7 +63,8 @@ export default function LoadView({orders, cargo, route, laterRoute}: {orders: Lo
       const label = !st ? 'Nu' : `Efter ${String(st.who || (st.pickup ? 'hämtning' : 'lossning')).split(/[\s/,]/)[0]}`;
       return {i, label, stop: st, cnt, slots: x.slots.map((c: any) => (c ? {cid: c, loose: !(Number((cargo[c] || {}).pal) > 0)} : null))};
     });
-    return {list, slots, num, over: sim.over, pallets, rowsOf, etaDrop, etaPick, pickNo, blockOf, multiPick: pn > 1, steps};
+    const total = list.reduce((n: number, o: any) => n + Math.max(1, Math.round(Number((cargo[o.cid] || {}).pal) || 0) || 1), 0);
+    return {list, slots, num, over: sim.over, pallets, total, rowsOf, etaDrop, etaPick, pickNo, blockOf, multiPick: pn > 1, steps};
   }, [orders, cargo, route, laterRoute]);
 
   if (!plan.list.length) {
@@ -101,8 +102,8 @@ export default function LoadView({orders, cargo, route, laterRoute}: {orders: Lo
         </ScrollView>
       ) : null}
       <View style={l.sumRow}>
-        <Text style={l.sum}><Text style={l.sumB}>{Math.min(sel ? sel.cnt : plan.pallets, TOTAL)}</Text> av {TOTAL} pallplatser{sel ? '' : plan.multiPick ? ' när bilen är fullast' : ''}</Text>
-        <Text style={l.sumDim}>{sel ? '' : 'En ruta = en pall · namnet = vart den ska'}</Text>
+        <Text style={l.sum}><Text style={l.sumB}>{Math.min(sel ? sel.cnt : plan.pallets, TOTAL)}</Text> av {TOTAL} pallplatser{sel ? ' i bilen' : plan.multiPick ? ' som mest samtidigt' : ''}</Text>
+        <Text style={l.sumDim}>{sel ? 'En ruta = en pall · namnet = vart den ska' : `${plan.total} pall totalt${plan.total > plan.pallets ? ` – ${plan.total - plan.pallets} är redan av innan resten lastas` : ''} · en ruta = en pall`}</Text>
       </View>
       {stepTxt ? <Text style={l.stepInfo}>{stepTxt}</Text> : null}
       {plan.over > 0 && (
