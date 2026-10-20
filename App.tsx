@@ -37,6 +37,7 @@ import OpterClient from './src/opter/OpterClient';
 import computeRoute from './src/opter/optimizer';
 
 const client = new OpterClient();
+const dlog = (t: string) => { try { const c: any = client; if (c.d) c.d(t); } catch (e) {} };
 // Var dagen börjar (rutten räknas därifrån tills du klarat första stoppet). Väljs under Plan → Imorgon.
 const STARTS = [
   {id: 'vb', lat: 59.2938, lng: 18.0127, label: 'Västberga', end: '15:00'},
@@ -817,7 +818,7 @@ function AppInner(): React.JSX.Element {
   useEffect(() => {
     const RL: any = NativeModules.RuttLocation;
     if (!RL || !RL.keepAlive || Platform.OS !== 'android') return;
-    RL.keepAlive(step === 'route' && live).then((v: any) => (client as any).d('håll vaken: ' + v)).catch((e: any) => (client as any).d('håll vaken fel: ' + String(e?.message || e)));
+    RL.keepAlive(step === 'route' && live).then((v: any) => dlog('håll vaken: ' + v)).catch((e: any) => dlog('håll vaken fel: ' + String(e?.message || e)));
   }, [step, live]);
   // ---- Nytt uppdrag → notis på låsskärmen (som Opter). En gång per order; inte i demo. ----
   const notified = useRef<Set<string> | null>(null);
@@ -834,8 +835,8 @@ function AppInner(): React.JSX.Element {
       const title = fresh.length === 1 ? 'Nytt uppdrag' : `${fresh.length} nya uppdrag`;
       const text = fresh.map(line).join('\n');
       // Alltid notis, även när RUTT är öppen (som Opter) – annars missas den om telefonen ligger i fickan med appen framme.
-      (client as any).d('nya uppdrag: ' + fresh.map((o: any) => o.cid).join(',') + ' · ' + AppState.currentState);
-      if (RL && RL.notify) RL.notify(4800 + (Number(String(fresh[0].cid).replace(/\D/g, '').slice(-4)) || 0), title, text).then((v: any) => (client as any).d('notis visad: ' + v)).catch((e: any) => (client as any).d('notis fel: ' + String(e?.message || e)));
+      dlog('nya uppdrag: ' + fresh.map((o: any) => o.cid).join(',') + ' · ' + AppState.currentState);
+      if (RL && RL.notify) RL.notify(4800 + (Number(String(fresh[0].cid).replace(/\D/g, '').slice(-4)) || 0), title, text).then((v: any) => dlog('notis visad: ' + v)).catch((e: any) => dlog('notis fel: ' + String(e?.message || e)));
     })();
   }, [newOrders, demo, live]);
   // ---- GPS: be om behörighet, starta tjänsten, skicka senaste position med serverns intervall ----
@@ -1050,10 +1051,10 @@ function AppInner(): React.JSX.Element {
         const {rutt, msgs: fresh} = await client.poll();
         if (!alive) return;
         const nNew = rutt && rutt.stops ? new Set(rutt.stops.filter((x: any) => x.live && x.live.isNew).map((x: any) => x.pickup || x.drop)).size : 0;
-        (client as any).d(`hämtat ${rutt && rutt.stops ? rutt.stops.length : 0} stopp, ${nNew} nya · ${AppState.currentState}`);
+        dlog(`hämtat ${rutt && rutt.stops ? rutt.stops.length : 0} stopp, ${nNew} nya · ${AppState.currentState}`);
         if (rutt && rutt.stops && rutt.stops.length) setOrders(rutt);
         setMsgs(fresh);
-      } catch (e: any) { (client as any).d('hämtning misslyckades: ' + String(e?.message || e)); }
+      } catch (e: any) { dlog('hämtning misslyckades: ' + String(e?.message || e)); }
     }
     client.onPush = refresh;
     const iv = setInterval(refresh, 30000);
