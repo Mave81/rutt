@@ -27,7 +27,10 @@ loadJSON('rutt.nav', 'google').then((v: any) => { if (v === 'waze' || v === 'goo
 export function setNavApp(v: NavApp) { NAV = v; saveJSON('rutt.nav', v); }
 export const navAppName = (v: NavApp = NAV) => (v === 'waze' ? 'Waze' : 'Google Maps');
 export function navigate(st: any, app: NavApp | 'map' = NAV) {
-  const geo = st.lat != null && st.lng != null;
+  // Adressen i ordern går före koordinaterna: Opters (eller uppslagna) koordinater kan ligga på fel husnummer
+  // (Morabergsvägen 25 → punkten låg vid nr 7). Koordinater används bara när ordern saknar gatuadress.
+  const hasAdr = !!(st.adr && /\d/.test(String(st.adr)) && (st.zip || st.area));
+  const geo = !hasAdr && st.lat != null && st.lng != null;
   const ll = geo ? `${st.lat},${st.lng}` : '';
   const q = encodeURIComponent([st.adr, st.zip, st.area].filter(Boolean).join(', '));
   const web = `https://www.google.com/maps/dir/?api=1&destination=${geo ? ll : q}`;
@@ -344,7 +347,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         <Pressable hitSlop={12} onPress={() => toggle(list, r)} style={{paddingVertical: 4}}><View style={[o.ck, on && o.ckOn]}>{on ? <Bi n="check2" size={14} color="#FFFFFF" /> : null}</View></Pressable>
         <Pressable style={[{flex: 1, minWidth: 0}, !on && {opacity: 0.5}]} onPress={() => other && setPlaceSheet({st: other, role: r.kind === 'pickup' ? 'MOTTAGARE · dit godset ska' : 'AVSÄNDARE · där det hämtades'})}>
           <Text style={o.liT} numberOfLines={1}>{r.st.own ? <Text style={o.ownTag}>{(r.st.own.from || 'EGET').toUpperCase()}  </Text> : null}{goodsOf(r)}</Text>
-          <Text style={o.ordS} numberOfLines={1}>{other ? <>{r.kind === 'pickup' ? '→ ' : 'från '}<Text style={o.ordSB}>{placeName(other)}</Text>{other.area ? ` · ${other.area}` : ''}</> : null}{r.st.orderNo ? `  ·  ${r.st.orderNo}` : ''}</Text>
+          <Text style={o.ordS} numberOfLines={2}>{other ? <>{r.kind === 'pickup' ? 'Ska till ' : 'Från '}<Text style={o.ordSB}>{placeName(other)}</Text>{[other.adr, [other.zip, other.area].filter(Boolean).join(' ')].filter(Boolean).length ? `, ${[other.adr, [other.zip, other.area].filter(Boolean).join(' ')].filter(Boolean).join(', ')}` : r.kind === 'pickup' ? ' – adress saknas i ordern' : ''}</> : null}{r.st.orderNo ? `  ·  ${r.st.orderNo}` : ''}</Text>
           {syncBad(r) ? <Text style={[o.ordS, {color: C.bad}]} onPress={() => onRetry(r.cid)}>Inte bekräftad i Opter – tryck för att skicka igen</Text> : null}
         </Pressable>
         <Pressable hitSlop={8} style={o.liMore} onPress={() => onEdit(r.cid, r.st)}>
@@ -582,7 +585,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
                       <View style={[o.ck, on && o.ckOn]}>{on ? <Bi n="check2" size={14} color="#FFFFFF" /> : null}</View>
                       <View style={{flex: 1, minWidth: 0}}>
                         <Text style={o.ordT} numberOfLines={1}>{r.kind === 'pickup' ? 'Hämta' : 'Lossa'} · {goodsOf(r)}<Text style={o.ordNo}>{r.st.orderNo ? `  ·  ${r.st.orderNo}` : ''}</Text></Text>
-                        <Text style={o.ordS} numberOfLines={1}>{r.kind === 'pickup' ? `→ ${other ? placeName(other) : ''}` : `i bilen${other ? `, från ${placeName(other)}` : ''}`}</Text>
+                        <Text style={o.ordS} numberOfLines={2}>{r.kind === 'pickup' ? `Ska till ${other ? [placeName(other), other.adr, other.area].filter(Boolean).filter((x: any, i: number, arr: any[]) => arr.indexOf(x) === i).join(', ') : ''}` : `i bilen${other ? `, från ${placeName(other)}` : ''}`}</Text>
                       </View>
                     </Pressable>
                   );
