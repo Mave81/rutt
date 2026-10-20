@@ -43,7 +43,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '20 okt · 3.36 · notis vid nytt uppdrag även när RUTT är öppen';
+const BUILD = '20 okt · 3.37 · testa notisen i Inställningar, diagnos för nya uppdrag i Skicka till Claude';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -239,6 +239,7 @@ function AppInner(): React.JSX.Element {
       d.crashes = await loadJSON(CRASH_KEY, []);
       d.build = BUILD;
       d.sendLog = client.log;
+      d.diag = (client as any).diag || [];
       d.local = Object.fromEntries(Object.entries(ost).map(([k, o]: any) => [k, {...o, pod: o && o.pod ? {name: o.pod.name, typeId: o.pod.typeId, kolli: o.pod.kolli, photos: (o.pod.photos || []).length, sigStrokes: o.pod.sig ? (o.pod.sig.strokes || []).length : 0} : null}]));
       await mailToClaude('RUTT-DATA helbild ' + new Date().toLocaleTimeString('sv-SE').slice(0, 5), d);
     } catch (e: any) { setClaudeSend({text: 'Kunde inte skicka: ' + String(e?.message || e), state: 'err'}); }
@@ -816,7 +817,7 @@ function AppInner(): React.JSX.Element {
   useEffect(() => {
     const RL: any = NativeModules.RuttLocation;
     if (!RL || !RL.keepAlive || Platform.OS !== 'android') return;
-    RL.keepAlive(step === 'route' && live).catch(() => {});
+    RL.keepAlive(step === 'route' && live).then((v: any) => (client as any).d('håll vaken: ' + v)).catch((e: any) => (client as any).d('håll vaken fel: ' + String(e?.message || e)));
   }, [step, live]);
   // ---- Nytt uppdrag → notis på låsskärmen (som Opter). En gång per order; inte i demo. ----
   const notified = useRef<Set<string> | null>(null);
@@ -833,7 +834,8 @@ function AppInner(): React.JSX.Element {
       const title = fresh.length === 1 ? 'Nytt uppdrag' : `${fresh.length} nya uppdrag`;
       const text = fresh.map(line).join('\n');
       // Alltid notis, även när RUTT är öppen (som Opter) – annars missas den om telefonen ligger i fickan med appen framme.
-      if (RL && RL.notify) RL.notify(4800 + (Number(String(fresh[0].cid).replace(/\D/g, '').slice(-4)) || 0), title, text).catch(() => {});
+      (client as any).d('nya uppdrag: ' + fresh.map((o: any) => o.cid).join(',') + ' · ' + AppState.currentState);
+      if (RL && RL.notify) RL.notify(4800 + (Number(String(fresh[0].cid).replace(/\D/g, '').slice(-4)) || 0), title, text).then((v: any) => (client as any).d('notis visad: ' + v)).catch((e: any) => (client as any).d('notis fel: ' + String(e?.message || e)));
     })();
   }, [newOrders, demo, live]);
   // ---- GPS: be om behörighet, starta tjänsten, skicka senaste position med serverns intervall ----
@@ -1047,9 +1049,11 @@ function AppInner(): React.JSX.Element {
       try {
         const {rutt, msgs: fresh} = await client.poll();
         if (!alive) return;
+        const nNew = rutt && rutt.stops ? new Set(rutt.stops.filter((x: any) => x.live && x.live.isNew).map((x: any) => x.pickup || x.drop)).size : 0;
+        (client as any).d(`hämtat ${rutt && rutt.stops ? rutt.stops.length : 0} stopp, ${nNew} nya · ${AppState.currentState}`);
         if (rutt && rutt.stops && rutt.stops.length) setOrders(rutt);
         setMsgs(fresh);
-      } catch (e) {}
+      } catch (e: any) { (client as any).d('hämtning misslyckades: ' + String(e?.message || e)); }
     }
     client.onPush = refresh;
     const iv = setInterval(refresh, 30000);
@@ -1294,6 +1298,11 @@ function AppInner(): React.JSX.Element {
             <Text style={[s.sheetNote, {marginTop: 2}]}>Prova allt med påhittade order. Inget skickas till Opter.</Text>
           </View>
           <View style={[s.toggle, demo && {backgroundColor: C.accent2}]}><View style={[s.toggleKnob, demo && {alignSelf: 'flex-end'}]} /></View>
+        </Pressable>
+        <Text style={s.podLabel}>Notis vid nytt uppdrag</Text>
+        <Pressable style={s.setRow} onPress={() => { const RL: any = NativeModules.RuttLocation; if (RL && RL.notify) RL.notify(4799, 'Nytt uppdrag (test)', 'Så här ser det ut när ett uppdrag kommer in.').then((v: any) => flash(v ? 'Testnotis skickad – dra ner för att se den' : 'Notiser är avstängda för RUTT', null)).catch((e: any) => flash('Notis fel: ' + String(e?.message || e), null)); }}>
+          <Text style={[s.sheetNote, {flex: 1, marginTop: 0}]}>Testa notisen (ljud, vibration, låsskärm)</Text>
+          <Bi n="bell-fill" size={18} color={C.accentInk} />
         </Pressable>
         <Text style={s.podLabel}>SMS till chefen</Text>
         <Pressable style={s.setRow} onPress={() => { const v = !smsOpter; setSmsOpter(v); saveJSON('rutt.smsopter.v1', v); }}>

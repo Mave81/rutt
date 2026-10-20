@@ -45,6 +45,8 @@ export default class OpterClient {
     this.onLog = null;  // appen sparar loggen i telefonen
     this.onDiag = null; // efter statusbyte: bevis till din dator (forre.nu/rutt/dump.php)
   }
+  // Diagnos (nya uppdrag, anslutning, notiser): ringbuffert som följer med "Skicka till Claude".
+  d(text) { this.diag = [...(this.diag || []), new Date().toTimeString().slice(0, 8) + ' ' + text].slice(-120); }
   _log(e) {
     this.log = [...this.log, {at: new Date().toISOString(), ...e}].slice(-80);
     try { this.onLog && this.onLog(this.log); } catch (x) {}
@@ -73,9 +75,12 @@ export default class OpterClient {
       .configureLogging(signalR.LogLevel.Warning)
       .build();
     this.conn.on('StartServerInitiatedSync', () => {
+      this.d('push från Opter');
       if (this.onPush) this.onPush();
     });
-    this.conn.onclose(() => { this.connected = false; });
+    this.conn.onclose((e) => { this.connected = false; this.d('anslutning stängd ' + (e ? String(e.message || e) : '')); });
+    this.conn.onreconnecting(() => this.d('återansluter…'));
+    this.conn.onreconnected(() => this.d('återansluten'));
     await this.conn.start();
     this.connected = true;
     return url;
