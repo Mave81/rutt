@@ -115,6 +115,50 @@ class RuttLocationModule(private val rc: ReactApplicationContext) : ReactContext
     } catch (e: Throwable) { promise.reject("gps", e.message ?: "kunde inte starta GPS") }
   }
 
+  /*
+   * Håll RUTT vaken i bakgrunden: React Native pausar JS-timers när appen inte syns, då slutar
+   * Opter-anslutningen att pinga (servern kopplar ner efter ~30 s) och nya uppdrag kommer inte fram.
+   * En "headless"-uppgift som aldrig tar slut gör att timers fortsätter (JavaTimerManager.isRunningTasks).
+   */
+  private var aliveTask = -1
+  @ReactMethod fun keepAlive(on: Boolean, promise: Promise) {
+    com.facebook.react.bridge.UiThreadUtil.runOnUiThread {
+      try {
+        val ctx = com.facebook.react.jstasks.HeadlessJsTaskContext.getInstance(rc)
+        if (on && aliveTask < 0) aliveTask = ctx.startTask(com.facebook.react.jstasks.HeadlessJsTaskConfig("RuttAlive", Arguments.createMap(), 0, true))
+        else if (!on && aliveTask >= 0) { ctx.finishTask(aliveTask); aliveTask = -1 }
+        promise.resolve(aliveTask >= 0)
+      } catch (e: Throwable) { promise.reject("alive", e.message ?: "kunde inte hålla appen vaken") }
+    }
+  }
+
+  /** Nytt uppdrag: notis som syns på låsskärmen, med ljud och vibration (som Opter). */
+  @ReactMethod fun notify(id: Int, title: String, text: String, promise: Promise) {
+    try {
+      val chId = "rutt_uppdrag"
+      val nm = rc.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+      if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(chId) == null) {
+        val ch = NotificationChannel(chId, "Nya uppdrag", NotificationManager.IMPORTANCE_HIGH)
+        ch.description = "När ett nytt uppdrag kommer från kontoret"
+        ch.enableVibration(true); ch.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+        nm.createNotificationChannel(ch)
+      }
+      val open = rc.packageManager.getLaunchIntentForPackage(rc.packageName)?.apply { addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK) }
+      val pi = if (open != null) PendingIntent.getActivity(rc, 1, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT) else null
+      val n = NotificationCompat.Builder(rc, chId)
+        .setSmallIcon(android.R.drawable.stat_notify_more)
+        .setContentTitle(title).setContentText(text)
+        .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+        .setPriority(NotificationCompat.PRIORITY_HIGH).setCategory(NotificationCompat.CATEGORY_MESSAGE)
+        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+        .setDefaults(NotificationCompat.DEFAULT_ALL)
+        .setAutoCancel(true).setContentIntent(pi).build()
+      if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(rc, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) { promise.resolve(false); return }
+      NotificationManagerCompat.from(rc).notify(id, n)
+      promise.resolve(true)
+    } catch (e: Throwable) { promise.reject("notify", e.message ?: "kunde inte visa notis") }
+  }
+
   @ReactMethod fun stop(promise: Promise) {
     try { rc.stopService(Intent(rc, LocationService::class.java)) } catch (_: Throwable) {}
     promise.resolve(true)

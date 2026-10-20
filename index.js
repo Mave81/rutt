@@ -11,3 +11,5 @@ import App from './App';
 import {name as appName} from './app.json';
 
 AppRegistry.registerComponent(appName, () => App);
+// Håller JS-timers igång i bakgrunden (Opter-anslutningen, GPS, nya uppdrag). Tar aldrig slut – stoppas från appen.
+AppRegistry.registerHeadlessTask('RuttAlive', () => () => new Promise(() => {}));

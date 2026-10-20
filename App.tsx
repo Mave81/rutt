@@ -43,7 +43,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '20 okt · 3.34 · GPS kör till adressen i ordern (inte koordinaten), hämtning visar vart godset ska';
+const BUILD = '20 okt · 3.35 · notis på låsskärmen vid nytt uppdrag, RUTT hålls vaken i bakgrunden';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -812,6 +812,30 @@ function AppInner(): React.JSX.Element {
     setTimeout(() => { try { BackHandler.exitApp(); } catch (e) {} }, 300);
   }
 
+  // ---- I bakgrunden: håll JS vaken (Opter-anslutningen pingar, nya uppdrag kommer fram) ----
+  useEffect(() => {
+    const RL: any = NativeModules.RuttLocation;
+    if (!RL || !RL.keepAlive || Platform.OS !== 'android') return;
+    RL.keepAlive(step === 'route' && live).catch(() => {});
+  }, [step, live]);
+  // ---- Nytt uppdrag → notis på låsskärmen (som Opter). En gång per order; inte i demo. ----
+  const notified = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (demo || !live) return;
+    const RL: any = NativeModules.RuttLocation;
+    (async () => {
+      if (!notified.current) { const v: any = await loadJSON('rutt.notified.v1', []); notified.current = new Set(Array.isArray(v) ? v.slice(-300) : []); }
+      const fresh = newOrders.filter((o: any) => !notified.current!.has(o.cid));
+      if (!fresh.length) return;
+      fresh.forEach((o: any) => notified.current!.add(o.cid));
+      saveJSON('rutt.notified.v1', [...notified.current!].slice(-300));
+      const line = (o: any) => { const p = o.pick || {}, d = o.drop || {}; const t = p.tEarliest && p.tEarliest.hhmm ? ` ${p.tEarliest.hhmm}` : ''; return `Hämta ${p.who || p.adr || '—'}${p.area ? ', ' + p.area : ''}${t} → ${d.who || d.adr || '—'}${d.area ? ', ' + d.area : ''}`; };
+      const title = fresh.length === 1 ? 'Nytt uppdrag' : `${fresh.length} nya uppdrag`;
+      const text = fresh.map(line).join('\n');
+      if (AppState.currentState === 'active') { try { Vibration.vibrate([0, 250, 120, 250]); } catch (e) {} return; }
+      if (RL && RL.notify) RL.notify(4800 + (Number(String(fresh[0].cid).replace(/\D/g, '').slice(-4)) || 0), title, text).catch(() => {});
+    })();
+  }, [newOrders, demo, live]);
   // ---- GPS: be om behörighet, starta tjänsten, skicka senaste position med serverns intervall ----
   useEffect(() => { loadJSON('rutt.gps.v1', true).then((v: any) => setGpsOn(v !== false)); }, []);
   useEffect(() => {
