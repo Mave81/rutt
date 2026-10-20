@@ -132,6 +132,24 @@ class RuttLocationModule(private val rc: ReactApplicationContext) : ReactContext
     }
   }
 
+  /*
+   * Klocka som går även när appen ligger i bakgrunden: skickar "ruttTick" till appen var N:e sekund från en egen tråd.
+   * Händelser från Android kommer fram till appen även när dess egna timers är pausade – då hinner RUTT
+   * fråga Opter efter nya uppdrag och hålla anslutningen vid liv.
+   */
+  private var tickThread: android.os.HandlerThread? = null
+  @ReactMethod fun ticker(sec: Int, promise: Promise) {
+    try { tickThread?.quitSafely() } catch (_: Throwable) {}
+    tickThread = null
+    if (sec <= 0) { promise.resolve(false); return }
+    val t = android.os.HandlerThread("rutt-tick"); t.start(); tickThread = t
+    val h = android.os.Handler(t.looper)
+    val ms = sec * 1000L
+    val r = object : Runnable { override fun run() { try { rc.emitDeviceEvent("ruttTick", null) } catch (_: Throwable) {}; if (tickThread === t) h.postDelayed(this, ms) } }
+    h.postDelayed(r, ms)
+    promise.resolve(true)
+  }
+
   /** Nytt uppdrag: notis som syns på låsskärmen, med ljud och vibration (som Opter). */
   @ReactMethod fun notify(id: Int, title: String, text: String, promise: Promise) {
     try {

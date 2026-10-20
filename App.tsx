@@ -44,7 +44,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '20 okt · 3.37 · testa notisen i Inställningar, diagnos för nya uppdrag i Skicka till Claude';
+const BUILD = '20 okt · 3.38 · nya uppdrag hämtas och notifieras även när RUTT ligger i bakgrunden (telefonens klocka)';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -821,24 +821,23 @@ function AppInner(): React.JSX.Element {
     RL.keepAlive(step === 'route' && live).then((v: any) => dlog('håll vaken: ' + v)).catch((e: any) => dlog('håll vaken fel: ' + String(e?.message || e)));
   }, [step, live]);
   // ---- Nytt uppdrag → notis på låsskärmen (som Opter). En gång per order; inte i demo. ----
+  // Anropas direkt från hämtningen (fungerar även när appen ligger i bakgrunden) och från listan när den ändras.
   const notified = useRef<Set<string> | null>(null);
-  useEffect(() => {
-    if (demo || !live) return;
+  const ostRef = useRef<any>({}); ostRef.current = ost;
+  async function announce(list: {cid: string; pick: any; drop: any}[]) {
+    if (demo) return;
     const RL: any = NativeModules.RuttLocation;
-    (async () => {
-      if (!notified.current) { const v: any = await loadJSON('rutt.notified.v1', []); notified.current = new Set(Array.isArray(v) ? v.slice(-300) : []); }
-      const fresh = newOrders.filter((o: any) => !notified.current!.has(o.cid));
-      if (!fresh.length) return;
-      fresh.forEach((o: any) => notified.current!.add(o.cid));
-      saveJSON('rutt.notified.v1', [...notified.current!].slice(-300));
-      const line = (o: any) => { const p = o.pick || {}, d = o.drop || {}; const t = p.tEarliest && p.tEarliest.hhmm ? ` ${p.tEarliest.hhmm}` : ''; return `Hämta ${p.who || p.adr || '—'}${p.area ? ', ' + p.area : ''}${t} → ${d.who || d.adr || '—'}${d.area ? ', ' + d.area : ''}`; };
-      const title = fresh.length === 1 ? 'Nytt uppdrag' : `${fresh.length} nya uppdrag`;
-      const text = fresh.map(line).join('\n');
-      // Alltid notis, även när RUTT är öppen (som Opter) – annars missas den om telefonen ligger i fickan med appen framme.
-      dlog('nya uppdrag: ' + fresh.map((o: any) => o.cid).join(',') + ' · ' + AppState.currentState);
-      if (RL && RL.notify) RL.notify(4800 + (Number(String(fresh[0].cid).replace(/\D/g, '').slice(-4)) || 0), title, text).then((v: any) => dlog('notis visad: ' + v)).catch((e: any) => dlog('notis fel: ' + String(e?.message || e)));
-    })();
-  }, [newOrders, demo, live]);
+    if (!notified.current) { const v: any = await loadJSON('rutt.notified.v1', []); notified.current = new Set(Array.isArray(v) ? v.slice(-300) : []); }
+    const fresh = list.filter(o => !notified.current!.has(o.cid) && !((ostRef.current[o.cid] || {}).acceptedAt));
+    if (!fresh.length) return;
+    fresh.forEach(o => notified.current!.add(o.cid));
+    saveJSON('rutt.notified.v1', [...notified.current!].slice(-300));
+    const line = (o: any) => { const p = o.pick || {}, d = o.drop || {}; const t = p.tEarliest && p.tEarliest.hhmm ? ` ${p.tEarliest.hhmm}` : ''; return `Hämta ${p.who || p.adr || '—'}${p.area ? ', ' + p.area : ''}${t} → ${d.who || d.adr || '—'}${d.area ? ', ' + d.area : ''}`; };
+    const title = fresh.length === 1 ? 'Nytt uppdrag' : `${fresh.length} nya uppdrag`;
+    dlog('nya uppdrag: ' + fresh.map(o => o.cid).join(',') + ' · ' + AppState.currentState);
+    if (RL && RL.notify) RL.notify(4800 + (Number(String(fresh[0].cid).replace(/\D/g, '').slice(-4)) || 0), title, fresh.map(line).join('\n')).then((v: any) => dlog('notis visad: ' + v)).catch((e: any) => dlog('notis fel: ' + String(e?.message || e)));
+  }
+  useEffect(() => { if (live) announce(newOrders as any); }, [newOrders, demo, live]);
   // ---- GPS: be om behörighet, starta tjänsten, skicka senaste position med serverns intervall ----
   useEffect(() => { loadJSON('rutt.gps.v1', true).then((v: any) => setGpsOn(v !== false)); }, []);
   useEffect(() => {
@@ -1054,11 +1053,20 @@ function AppInner(): React.JSX.Element {
         dlog(`hämtat ${rutt && rutt.stops ? rutt.stops.length : 0} stopp, ${nNew} nya · ${AppState.currentState}`);
         if (rutt && rutt.stops && rutt.stops.length) setOrders(rutt);
         setMsgs(fresh);
+        if (rutt && rutt.stops) {
+          const by: Record<string, any> = {};
+          for (const x of (rutt.stops as any[])) { if (!(x.live && x.live.tab === 'new')) continue; const c = String(x.pickup || x.drop); by[c] = by[c] || {cid: c}; if (x.pickup) by[c].pick = x; else by[c].drop = x; }
+          announce(Object.values(by));
+        }
       } catch (e: any) { dlog('hämtning misslyckades: ' + String(e?.message || e)); }
     }
     client.onPush = refresh;
     const iv = setInterval(refresh, 30000);
-    return () => { alive = false; client.onPush = null; clearInterval(iv); };
+    // I bakgrunden pausar Android appens timers – då kommer klockan från telefonen i stället (var 20:e s).
+    const RL: any = NativeModules.RuttLocation;
+    if (RL && RL.ticker) RL.ticker(20).catch(() => {});
+    const tk = DeviceEventEmitter.addListener('ruttTick', () => { if (AppState.currentState !== 'active') { dlog('tick i bakgrunden'); refresh(); } });
+    return () => { alive = false; client.onPush = null; clearInterval(iv); tk.remove(); if (RL && RL.ticker) RL.ticker(0).catch(() => {}); };
   }, [step]);
 
   // Läskvitton på automatik: så fort chatten är öppen och det finns olästa
