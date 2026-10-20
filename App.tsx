@@ -44,7 +44,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '20 okt · 3.38 · nya uppdrag hämtas och notifieras även när RUTT ligger i bakgrunden (telefonens klocka)';
+const BUILD = '20 okt · 3.39 · hängande hämtning börjar om, påminnelse var 15:e min tills uppdraget bekräftats, mer diagnos';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -822,19 +822,23 @@ function AppInner(): React.JSX.Element {
   }, [step, live]);
   // ---- Nytt uppdrag → notis på låsskärmen (som Opter). En gång per order; inte i demo. ----
   // Anropas direkt från hämtningen (fungerar även när appen ligger i bakgrunden) och från listan när den ändras.
-  const notified = useRef<Set<string> | null>(null);
+  // cid → senaste notis. Står uppdraget kvar som nytt (inte bekräftat) påminner RUTT var 15:e minut, som Opter.
+  const notified = useRef<Record<string, number> | null>(null);
   const ostRef = useRef<any>({}); ostRef.current = ost;
   async function announce(list: {cid: string; pick: any; drop: any}[]) {
     if (demo) return;
     const RL: any = NativeModules.RuttLocation;
-    if (!notified.current) { const v: any = await loadJSON('rutt.notified.v1', []); notified.current = new Set(Array.isArray(v) ? v.slice(-300) : []); }
-    const fresh = list.filter(o => !notified.current!.has(o.cid) && !((ostRef.current[o.cid] || {}).acceptedAt));
+    if (!notified.current) { const v: any = await loadJSON('rutt.notified.v2', {}); notified.current = v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
+    const now = Date.now(), N = notified.current!;
+    const fresh = list.filter(o => !((ostRef.current[o.cid] || {}).acceptedAt) && (!N[o.cid] || now - N[o.cid] > 15 * 60000));
     if (!fresh.length) return;
-    fresh.forEach(o => notified.current!.add(o.cid));
-    saveJSON('rutt.notified.v1', [...notified.current!].slice(-300));
+    const again = fresh.every(o => N[o.cid]);
+    fresh.forEach(o => { N[o.cid] = now; });
+    const keys = Object.keys(N).sort((a, b) => N[b] - N[a]).slice(0, 300); const keep: Record<string, number> = {}; keys.forEach(k => { keep[k] = N[k]; }); notified.current = keep;
+    saveJSON('rutt.notified.v2', keep);
     const line = (o: any) => { const p = o.pick || {}, d = o.drop || {}; const t = p.tEarliest && p.tEarliest.hhmm ? ` ${p.tEarliest.hhmm}` : ''; return `Hämta ${p.who || p.adr || '—'}${p.area ? ', ' + p.area : ''}${t} → ${d.who || d.adr || '—'}${d.area ? ', ' + d.area : ''}`; };
-    const title = fresh.length === 1 ? 'Nytt uppdrag' : `${fresh.length} nya uppdrag`;
-    dlog('nya uppdrag: ' + fresh.map(o => o.cid).join(',') + ' · ' + AppState.currentState);
+    const title = (fresh.length === 1 ? 'Nytt uppdrag' : `${fresh.length} nya uppdrag`) + (again ? ' – väntar på svar' : '');
+    dlog((again ? 'påminnelse: ' : 'nya uppdrag: ') + fresh.map(o => o.cid).join(',') + ' · ' + AppState.currentState);
     if (RL && RL.notify) RL.notify(4800 + (Number(String(fresh[0].cid).replace(/\D/g, '').slice(-4)) || 0), title, fresh.map(line).join('\n')).then((v: any) => dlog('notis visad: ' + v)).catch((e: any) => dlog('notis fel: ' + String(e?.message || e)));
   }
   useEffect(() => { if (live) announce(newOrders as any); }, [newOrders, demo, live]);
@@ -1045,7 +1049,14 @@ function AppInner(): React.JSX.Element {
   useEffect(() => {
     if (step !== 'route') return;
     let alive = true;
-    async function refresh() {
+    let busy = 0; // när pågående hämtning startade (0 = ingen)
+    async function refresh(why = 'tid') {
+      if (busy) {
+        // Hänger en hämtning (svar som aldrig kom)? Efter 45 s: börja om anslutningen.
+        if (Date.now() - busy > 45000) { dlog('hämtningen hängde – börjar om'); client.reset(); busy = 0; } else return;
+      }
+      busy = Date.now();
+      dlog('hämtar (' + why + ')');
       try {
         const {rutt, msgs: fresh} = await client.poll();
         if (!alive) return;
@@ -1059,13 +1070,15 @@ function AppInner(): React.JSX.Element {
           announce(Object.values(by));
         }
       } catch (e: any) { dlog('hämtning misslyckades: ' + String(e?.message || e)); }
+      finally { busy = 0; }
     }
-    client.onPush = refresh;
-    const iv = setInterval(refresh, 30000);
+    client.onPush = () => refresh('push');
+    const iv = setInterval(() => refresh('tid'), 30000);
     // I bakgrunden pausar Android appens timers – då kommer klockan från telefonen i stället (var 20:e s).
     const RL: any = NativeModules.RuttLocation;
-    if (RL && RL.ticker) RL.ticker(20).catch(() => {});
-    const tk = DeviceEventEmitter.addListener('ruttTick', () => { if (AppState.currentState !== 'active') { dlog('tick i bakgrunden'); refresh(); } });
+    if (RL && RL.ticker) RL.ticker(20).then((v: any) => dlog('klocka: ' + v)).catch((e: any) => dlog('klocka fel: ' + String(e?.message || e)));
+    else dlog('klocka saknas');
+    const tk = DeviceEventEmitter.addListener('ruttTick', () => { if (AppState.currentState !== 'active') refresh('klocka'); });
     return () => { alive = false; client.onPush = null; clearInterval(iv); tk.remove(); if (RL && RL.ticker) RL.ticker(0).catch(() => {}); };
   }, [step]);
 

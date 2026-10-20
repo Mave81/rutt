@@ -71,7 +71,6 @@ export default class OpterClient {
     const url = connectionString(cfg);
     this.conn = new signalR.HubConnectionBuilder()
       .withUrl(url, {withCredentials: false})
-      .withAutomaticReconnect()
       .configureLogging(signalR.LogLevel.Warning)
       .build();
     this.conn.on('StartServerInitiatedSync', () => {
@@ -79,13 +78,18 @@ export default class OpterClient {
       if (this.onPush) this.onPush();
     });
     this.conn.onclose((e) => { this.connected = false; this.d('anslutning stängd ' + (e ? String(e.message || e) : '')); });
-    this.conn.onreconnecting(() => this.d('återansluter…'));
-    this.conn.onreconnected(() => this.d('återansluten'));
+
     await this.conn.start();
     this.connected = true;
     return url;
   }
 
+  // Något hängde (svar som aldrig kom, t.ex. när telefonen sov): släpp allt och börja om nästa gång.
+  reset() {
+    this.d('börjar om anslutningen');
+    const c = this.conn; this.conn = null; this._relogin = null; this.connected = false;
+    try { c && c.stop().catch(() => {}); } catch (e) {}
+  }
   _alive() {
     return this.conn && this.conn.state === signalR.HubConnectionState.Connected;
   }
