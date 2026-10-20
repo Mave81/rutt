@@ -43,7 +43,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '20 okt · 3.35 · notis på låsskärmen vid nytt uppdrag, RUTT hålls vaken i bakgrunden';
+const BUILD = '20 okt · 3.36 · notis vid nytt uppdrag även när RUTT är öppen';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -832,7 +832,7 @@ function AppInner(): React.JSX.Element {
       const line = (o: any) => { const p = o.pick || {}, d = o.drop || {}; const t = p.tEarliest && p.tEarliest.hhmm ? ` ${p.tEarliest.hhmm}` : ''; return `Hämta ${p.who || p.adr || '—'}${p.area ? ', ' + p.area : ''}${t} → ${d.who || d.adr || '—'}${d.area ? ', ' + d.area : ''}`; };
       const title = fresh.length === 1 ? 'Nytt uppdrag' : `${fresh.length} nya uppdrag`;
       const text = fresh.map(line).join('\n');
-      if (AppState.currentState === 'active') { try { Vibration.vibrate([0, 250, 120, 250]); } catch (e) {} return; }
+      // Alltid notis, även när RUTT är öppen (som Opter) – annars missas den om telefonen ligger i fickan med appen framme.
       if (RL && RL.notify) RL.notify(4800 + (Number(String(fresh[0].cid).replace(/\D/g, '').slice(-4)) || 0), title, text).catch(() => {});
     })();
   }, [newOrders, demo, live]);
