@@ -11,9 +11,10 @@ import {Image, Pressable, StyleSheet, Text, TextInput, View} from 'react-native'
 import {C, themed, hhmm} from './theme';
 import {MAX_PHOTOS, Sheet, pickPhoto} from './parts';
 import {Bi, BiName} from './Bi';
+import TidInput, {fmtMin} from './TidInput';
 
 export type Edit = {statusId?: number; addServices?: any[]; damages?: any[]; changes?: any[]; images?: any[]};
-type Screen = 'menu' | 'status' | 'image' | 'add' | 'change' | 'damage';
+type Screen = 'menu' | 'status' | 'image' | 'add' | 'change' | 'damage' | 'time';
 
 // Demo: så det går att prova utan Opter. Märks som demo i appen och skickas aldrig.
 export const DEMO_OPTS = {
@@ -36,7 +37,7 @@ const DEMO_STATUS = [{id: 11, name: 'Lastad', userOption: true, pickup: true}, {
 const numOk = (v: string) => /^\d+([.,]\d+)?$/.test(String(v).trim());
 
 export default function EditSheet({item, opts, history, onClose, onSend, onRepod, saved, onResend, onDump}: {
-  item: {cid: string; st: any; done: boolean} | null;
+  item: {cid: string; st: any; done: boolean; start?: number | null} | null;
   opts: any; history: any[];
   onClose: () => void;
   onSend: (edit: Edit, label: string) => void;
@@ -56,8 +57,9 @@ export default function EditSheet({item, opts, history, onClose, onSend, onRepod
   const [dRs, setDRs] = useState<any>(null);
   const [dTxt, setDTxt] = useState('');
   const [dImg, setDImg] = useState<any[]>([]);
+  const [tid, setTid] = useState<number | null>(null);
   useEffect(() => {
-    setScr('menu'); setStatusId(null); setImg([]); setImgTxt(''); setAdds({}); setVals({});
+    setScr('menu'); setTid(null); setStatusId(null); setImg([]); setImgTxt(''); setAdds({}); setVals({});
     setDType(null); setDEv(null); setDRs(null); setDTxt(''); setDImg([]);
   }, [item && item.cid]);
   if (!item) return null;
@@ -175,9 +177,25 @@ export default function EditSheet({item, opts, history, onClose, onSend, onRepod
       </Sheet>
     );
   }
+  // ---- Tid (Opters "Tid": timmar + minuter, skickas som minuter totalt) ----
+  const timeField = (O.fields || []).find((f: any) => f.cetName === 'SHI_TimeMinutes');
+  if (scr === 'time' && timeField) {
+    const cur = Number(values.timeMinutes) || 0;
+    return (
+      <Sheet open onClose={onClose} scroll>
+        {back}
+        <Text style={e.h}>{String(timeField.label || 'Tid').replace(/\s*\(.*\)/, '')}</Text>
+        <Text style={e.p}>{cur ? `Nu på ordern: ${fmtMin(cur)}. ` : ''}Går till Opter som en ändring på ordern, samma som Tid i Opter Driver.</Text>
+        <TidInput minutes={cur || null} onChange={setTid} start={item.start || null} />
+        <SendBtn ok={tid != null && tid > 0 && tid !== cur} why={tid === cur ? 'Samma tid som redan står på ordern.' : 'Välj tid.'}
+          label={`Tid ${tid ? fmtMin(tid) : ''}`}
+          edit={() => ({changes: [{cet: timeField.cet, kind: 'dec', value: String(tid)}]})} />
+      </Sheet>
+    );
+  }
   // ---- Ändring (fälten kontoret tillåter: kolli, vikt, tid …) ----
   if (scr === 'change') {
-    const fields = O.fields || [];
+    const fields = (O.fields || []).filter((f: any) => f.cetName !== 'SHI_TimeMinutes');
     const changed = fields.filter((f: any) => vals[f.col] != null && String(vals[f.col]) !== String(values[f.col] == null ? '' : values[f.col]));
     const bad = changed.some((f: any) => f.kind !== 'str' && !(f.kind === 'int' ? /^\d+$/.test(vals[f.col]) : numOk(vals[f.col])));
     return (
@@ -283,6 +301,7 @@ export default function EditSheet({item, opts, history, onClose, onSend, onRepod
         <Item on={item.done && perm.pod && !!onRepod} icon="pen-fill" t="Ny kvittens" s="Signatur, namn eller foto igen" go={() => { onClose(); onRepod && onRepod(); }} />
         <Item on={perm.addImage} icon="camera-fill" t="Lägg till bild" s="Bild på ordern, utan ny kvittens" go={() => setScr('image')} />
         <Item on={perm.addService} icon="plus-circle-fill" t="Tillägg" s={addTypes.length ? addTypes.slice(0, 3).map((a: any) => a.name).join(', ') + (addTypes.length > 3 ? '…' : '') : 'Väntetid, inbärning …'} go={() => setScr('add')} tint={C.accentInk} />
+        <Item on={perm.changes && !!timeField} icon="clock-fill" t="Tid" s="Timmar och minuter, eller timjobb med start och slut" go={() => setScr('time')} tint={C.accentInk} />
         <Item on={perm.changes} icon="input-cursor-text" t="Ändring" s={(O.fields || []).slice(0, 4).map((f: any) => f.label.replace(/\s*\(.*\)/, '')).join(', ') || 'Kolli, vikt …'} go={() => setScr('change')} />
         <Item on={perm.damages} icon="exclamation-triangle-fill" t="Avvikelse" s="Skada, fel antal, saknas …" go={() => setScr('damage')} tint={C.bad} />
       </View>

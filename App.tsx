@@ -44,7 +44,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '20 okt · 3.39 · hängande hämtning börjar om, påminnelse var 15:e min tills uppdraget bekräftats, mer diagnos';
+const BUILD = '21 okt · 3.40 · Tid som i Opter (timmar + minuter, timjobb start–slut), tillägg dolda när kontoret inte tillåter dem';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -170,7 +170,7 @@ function AppInner(): React.JSX.Element {
   const [forwardFor, setForwardFor] = useState<any>(null);
   const [names, setNames] = useState<Record<string, string[]>>({}); // sparade mottagarnamn per företag
   const [signStop, setSignStop] = useState<any>(null); // stopp som signeras just nu
-  const [editFor, setEditFor] = useState<{cid: string; st: any; done: boolean} | null>(null); // order som ändras (Klart eller planen)
+  const [editFor, setEditFor] = useState<{cid: string; st: any; done: boolean; start?: number | null} | null>(null); // order som ändras (Klart eller planen)
   const addTimers = useRef<Record<string, any>>({}); // tillägg valda vid lossning – skickas när Ångra gått ut
   const [toast, setToast] = useState<{text: string; undo: (() => void) | null} | null>(null);
   const [claudeSend, setClaudeSend] = useState<{text: string; state: 'busy' | 'ok' | 'err'} | null>(null); // Skicka till Claude – syns hela vägen
@@ -715,6 +715,13 @@ function AppInner(): React.JSX.Element {
       podMem.current[st.drop] = pod;
       sendUnload(st, pod);
       if (!demo) { const cid = String(st.drop); const d = dayOrderOf(cid); DB.logEvent({t: doneT, kind: 'unload', cid, who: st.who, lat: st.lat, lng: st.lng, pal: d.pal}); DB.saveOrder(DB.ymdOf(doneT), {...d, doneAt: doneT, podName: pod.name || '', kolli: pod.kolli != null ? pod.kolli : null}); }
+      // Tid (timjobb) från kvittensen: skickas som Opters "Tid" (minuter) när Ångra gått ut, på första ordern.
+      if (pod0.timeMin && st === list[0] && st.live) {
+        const tm = pod0.timeMin, key = st.drop + ':tid';
+        if (addTimers.current[key]) clearTimeout(addTimers.current[key].t);
+        const fireTid = () => { if (!addTimers.current[key] || addTimers.current[key].fire !== fireTid) return; clearTimeout(addTimers.current[key].t); delete addTimers.current[key]; sendEdit(st.drop, st, {changes: [{cet: 34, kind: 'dec', value: String(tm)}]}, `Tid ${tm >= 60 ? Math.floor(tm / 60) + ' h ' : ''}${tm % 60 ? (tm % 60) + ' min' : ''}`.trim()); };
+        addTimers.current[key] = {t: setTimeout(fireTid, 8400), fire: fireTid};
+      }
       // Tillägg valda i kvittensen skickas när Ångra gått ut (samma väntan som Lossad).
       const adds = (pod0.adds || []).filter((a: any) => a.satId);
       // Gäller hela stoppet → läggs på första ordern (en väntetid debiteras en gång), som när man gör det i Opter.
@@ -731,7 +738,7 @@ function AppInner(): React.JSX.Element {
     if (pod0.name) setNames(n => { const nn = rememberName(n, st0.who, pod0.name); saveJSON(NAMES_KEY, nn); return nn; });
     flash(many ? `Lossad · ${list.length} order hos ${st0.who || ''}` : `Lossad · ${st0.who || 'order'}`, () => {
       if (!demo) list.forEach((x: any) => { DB.unlogEvent(String(x.drop), 'unload', doneT); DB.saveOrder(DB.ymdOf(doneT), {cid: String(x.drop), doneAt: undefined}); });
-      list.forEach((x: any) => { cancelSend(x.drop, 'unload'); smsCancel(String(x.drop), 'unload'); if (addTimers.current[x.drop]) { clearTimeout(addTimers.current[x.drop].t); delete addTimers.current[x.drop]; } });
+      list.forEach((x: any) => { cancelSend(x.drop, 'unload'); smsCancel(String(x.drop), 'unload'); const tk = x.drop + ':tid'; if (addTimers.current[tk]) { clearTimeout(addTimers.current[tk].t); delete addTimers.current[tk]; } if (addTimers.current[x.drop]) { clearTimeout(addTimers.current[x.drop].t); delete addTimers.current[x.drop]; } });
       setOst(o => { const n = {...o}; for (const x of list) { if (prev[x.drop]) n[x.drop] = prev[x.drop]; else delete n[x.drop]; } return n; });
     });
   }
@@ -1237,7 +1244,7 @@ function AppInner(): React.JSX.Element {
             </View>
           )}
           {tab === 'klart' && klartView === 'dagbok' && <DagbokView me={driverName || 'RUTT'} onSms={chefC ? (text: string) => { jobbet.send(chefC, text); flash(`Dagrapport till ${chefC.name.split(' ')[0]}`, null); } : undefined} />}
-          {tab === 'klart' && klartView === 'idag' && <DoneView done={doneOrders} onRetry={retrySync} onOpen={(d: any) => (isEgen(d.cid) ? openOwn(d.cid) : setEditFor({cid: d.cid, st: d.st, done: true}))} />}
+          {tab === 'klart' && klartView === 'idag' && <DoneView done={doneOrders} onRetry={retrySync} onOpen={(d: any) => (isEgen(d.cid) ? openOwn(d.cid) : setEditFor({cid: d.cid, st: d.st, done: true, start: (ost[d.cid] || {}).loadedAt || null}))} />}
           {tab === 'nytt' && <NewOrdersView orders={newOrders} cargo={fullSrc ? fullSrc.cargo : {}} onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={(o: any) => setOrderStatus(o, 'reject')} onForward={(orders.perm && orders.perm.giveAway === false) ? undefined : setForwardFor} />}
           <RejectSheet o={rejectFor} onClose={() => setRejectFor(null)} onReject={(o: any) => setOrderStatus(o, 'reject')} />
           <ForwardSheet o={forwardFor} drivers={team.drivers} onClose={() => setForwardFor(null)} onForward={forwardOrder} />
@@ -1259,7 +1266,7 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && (planDay === 'idag' || !later.length) && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any, more: any[] = []) => setSignStop(more.length ? {...st, group: [st, ...more]} : st)} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any, more: any[] = []) => setSignStop(more.length ? {...st, group: [st, ...more]} : st)} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} />
           )}
           {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} laterRoute={laterRoute} />}
           {tab === 'chat' && <JobbetView j={jobbet} onMakeJob={(m: any) => setSedelFor({media: m})} live={live} opterUnread={unread} opterLast={chatList[chatList.length - 1]} onOpenOpter={markOpterRead}
@@ -1381,6 +1388,9 @@ function AppInner(): React.JSX.Element {
           stop={signStop}
           savedNames={names[companyKey(signStop.who)] || []}
           saved={ost[signStop.drop]}
+          addOk={demo || !(orders.opts && orders.opts.perm && orders.opts.perm.addService === false)}
+          timeOk={!signStop.own && !signStop.ownSign && (demo || !!(orders.opts && orders.opts.perm && orders.opts.perm.changes !== false && (orders.opts.fields || []).some((f: any) => f.cetName === 'SHI_TimeMinutes')))}
+          start={(ost[signStop.drop] || {}).loadedAt || null}
           onCancel={() => setSignStop(null)}
           onDone={(pod: any) => onSigned(signStop, pod)}
         />

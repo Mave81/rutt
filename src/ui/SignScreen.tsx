@@ -10,9 +10,10 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, themed} from './theme';
 import {MAX_PHOTOS, SigData, SignaturePad, SigPreview, SignFullscreen, pickPhoto, useKeyboardLift} from './parts';
 import {Bi} from './Bi';
+import TidInput, {fmtMin} from './TidInput';
 
 
-export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: {stop: any; savedNames: string[]; saved?: any; onCancel: () => void; onDone: (pod: any) => void}) {
+export default function SignScreen({stop, savedNames, saved, onCancel, onDone, addOk = true, timeOk = false, start = null}: {stop: any; savedNames: string[]; saved?: any; onCancel: () => void; onDone: (pod: any) => void; addOk?: boolean; timeOk?: boolean; start?: number | null}) {
   const insets = useSafeAreaInsets();
   const {kb, lift} = useKeyboardLift();
   const [sig, setSig] = useState<SigData | null>(null);
@@ -30,10 +31,12 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
   const [comment, setComment] = useState('');
   const [comment2, setComment2] = useState('');
   const [typeId, setTypeId] = useState(0);
+  const [tidOpen, setTidOpen] = useState(false);
+  const [tid, setTid] = useState<number | null>(null);
   const [subId, setSubId] = useState(0);
 
   useEffect(() => {
-    setSig(null); setFsSig(false); setMode('sig'); setName(''); setPhotos([]); setComment(''); setComment2('');
+    setSig(null); setFsSig(false); setTidOpen(false); setTid(null); setMode('sig'); setName(''); setPhotos([]); setComment(''); setComment2('');
     setTypeId((stop && stop.pod && stop.pod.defaultId) || 0); setSubId(0);
     setAdds({}); setExtOpen(false);
     setKolli((saved && saved.kolli) || (stop && stop.kolli) || 0);
@@ -43,7 +46,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
   // Kvittenstyp väljer du själv (som i Opter). Krav = orderns krav OCH typens krav.
   const P = (stop && stop.pod) || null;
   // Tilläggen som kontoret lagt på ordern (Opter: ShipmentAddServiceType). Demo: exempel.
-  const addTypes: any[] = stop && stop.live && stop.live.edit ? stop.live.edit.addTypes : stop && !stop.live && !stop.own && !stop.ownSign ? [{id: 1, name: 'Väntetid'}, {id: 2, name: 'Inbärning'}, {id: 3, name: 'Bomkörning'}] : [];
+  const addTypes: any[] = !addOk ? [] : stop && stop.live && stop.live.edit ? stop.live.edit.addTypes : stop && !stop.live && !stop.own && !stop.ownSign ? [{id: 1, name: 'Väntetid'}, {id: 2, name: 'Inbärning'}, {id: 3, name: 'Bomkörning'}] : [];
   const types: any[] = (P && P.types) || [];
   const type = types.find(t => t.id === typeId) || null;
   const subs: any[] = type && P ? P.subTypes.filter((x: any) => x.mainId === type.id) : [];
@@ -86,7 +89,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
     if (!ok) return;
     const autoNote = mode === 'foto' ? `Kund ej på plats – foto taget på begäran av ${name.trim()}` : '';
     const cm = comment.trim() || autoNote;
-    onDone({mode, name: name.trim(), sig: mode === 'sig' || officeSig ? sig : null, photos, adds: Object.entries(adds).map(([id, n]) => ({satId: Number(id), number: String(n || '').trim(), name: (addTypes.find((t: any) => String(t.id) === id) || {}).name || 'Tillägg'})), kolli: group.length ? null : kolli, comment: cm, comment2: comment2.trim(), typeId: type ? type.id : 0, subId: sub ? sub.id : 0, typeName: eff ? eff.name : '', at: Date.now()});
+    onDone({mode, name: name.trim(), sig: mode === 'sig' || officeSig ? sig : null, photos, adds: Object.entries(adds).map(([id, n]) => ({satId: Number(id), number: String(n || '').trim(), name: (addTypes.find((t: any) => String(t.id) === id) || {}).name || 'Tillägg'})), kolli: group.length ? null : kolli, comment: cm, comment2: comment2.trim(), typeId: type ? type.id : 0, subId: sub ? sub.id : 0, typeName: eff ? eff.name : '', timeMin: tidOpen && tid ? tid : null, at: Date.now()});
   }
 
   return (
@@ -263,6 +266,18 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone}: 
                   </View>
                 );
               })}
+            </>
+          ))}
+
+          {!stop.repod && timeOk && (!tidOpen ? (
+            <Pressable style={st.devToggle} onPress={() => setTidOpen(true)}>
+              <Text style={st.devToggleTxt}>Timjobb eller tid som ska debiteras? Lägg till tid</Text>
+              <Text style={st.devPlus}>＋</Text>
+            </Pressable>
+          ) : (
+            <>
+              <View style={st.secHead}><Text style={st.sec}>Tid</Text><Text style={st.hint}>{tid ? fmtMin(tid) + ' · ' : ''}skickas till Opter</Text></View>
+              <TidInput minutes={null} onChange={setTid} start={start} />
             </>
           ))}
 
