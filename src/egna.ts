@@ -14,6 +14,7 @@ export type Egen = {
   ocr?: any; // texten RUTT läste (rader med rutor), för ifyllnad av sedeln
   signed?: Signed | null;
   sent?: {load?: number; unload?: number};
+  loadedAt?: number | null; doneAt?: number | null; // sparas på jobbet (inte per dag) så ett lossat jobb inte kommer tillbaka nästa dag
 };
 export const EGNA_KEY = 'rutt.egna.v1';
 export const isEgen = (cid: any) => /^E\d/.test(String(cid || ''));

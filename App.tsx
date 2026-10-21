@@ -44,7 +44,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '21 okt · 3.40 · Tid som i Opter (timmar + minuter, timjobb start–slut), tillägg dolda när kontoret inte tillåter dem';
+const BUILD = '21 okt · 3.41 · egna jobb kommer inte tillbaka nästa dag när de är lossade';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -149,7 +149,22 @@ function AppInner(): React.JSX.Element {
   // Egna jobb (sedlar från Joel som du gjort till stopp). Klara jobb äldre än en vecka rensas.
   const [egna, setEgna] = useState<Egen[]>([]);
   const egnaLoaded = useRef(false);
-  useEffect(() => { loadJSON(EGNA_KEY, []).then((v: any) => { const wk = new Date(Date.now() - 7 * 86400000); const lim = `${wk.getFullYear()}-${String(wk.getMonth() + 1).padStart(2, '0')}-${String(wk.getDate()).padStart(2, '0')}`; setEgna(Array.isArray(v) ? v.filter((e: any) => e && e.day >= lim) : []); egnaLoaded.current = true; }); }, []);
+  useEffect(() => { loadJSON(EGNA_KEY, []).then(async (v: any) => {
+    const wk = new Date(Date.now() - 7 * 86400000); const lim = `${wk.getFullYear()}-${String(wk.getMonth() + 1).padStart(2, '0')}-${String(wk.getDate()).padStart(2, '0')}`;
+    let list: Egen[] = Array.isArray(v) ? v.filter((e: any) => e && e.day >= lim) : [];
+    // Jobb lastade/lossade innan RUTT sparade det på jobbet: hämta tiderna ur dagboken.
+    try {
+      const days = (await DB.listDays()).filter(d => d >= lim);
+      const evs = (await Promise.all(days.map(DB.loadDay))).flatMap(d => d.events || []);
+      list = list.map(e => {
+        if (e.doneAt) return e;
+        const un = evs.find(x => x.cid === e.id && x.kind === 'unload'), ld = evs.find(x => x.cid === e.id && x.kind === 'load');
+        return un || ld ? {...e, loadedAt: e.loadedAt || (ld && ld.t) || (un && un.t) || null, doneAt: un ? un.t : null} : e;
+      });
+    } catch (x) {}
+    setEgna(list); egnaLoaded.current = true; saveJSON(EGNA_KEY, list);
+  }); }, []);
+  const markEgen = (ids: string[], patch: Partial<Egen>) => { const set = new Set(ids.filter(isEgen)); if (set.size) saveEgna(l => l.map(e => (set.has(e.id) ? {...e, ...patch} : e))); };
   const saveEgna = (f: (l: Egen[]) => Egen[]) => setEgna(l => { const n = f(l); if (egnaLoaded.current) saveJSON(EGNA_KEY, n); return n; });
   const [sedelFor, setSedelFor] = useState<{media?: any; job?: Egen} | null>(null);
   const [smsOpter, setSmsOpter] = useState(false); // Lastat/Lossat-SMS även för Opter-order (Inställningar)
@@ -304,8 +319,11 @@ function AppInner(): React.JSX.Element {
   const baseSrc: any = demo ? DEMO : ordersAll.stops.length ? ordersAll : null; // demo går att slå på när som helst (Inställningar)
   // Egna jobb blandas in som vanliga order: samma plan, lastplan, Klart och dagbok – men skickas aldrig till Opter.
   const fullSrc: any = useMemo(() => {
-    if (!egna.length) return baseSrc;
-    const st = egna.flatMap(e => toStops(e)); const cg: any = {}; for (const e of egna) cg[e.id] = cargoOf(e);
+    // Lossade egna jobb visas bara samma dag (i Klart), sen försvinner de ur planen.
+    const today = new Date().toDateString();
+    const vis = egna.filter(e => !e.doneAt || new Date(e.doneAt).toDateString() === today);
+    if (!vis.length) return baseSrc;
+    const st = vis.flatMap(e => toStops(e)); const cg: any = {}; for (const e of vis) cg[e.id] = cargoOf(e);
     return baseSrc ? {...baseSrc, stops: [...baseSrc.stops, ...st], cargo: {...baseSrc.cargo, ...cg}} : {stops: st, cargo: cg, perm: null, opts: null};
   }, [baseSrc, egna]);
   // ---- Var hör varje order hemma? Opters regler (live.tab) + dina tryck i RUTT ----
@@ -449,6 +467,18 @@ function AppInner(): React.JSX.Element {
     loadJSON(key, {}).then(v => setOst(v || {}));
   }, [demo]);
   useEffect(() => { if (ostLoaded.current) saveJSON(ostLoaded.current, ost); }, [ost]);
+  // Ett eget jobbs lastat/lossat ligger på jobbet – in i dagens orderstatus så plan, last och klart vet det.
+  useEffect(() => {
+    if (!egna.length) return;
+    setOst(o => {
+      let n: any = null;
+      for (const e of egna) {
+        const cur = o[e.id] || {};
+        if ((e.loadedAt && !cur.loadedAt) || (e.doneAt && !cur.doneAt)) { n = n || {...o}; n[e.id] = {...cur, ...(e.loadedAt && !cur.loadedAt ? {loadedAt: e.loadedAt} : {}), ...(e.doneAt && !cur.doneAt ? {doneAt: e.doneAt, who: e.drop.name} : {})}; }
+      }
+      return n || o;
+    });
+  }, [egna, ost]);
 
   function flash(text: string, undo: (() => void) | null) {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -613,10 +643,12 @@ function AppInner(): React.JSX.Element {
     setOst(o => { const n = {...o}; for (const x of list) n[x.pickup] = {...(o[x.pickup] || {}), loadedAt: at}; return n; });
     list.forEach(x => sendLoad(x));
     smsLater(list.map(x => ({st: x, cid: String(x.pickup)})), 'load', at, '');
+    markEgen(list.map(x => String(x.pickup)), {loadedAt: at});
     if (!demo) for (const x of list) { const cid = String(x.pickup); const d = dayOrderOf(cid); DB.logEvent({t: at, kind: 'load', cid, who: x.who, lat: x.lat, lng: x.lng, pal: d.pal}); DB.saveOrder(DB.ymdOf(at), {...d, loadedAt: at}); }
     flash(list.length > 1 ? `Lastad · ${list.length} order hos ${st.who || ''}` : `Lastad · ${st.who || 'order'}`, () => {
       if (!demo) list.forEach(x => DB.unlogEvent(String(x.pickup), 'load', at));
       list.forEach(x => { cancelSend(x.pickup, 'load'); smsCancel(String(x.pickup), 'load'); });
+      markEgen(list.map(x => String(x.pickup)), {loadedAt: null});
       setOst(o => { const n = {...o}; for (const x of list) { if (prev[x.pickup]) n[x.pickup] = prev[x.pickup]; else delete n[x.pickup]; } return n; });
     });
   }
@@ -735,9 +767,11 @@ function AppInner(): React.JSX.Element {
       }
     }
     smsLater(list.map((x: any) => ({st: x, cid: String(x.drop)})), 'unload', doneT, pod0.name || '');
+    markEgen(list.map((x: any) => String(x.drop)), {doneAt: doneT});
     if (pod0.name) setNames(n => { const nn = rememberName(n, st0.who, pod0.name); saveJSON(NAMES_KEY, nn); return nn; });
     flash(many ? `Lossad · ${list.length} order hos ${st0.who || ''}` : `Lossad · ${st0.who || 'order'}`, () => {
       if (!demo) list.forEach((x: any) => { DB.unlogEvent(String(x.drop), 'unload', doneT); DB.saveOrder(DB.ymdOf(doneT), {cid: String(x.drop), doneAt: undefined}); });
+      markEgen(list.map((x: any) => String(x.drop)), {doneAt: null});
       list.forEach((x: any) => { cancelSend(x.drop, 'unload'); smsCancel(String(x.drop), 'unload'); const tk = x.drop + ':tid'; if (addTimers.current[tk]) { clearTimeout(addTimers.current[tk].t); delete addTimers.current[tk]; } if (addTimers.current[x.drop]) { clearTimeout(addTimers.current[x.drop].t); delete addTimers.current[x.drop]; } });
       setOst(o => { const n = {...o}; for (const x of list) { if (prev[x.drop]) n[x.drop] = prev[x.drop]; else delete n[x.drop]; } return n; });
     });
