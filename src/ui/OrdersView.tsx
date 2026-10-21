@@ -497,6 +497,19 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         {pl.drops.length > 0 && (
           <Slider style={{marginTop: 8}} key={'d' + pl.key + nDrop} label={`Dra för Lossad${nDrop > 1 ? ` · ${nDrop}` : ''}`} tone="ok" onDone={() => doUnload(pl.drops)} />
         )}
+        {(() => {
+          // Som Opter: lossa flera order på samma ställe fast de står på olika adresser (t.ex. Birger Jarlsg 14/18, Stureplan 2).
+          const mine = new Set(pl.drops.map((r: Row) => k(r)));
+          const other = rows.filter(r => r.kind === 'drop' && !mine.has(k(r))).length;
+          if (!other || (perm && perm.delivery === false)) return null;
+          return (
+            <Pressable style={o.moreDrop} onPress={() => { const n: Record<string, boolean> = {}; pl.drops.filter((r: Row) => isOn(pl.drops, r)).forEach((r: Row) => { n[k(r)] = true; }); setSel(n); setMark(true); }} android_ripple={{color: C.edge}}>
+              <Bi n="check-square-fill" size={16} color={C.accent2} />
+              <Text style={o.moreDropT}>Lossa även order till andra adresser här · {other} till i bilen</Text>
+              <Bi n="chevron-right" size={13} color={C.dim} />
+            </Pressable>
+          );
+        })()}
         {pl.picks.length > 0 && (
           <Slider style={{marginTop: 8}} key={'p' + pl.key + nPick} label={`Dra för Lastad${nPick > 1 ? ` · ${nPick}` : ''}`} tone="go" onDone={() => doLoad(pl.picks)} />
         )}
@@ -788,6 +801,8 @@ const o = themed(() => StyleSheet.create({
   step: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, flexWrap: 'wrap'},
   code: {flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.panel2, borderRadius: 16, paddingHorizontal: 11, height: 32},
   codeT: {color: C.ink, fontSize: 15, fontWeight: '900', letterSpacing: 1.5},
+  moreDrop: {flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, paddingVertical: 11, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: C.edge, backgroundColor: C.panel2},
+  moreDropT: {flex: 1, color: C.ink, fontSize: 13.5, fontWeight: '800'},
   chipBtn: {flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.panel2, borderRadius: 16, paddingHorizontal: 11, height: 32},
   chipTxt: {color: C.ink, fontSize: 13, fontWeight: '700', maxWidth: 110},
   secLbl: {color: C.faint, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 14, marginBottom: 2},

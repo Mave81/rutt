@@ -60,6 +60,7 @@ const F = {
     21: 'customerId', 23: 'customerRef', 34: 'senderRef', 35: 'receiverRef', 36: 'timeMinutes',
     56: 'externalId', 101: 'customerDefaultPOT', 138: 'podLockMainType',
     61: 'podNameReq', 62: 'podSigReq', 63: 'podRemarkReq', 71: 'orderReceiver', 73: 'customerPhone1',
+    105: 'tfrId', 106: 'tfComment', 107: 'forceDelayReason', 108: 'forceDamageOnDelay',
     117: 'podPicReq', 119: 'customerRefPhone', 120: 'customerRefMobile', 121: 'podCommentReq', 123: 'customerPhone2',
   },
   ShipmentPodSuggestion: { 1: 'shiId', 2: 'name', 3: 'revoked' },
@@ -76,6 +77,7 @@ const F = {
   ShipmentAddService: { 1: 'shiId', 2: 'satId', 3: 'number', 4: 'code', 5: 'descr', 6: 'externalId', 8: 'active' },
   DefaultDamageType: { 1: 'name', 2: 'descr', 3: 'externalId', 4: 'order', 5: 'active', 6: 'id', 7: 'forceComment', 8: 'isDefault', 9: 'forceEvent', 10: 'forcePicture', 11: 'inMobile' },
   DamageEvent: { 1: 'name', 2: 'descr', 3: 'order', 4: 'active', 5: 'id', 6: 'forceReason' },
+  TimeFailureReason: { 1: 'id', 2: 'inMobile', 3: 'active', 4: 'name', 5: 'descr' },
   DamageReason: { 1: 'id', 2: 'name', 3: 'descr', 4: 'order', 5: 'active' },
   DamageTypeEvent: { 1: 'id', 2: 'datId', 3: 'daeId' },
   DamageEventReason: { 1: 'id', 2: 'daeId', 3: 'darId' },
@@ -453,7 +455,12 @@ function editOptions(decoded) {
     })) : [];
     return {id, name: String(c.name || 'Avvikelse'), order: c.order, isDefault: !!c.isDefault, forceComment: !!c.forceComment, forceEvent: !!c.forceEvent && events.length > 0, forcePicture: !!c.forcePicture, events};
   }).sort(byOrder);
+  // Förseningsorsaker (Opter: TimeFailureReason, bara aktiva som får väljas i mobilen).
+  const delayReasons = rows.filter(r => r.table === 'TimeFailureReason' && r.columns.active !== false && r.columns.inMobile !== false)
+    .map(r => ({id: r.columns.id || r.key.xxxId, name: String(r.columns.name || ''), descr: String(r.columns.descr || '')}))
+    .filter(r => r.id > 0 && r.name).sort((a, b) => a.name.localeCompare(b.name, 'sv'));
   return {
+    delayReasons,
     perm: {
       pod: sBool('ProofOfDeliveryPermission', true), addService: sBool('AddServicePermission', true), giveAway: sBool('GiveAwayPermission', true),
       changes: sBool('ChangesPermission', true), damages: sBool('DamagesPermission', true),
@@ -722,6 +729,24 @@ function optTime(dt, dateTTY, timeTTY) {
   return {hhmm: hasTime ? hhmm(dt) : null, date: ymd(dt), hasDate, ms: dt.getTime()};
 }
 
+/* Opter: isTimeAfterLatestDeliveryTime. Saknas både datum och tid → aldrig sen. Bara datum → jämför dagen. */
+function isLateDelivery(latestDel, now = Date.now()) {
+  if (!latestDel) return false;
+  if (latestDel.hasTime) return now > latestDel.ms;
+  return ymd(new Date(now)) > latestDel.date;
+}
+/* Ordrar i en lossning där Opter skulle fråga efter förseningsorsak / kräva avvikelse. */
+function delayNeeds(stops, now = Date.now()) {
+  const out = [];
+  for (const st of stops || []) {
+    const L = st && st.live; if (!L || !L.unloadSt) continue;
+    if (!isLateDelivery(L.latestDel, now)) continue;
+    const reason = !!L.forceDelay && !(L.tfrId > 0);
+    const damage = !!L.forceDamageDelay;
+    if (reason || damage) out.push({cid: String(st.drop), reason, damage});
+  }
+  return out;
+}
 /* Antal pallar som står i fritext: "4 pall", "2 st pallar", "3 helpall", "1 halvpall", "2 EUR-pall". Största talet gäller. */
 function palFromText(text) {
   let best = 0; const re = /(\d{1,2})\s*(?:st\.?\s*)?(?:hel|halv|eur?o?|eng[åa]ngs|eng)?[-\s]?pall(?:ar|en|arna)?\b/gi; let m;
@@ -837,7 +862,10 @@ function toRutt(decoded) {
       serverDone, acceptSt: acceptSt ? {id: acceptSt.id, name: acceptSt.name} : null, rejectSt: rejectSt ? {id: rejectSt.id, name: rejectSt.name} : null,
       loadSt: loadSt ? {id: loadSt.id, name: loadSt.name} : null, unloadSt: unloadSt ? {id: unloadSt.id, name: unloadSt.name, pod: !!unloadSt.pod} : null,
       podType: podType ? {id: podType.id, name: podType.name} : null, hasSpt, externalId: c.externalId || '',
-      packageIds: pkgs.map(p => p._id).filter(Boolean) };
+      packageIds: pkgs.map(p => p._id).filter(Boolean),
+      // Försening som Opter: kunden kräver orsak (och ev. avvikelse) när ordern lossas efter senaste leveranstid.
+      tfrId: Number(c.tfrId) || 0, forceDelay: !!c.forceDelayReason, forceDamageDelay: !!c.forceDamageOnDelay,
+      latestDel: (() => { const t = optTime(c.latestDelDT, c.latestDelDateTTY, c.latestDelTimeTTY); return t ? {ms: t.ms, date: t.date, hasTime: !!t.hhmm} : null; })() };
     const pkgText = pkgs.map(p => [p.quantity ? p.quantity + ' st' : '', p.packageType, p.text].filter(Boolean).join(' ')).filter(Boolean).join(', ');
     cargo[cid] = { name: c.customer || c.serviceType || ('Order ' + cid), pal, kg, to: to && to.city ? to.city : '', goods: pkgText };
     // Krav som Opter: ett fält krävs bara om BÅDE ordern och den valda kvittenstypen kräver det.
@@ -881,5 +909,5 @@ function toRutt(decoded) {
 module.exports = {
   MessageType, Table, DT, RST, F, frame, unframe, decodeSync, ticksToDate,
   logonPayload, parseLogon, resourceList, encodeStartWork, encodeWorkStatus, toRutt,
-  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering, tidspass, palFromText, team, encodeShipmentStatus, encodeShipmentEdit, encodeGiveAway, editOptions, CET, CHANGE_FIELDS, signatureString, encodePosition, setting,
+  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering, tidspass, palFromText, team, encodeShipmentStatus, encodeShipmentEdit, encodeGiveAway, editOptions, isLateDelivery, delayNeeds, CET, CHANGE_FIELDS, signatureString, encodePosition, setting,
 };

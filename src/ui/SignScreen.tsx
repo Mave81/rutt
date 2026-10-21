@@ -13,7 +13,7 @@ import {Bi} from './Bi';
 import TidInput, {fmtMin} from './TidInput';
 
 
-export default function SignScreen({stop, savedNames, saved, onCancel, onDone, addOk = true, timeOk = false, start = null}: {stop: any; savedNames: string[]; saved?: any; onCancel: () => void; onDone: (pod: any) => void; addOk?: boolean; timeOk?: boolean; start?: number | null}) {
+export default function SignScreen({stop, savedNames, saved, onCancel, onDone, addOk = true, timeOk = false, start = null, delay = null}: {delay?: {needs: {cid: string; who: string; orderNo?: string; reason: boolean; damage: boolean; late?: string}[]; reasons: {id: number; name: string; descr?: string}[]; damageTypes: any[]} | null; stop: any; savedNames: string[]; saved?: any; onCancel: () => void; onDone: (pod: any) => void; addOk?: boolean; timeOk?: boolean; start?: number | null}) {
   const insets = useSafeAreaInsets();
   const {kb, lift} = useKeyboardLift();
   const [sig, setSig] = useState<SigData | null>(null);
@@ -34,11 +34,17 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
   const [tidOpen, setTidOpen] = useState(false);
   const [tid, setTid] = useState<number | null>(null);
   const [subId, setSubId] = useState(0);
+  // Försening (som Opter): orsak + kommentar, och avvikelse om kunden kräver det.
+  const [tfr, setTfr] = useState(0);
+  const [tfText, setTfText] = useState('');
+  const [dmgT, setDmgT] = useState(0);
+  const [dmgE, setDmgE] = useState(0);
+  const [dmgR, setDmgR] = useState(0);
 
   useEffect(() => {
     setSig(null); setFsSig(false); setTidOpen(false); setTid(null); setMode('sig'); setName(''); setPhotos([]); setComment(''); setComment2('');
     setTypeId((stop && stop.pod && stop.pod.defaultId) || 0); setSubId(0);
-    setAdds({}); setExtOpen(false);
+    setAdds({}); setExtOpen(false); setTfr(0); setTfText(''); setDmgT(0); setDmgE(0); setDmgR(0);
     setKolli((saved && saved.kolli) || (stop && stop.kolli) || 0);
   }, [stop, saved]);
 
@@ -80,6 +86,26 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
   if (req.remark && comment.trim().length === 0) missing.push('anmärkning');
   if (req.comment && comment2.trim().length === 0) missing.push((fields.commentName || 'kommentar').toLowerCase());
   if (req.sub && !sub) missing.push('undertyp');
+  const dNeeds = (delay && delay.needs) || [];
+  const needReason = dNeeds.some(n => n.reason), needDmg = dNeeds.some(n => n.damage);
+  const dReasons = (delay && delay.reasons) || [];
+  const dTypes: any[] = (delay && delay.damageTypes) || [];
+  const dType = dTypes.find(t => t.id === dmgT) || null;
+  const dEv = dType ? (dType.events || []).find((e: any) => e.id === dmgE) || null : null;
+  const dRs = dEv ? (dEv.reasons || []).find((r: any) => r.id === dmgR) || null : null;
+  if (needReason) {
+    if (!tfr) missing.push(dReasons.length ? 'förseningsorsak' : 'förseningsorsak (Opter har inga orsaker för mobilen – ring kontoret)');
+    if (tfText.trim().length === 0) missing.push('kommentar till förseningen');
+  }
+  if (needDmg) {
+    if (!dType) missing.push('avvikelse (kunden kräver vid försening)');
+    else {
+      if (dType.forceEvent && !dEv) missing.push('händelse på avvikelsen');
+      if (dEv && dEv.forceReason && (dEv.reasons || []).length && !dRs) missing.push('orsak på avvikelsen');
+      if (dType.forceComment && tfText.trim().length === 0 && comment.trim().length === 0) missing.push('kommentar på avvikelsen');
+      if (dType.forcePicture && photos.length === 0) missing.push('foto på avvikelsen');
+    }
+  }
   const ok = missing.length === 0;
 
   async function addPhoto(cam: boolean) {
@@ -89,7 +115,9 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
     if (!ok) return;
     const autoNote = mode === 'foto' ? `Kund ej på plats – foto taget på begäran av ${name.trim()}` : '';
     const cm = comment.trim() || autoNote;
-    onDone({mode, name: name.trim(), sig: mode === 'sig' || officeSig ? sig : null, photos, adds: Object.entries(adds).map(([id, n]) => ({satId: Number(id), number: String(n || '').trim(), name: (addTypes.find((t: any) => String(t.id) === id) || {}).name || 'Tillägg'})), kolli: group.length ? null : kolli, comment: cm, comment2: comment2.trim(), typeId: type ? type.id : 0, subId: sub ? sub.id : 0, typeName: eff ? eff.name : '', timeMin: tidOpen && tid ? tid : null, at: Date.now()});
+    onDone({mode, name: name.trim(), sig: mode === 'sig' || officeSig ? sig : null, photos, adds: Object.entries(adds).map(([id, n]) => ({satId: Number(id), number: String(n || '').trim(), name: (addTypes.find((t: any) => String(t.id) === id) || {}).name || 'Tillägg'})), kolli: group.length ? null : kolli, comment: cm, comment2: comment2.trim(), typeId: type ? type.id : 0, subId: sub ? sub.id : 0, typeName: eff ? eff.name : '', timeMin: tidOpen && tid ? tid : null, at: Date.now(),
+      delay: dNeeds.length ? {needs: dNeeds, tfrId: tfr, tfrName: (dReasons.find(r => r.id === tfr) || {name: ''}).name, comment: tfText.trim(),
+        damage: needDmg && dType ? {ddtId: dType.id, daeId: dEv ? dEv.id : 0, darId: dRs ? dRs.id : 0, name: dType.name, comment: tfText.trim() || cm} : null} : null});
   }
 
   return (
@@ -132,8 +160,55 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
               <Text style={st.grpHead}>Samma kvittens för {group.length} order</Text>
               {group.map((g: any) => <Text key={g.drop} style={st.grpTxt} numberOfLines={1}>• {[g.who, g.orderNo && `Order ${g.orderNo}`, g.kolli && `${g.kolli} kolli`].filter(Boolean).join(' · ') || g.who}</Text>)}
               {new Set(group.map((g: any) => String(g.who || '').toLowerCase())).size > 1 ? (
-                <Text style={[st.grpTxt, {color: C.bad, marginTop: 6}]}>Orderna har olika mottagare ({[...new Set(group.map((g: any) => g.who))].join(', ')}). Samma signatur sparas på alla – som i Opter Driver. Lossa hellre en mottagare i taget.</Text>
+                <Text style={[st.grpTxt, {color: C.dim, marginTop: 6}]}>Olika adresser ({[...new Set(group.map((g: any) => g.who))].join(', ')}) – samma kvittens sparas på alla, precis som när du bockar flera i Opter.</Text>
               ) : null}
+            </View>
+          )}
+
+          {!stop.repod && dNeeds.length > 0 && (
+            <View style={st.lateBox}>
+              <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
+                <Bi n="alarm-fill" size={18} color={C.bad} />
+                <Text style={st.lateHead}>{dNeeds.length > 1 ? `${dNeeds.length} order är försenade` : 'Ordern är försenad'}</Text>
+              </View>
+              <Text style={st.lateSub}>{dNeeds.map(n => [n.who, n.orderNo ? '#' + n.orderNo : '', n.late ? 'senast ' + n.late : ''].filter(Boolean).join(' · ')).join('\n')}</Text>
+              <Text style={st.lateSub}>Kunden kräver {needReason ? 'en förseningsorsak' : ''}{needReason && needDmg ? ' och ' : ''}{needDmg ? 'en avvikelse' : ''} – precis som Opter frågar.</Text>
+              {needReason && (
+                <>
+                  <View style={st.secHead}><Text style={st.sec}>Förseningsorsak</Text><View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View></View>
+                  <View style={st.chips}>
+                    {dReasons.map(r => (
+                      <Pressable key={r.id} style={[st.chip, tfr === r.id && st.chipOn]} onPress={() => setTfr(r.id)}><Text style={[st.chipTxt, tfr === r.id && st.chipTxtOn]}>{r.name}</Text></Pressable>
+                    ))}
+                  </View>
+                </>
+              )}
+              {needDmg && (
+                <>
+                  <View style={st.secHead}><Text style={st.sec}>Avvikelse</Text><View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View></View>
+                  <View style={st.chips}>
+                    {dTypes.map((t: any) => (
+                      <Pressable key={t.id} style={[st.chip, dmgT === t.id && st.chipOn]} onPress={() => { setDmgT(t.id); setDmgE(0); setDmgR(0); }}><Text style={[st.chipTxt, dmgT === t.id && st.chipTxtOn]}>{t.name}</Text></Pressable>
+                    ))}
+                  </View>
+                  {dType && (dType.events || []).length > 0 && (
+                    <View style={[st.chips, {marginTop: 8}]}>
+                      {dType.events.map((e: any) => (
+                        <Pressable key={e.id} style={[st.chip, dmgE === e.id && st.chipOn]} onPress={() => { setDmgE(e.id); setDmgR(0); }}><Text style={[st.chipTxt, dmgE === e.id && st.chipTxtOn]}>{e.name}</Text></Pressable>
+                      ))}
+                    </View>
+                  )}
+                  {dEv && (dEv.reasons || []).length > 0 && (
+                    <View style={[st.chips, {marginTop: 8}]}>
+                      {dEv.reasons.map((r: any) => (
+                        <Pressable key={r.id} style={[st.chip, dmgR === r.id && st.chipOn]} onPress={() => setDmgR(r.id)}><Text style={[st.chipTxt, dmgR === r.id && st.chipTxtOn]}>{r.name}</Text></Pressable>
+                      ))}
+                    </View>
+                  )}
+                </>
+              )}
+              <View style={st.secHead}><Text style={st.sec}>Varför blev det sent?</Text>{needReason ? <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View> : null}</View>
+              <TextInput style={st.comment} value={tfText} onChangeText={setTfText} placeholder="T.ex. kö på Essingeleden, väntade på lastning…" placeholderTextColor={C.faint} multiline />
             </View>
           )}
 
@@ -323,6 +398,9 @@ const st = themed(() => StyleSheet.create({
   nameInput: {backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 12, color: C.ink, paddingHorizontal: 14, paddingVertical: 13, fontSize: 18, fontWeight: '600'},
   sugLabel: {color: C.faint, fontSize: 12, marginTop: 10, marginBottom: 7},
   chips: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
+  lateBox: {backgroundColor: C.badSoft, borderColor: C.bad, borderWidth: 1.5, borderRadius: 14, padding: 14, marginTop: 4, marginBottom: 6, gap: 6},
+  lateHead: {color: C.bad, fontSize: 16, fontWeight: '900'},
+  lateSub: {color: C.ink, fontSize: 13.5, lineHeight: 19},
   chip: {backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, borderRadius: 18, paddingVertical: 9, paddingHorizontal: 14},
   chipOn: {backgroundColor: C.accent, borderColor: C.accent},
   chipTxt: {color: C.ink, fontSize: 14, fontWeight: '600'},

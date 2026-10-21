@@ -44,7 +44,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '21 okt · 3.41 · egna jobb kommer inte tillbaka nästa dag när de är lossade';
+const BUILD = '21 okt · 3.42 · förseningsorsak + lossa flera adresser';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -528,6 +528,15 @@ function AppInner(): React.JSX.Element {
     queueSend(st.pickup, 'load', () => client.setStatus(L, L.loadSt.id, null));
   }
   // Lossad → Opter, byte för byte som Opter Driver (registerPod + setShipmentStatus i samma synk).
+  // Som Opter: vid Lossad efter senaste leveranstid frågas efter orsak när kunden kräver det.
+  function delayFor(st0: any) {
+    if (!st0 || st0.repod) return null;
+    const list = st0.group && st0.group.length ? st0.group : [st0];
+    const needs = (P.delayNeeds(list) || []).map((n: any) => { const x = list.find((y: any) => String(y.drop) === n.cid) || {}; const ld = x.live && x.live.latestDel; return {...n, who: x.who || '', orderNo: x.orderNo || '', late: ld ? (ld.hasTime ? new Date(ld.ms).toTimeString().slice(0, 5) : ld.date) : ''}; });
+    if (!needs.length) return null;
+    const o = orders.opts || {};
+    return {needs, reasons: o.delayReasons || [], damageTypes: o.damageTypes || []};
+  }
   async function sendUnload(st: any, pod: any) {
     const L = st.live;
     if (!live || !L || !L.unloadSt) return;
@@ -535,7 +544,14 @@ function AppInner(): React.JSX.Element {
     const hadPod = !!(pod && (pod.name || (pod.sig && pod.sig.strokes && pod.sig.strokes.length)));
     // Opter tar bara emot en kvittens med en kvittenstyp. Saknas den → säg det, låtsas inte att den kom fram.
     if (!podData && hadPod) flash('Kvittensen kom inte med – ordern saknar kvittenstyp i Opter', null);
-    queueSend(st.drop, 'unload', async () => { const r = await client.setStatus(L, L.unloadSt.id, podData); return (!podData && hadPod && r.confirmed) ? {...r, noPod: true} : r; });
+    // Försenad: orsak (+ avvikelse) skickas först, i samma kö som Lossad (Ångra stoppar båda) – som Opter gör vid statusbytet.
+    const dl = pod && pod.delay, need = dl ? (dl.needs || []).find((n: any) => n.cid === String(st.drop)) : null;
+    const pre: any = {};
+    if (need && need.reason && dl.tfrId && dl.comment) pre.changes = [{cet: 106, kind: 'str', value: dl.comment}, {cet: 107, kind: 'int', value: String(dl.tfrId)}];
+    if (need && need.damage && dl.damage) pre.damages = [{ddtId: dl.damage.ddtId, daeId: dl.damage.daeId, darId: dl.damage.darId, comment: dl.damage.comment || '', images: []}];
+    queueSend(st.drop, 'unload', async () => {
+      if (pre.changes || pre.damages) { try { const e = await client.editShipment(L, pre); dlog('försening ' + st.drop + ' ' + JSON.stringify(e && (e.confirmed != null ? {ok: e.confirmed} : e)).slice(0, 80)); } catch (e: any) { dlog('försening fel ' + String(e?.message || e)); } }
+      const r = await client.setStatus(L, L.unloadSt.id, podData); return (!podData && hadPod && r.confirmed) ? {...r, noPod: true} : r; });
   }
   // Kvittensen som sparades vid lossningen (signatur + namn) skickas till Opter igen, utan ny signatur.
   // En order till Claude (från Klart eller planen): serverns rader för ordern + vad RUTT skickat + det RUTT har sparat.
@@ -1425,6 +1441,7 @@ function AppInner(): React.JSX.Element {
           addOk={demo || !(orders.opts && orders.opts.perm && orders.opts.perm.addService === false)}
           timeOk={!signStop.own && !signStop.ownSign && (demo || !!(orders.opts && orders.opts.perm && orders.opts.perm.changes !== false && (orders.opts.fields || []).some((f: any) => f.cetName === 'SHI_TimeMinutes')))}
           start={(ost[signStop.drop] || {}).loadedAt || null}
+          delay={delayFor(signStop)}
           onCancel={() => setSignStop(null)}
           onDone={(pod: any) => onSigned(signStop, pod)}
         />
