@@ -1,5 +1,6 @@
 /**
- * Plan – förslag A "Fokus" (valt 16 okt): EN skärm per ställe.
+ * Plan – jobblistan (förslag A, valt 22 okt). Se kommentaren vid OrdersView nedan.
+ * (Tidigare: förslag A "Fokus" 16 okt – EN skärm per ställe.)
  *  - Stort: stället du ska till, adress, tid, portkod. Inga lådor runt allt.
  *  - Orderna som en bocklista (alla bockade). Många order grupperas på vart de ska.
  *    Varje order: tryck för mottagaren/avsändaren med allt, ⋯ = tillägg, bild, avvikelse, ändring.
@@ -9,9 +10,9 @@
  *    kontorets behörighet (SetMultipleStatusPermission), som Opter Driver.
  */
 import React, {useMemo, useState} from 'react';
-import {FlatList, Linking, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View} from 'react-native';
+import {FlatList, Linking, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {C, themed, hhmm, prettyPhone, whenText} from './theme';
+import {C, themed, hhmm, prettyPhone, whenText, FONT, R} from './theme';
 import {Sheet} from './parts';
 import {Bi, BiName} from './Bi';
 import Slider from './Slider';
@@ -178,7 +179,17 @@ function SmsSheet({to, onClose}: {to: {name: string; num: string; who: string} |
   );
 }
 
-export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell}: {
+/* =====================================================================================
+ * Jobblistan (förslag A, valt 22 okt): hela dagen på en skärm.
+ *  - Stopp i körordning: nummer, HÄMTA/LÄMNA, namn, adress, tid. Under: en rad per order.
+ *  - Tryck på en order = allt om den i ett blad (+ "Visa för butiken" vid hämtning).
+ *  - Håll in en order = markera flera (även andra adresser), sen en knapp: "Lastad · n" / "Lossad · n".
+ *  - Lämningar är grå tills godset är lastat. Nere: nästa stopp med GPS, Ring och dra-för-Lastad/Lossad.
+ * ===================================================================================== */
+type JRow = Row & {state: 'act' | 'wait'};
+type JPlace = {key: string; st: any; rows: JRow[]; eta: any; late: number};
+
+export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell, me = '', onAddNum}: {
   route: any; cargo: any; ost: Record<string, any>; allStops: any[];
   onLoaded: (st: any, more?: any[]) => void; onUnload: (st: any, more?: any[]) => void;
   onEdit: (cid: string, st: any) => void;
@@ -186,52 +197,85 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   onRetry: (cid: string) => void; live: boolean; later?: any[]; onReorder?: (keys: string[] | null) => void; perm?: any;
   tellTo?: TellTarget[];
   onTell?: (id: string, text: string) => void;
+  me?: string;
+  onAddNum?: (cid: string, c: {label: string; num: string}) => void;
 }) {
-  const [focus, setFocus] = useState<string | null>(null); // annat stopp än NÄSTA valt som "nu"
   const [callStop, setCallStop] = useState<any>(null);
   const [sms, setSms] = useState<any>(null);
   const [tell, setTell] = useState<{text: string; mob: any; who: string} | null>(null);
-  const [listOpen, setListOpen] = useState(false);
-  const [fullInfo, setFullInfo] = useState<Record<string, boolean>>({});
   const [reorder, setReorder] = useState(false);
-  const [unsel, setUnsel] = useState<Record<string, boolean>>({}); // order på samma ställe som du bockat ur
   const [navFor, setNavFor] = useState<any>(null);
-  const [radio, setRadio] = useState<Record<string, string>>({}); // en i taget när kontoret stängt av flera
-  const [openG, setOpenG] = useState<Record<string, boolean>>({});
   const [placeSheet, setPlaceSheet] = useState<any>(null);
-  const [mark, setMark] = useState(false);
   const [sel, setSel] = useState<Record<string, boolean>>({});
-  const [planned, setPlanned] = useState<any>(null); // order för senare dag, visas som kort i ett blad // visa planen fast bilen rullar
+  const [selMode, setSelMode] = useState(false);
+  const [openRow, setOpenRow] = useState<JRow | null>(null);
+  const [shop, setShop] = useState<JRow[] | null>(null);
+  const [addNum, setAddNum] = useState<{cid: string; label: string; num: string} | null>(null);
+  const [planned, setPlanned] = useState<any>(null);
   const now = Date.now();
-  const bottom = useSafeAreaInsets().bottom + 24;
+  const insets = useSafeAreaInsets();
 
-  // Bygg raderna ur körordningen: hämtningar alltid; lämningar bara när godset är lastat.
-  const rows: Row[] = useMemo(() => {
+  // Alla rader ur körordningen. Lämningar vars gods inte är lastat än visas grå ("väntar på lastning").
+  const rows: JRow[] = useMemo(() => {
     const order = route.order || [], prow = route.plan.rows || [];
-    const dropAt: Record<string, any> = {};
-    order.forEach((s: any, i: number) => { if (s.drop) dropAt[s.drop] = {eta: prow[i] && prow[i].eta, area: s.area || s.adr}; });
-    const out: Row[] = [];
     const pendingPick = new Set(order.filter((s: any) => s.pickup).map((s: any) => String(s.pickup)));
+    const out: JRow[] = [];
     order.forEach((s: any, i: number) => {
-      if (s.pickup) out.push({kind: 'pickup', st: s, cid: s.pickup, plan: prow[i], dropLater: dropAt[s.pickup] || null});
-      else if (s.drop && !pendingPick.has(String(s.drop))) out.push({kind: 'drop', st: s, cid: s.drop, plan: prow[i]});
+      if (s.pickup) out.push({kind: 'pickup', st: s, cid: s.pickup, plan: prow[i], state: 'act'});
+      else if (s.drop) out.push({kind: 'drop', st: s, cid: s.drop, plan: prow[i], state: pendingPick.has(String(s.drop)) ? 'wait' : 'act'});
     });
     return out;
   }, [route, ost]);
+  // Stopp = samma ställe (Opter har ingen sådan logik – RUTT slår ihop på adress/koordinater).
+  const places: JPlace[] = useMemo(() => {
+    const out: JPlace[] = [];
+    for (const r of rows) {
+      let pl = out.find(x => samePlace(x.st, r.st));
+      if (!pl) out.push(pl = {key: r.kind + r.cid, st: r.st, rows: [], eta: null, late: 0});
+      pl.rows.push(r);
+      if (r.state === 'act' && !pl.eta && r.plan && r.plan.eta) pl.eta = r.plan.eta;
+      if (r.plan && r.plan.late) pl.late = Math.max(pl.late, r.plan.late);
+    }
+    const rank = (r: JRow) => (r.state === 'wait' ? 2 : r.kind === 'drop' ? 0 : 1);
+    out.forEach(pl => pl.rows.sort((a, b) => rank(a) - rank(b)));
+    return out;
+  }, [rows]);
+  const k = (r: Row) => r.kind + r.cid;
+  const multi = !perm || perm.multi !== false;
+  const canP = !perm || perm.pickup !== false, canD = !perm || perm.delivery !== false;
+  const canAct = (r: JRow) => r.state === 'act' && (r.kind === 'pickup' ? canP : canD);
+  const otherOf = (r: Row) => r.kind === 'pickup'
+    ? (allStops.find((s: any) => s.drop === r.cid) || later.find((s: any) => s.drop === r.cid))
+    : (allStops.find((s: any) => s.pickup === r.cid) || later.find((s: any) => s.pickup === r.cid));
+  const placeName = (st: any) => st.who || [st.adr, st.area].filter(Boolean).join(', ') || '—';
+  const qty = (r: Row) => { const c = cargo[r.cid] || {}; const kli = Number(r.st.kolli) || 0; return kli ? {n: kli, u: 'kli'} : c.pal ? {n: Number(c.pal), u: 'pall'} : null; };
+  // Godset = kollitexten i Opter ("2 pall", "Kartonger"). Inte kundnamnet/tjänsten ("Bud BDX"), det är inget gods.
+  const goodsOf = (r: Row) => { const c = cargo[r.cid] || {}; const g = String(c.goods || ''); return /^order\b/i.test(g) ? '' : g; };
+  const syncBad = (r: Row) => { const sy = (ost[r.cid] || {}).sync || {}; const v = r.kind === 'pickup' ? sy.load : sy.unload; return v === 'failed' || v === 'unconfirmed'; };
+  const nextPl = places.find(pl => pl.rows.some(r => r.state === 'act')) || null;
+  // Rubriken på ett stopp: företaget när alla order gäller samma, annars gatan (t.ex. Birger Jarlsgatan 18 med fyra mottagare).
+  const titleOf = (pl: JPlace) => { const whos = [...new Set(pl.rows.map(r => String(r.st.who || '')))]; return whos.length === 1 && whos[0] ? whos[0] : pl.st.adr || placeName(pl.st); };
+  const sumQty = (rs: Row[]) => { let kli = 0, pal = 0; rs.forEach(r => { const q = qty(r); if (q) { if (q.u === 'kli') kli += q.n; else pal += q.n; } }); return {kli, pal}; };
+  const qtyTxt = (q: {kli: number; pal: number}) => [q.kli ? `${q.kli} kli` : '', q.pal ? `${q.pal} pall` : ''].filter(Boolean).join(' · ');
 
-  const p = route.plan;
-  // Hela körordningen (även lossningar som väntar på sin hämtning) för "Ändra ordning".
-  const orderItems = useMemo(() => (route.order || []).map((s: any, i: number) => ({key: s.pickup ? 'p' + s.pickup : 'd' + s.drop, kind: s.pickup ? 'pickup' : 'drop', cid: s.pickup || s.drop, st: s, plan: (route.plan.rows || [])[i]})), [route]);
-
-  function callFor(st: any) {
-    const tel = st.tel || [];
-    if (tel.length === 1) dial(tel[0].num);
-    else if (tel.length > 1) setCallStop(st);
-  }
+  // ---- markera flera ----
+  const selRows = rows.filter(r => sel[k(r)] && canAct(r));
+  const nP = selRows.filter(r => r.kind === 'pickup').length, nD = selRows.length - nP;
+  const exitSel = () => { setSelMode(false); setSel({}); };
+  const toggle = (r: JRow) => { if (!canAct(r)) return; setSel(x => { const n = {...x, [k(r)]: !x[k(r)]}; if (!Object.values(n).some(Boolean)) setSelMode(false); return n; }); };
+  const startSel = (r: JRow) => { if (!multi || !canAct(r)) return; setSel({[k(r)]: true}); setSelMode(true); };
+  const togglePlace = (pl: JPlace) => { const rs = pl.rows.filter(canAct); const all = rs.every(r => sel[k(r)]); setSel(x => { const n = {...x}; rs.forEach(r => { n[k(r)] = !all; }); if (!Object.values(n).some(Boolean)) setSelMode(false); return n; }); };
+  const selectAll = () => { const kind = selRows[0] ? selRows[0].kind : (nextPl && nextPl.rows.find(canAct) || {kind: 'drop'}).kind; setSel(x => { const n = {...x}; rows.filter(r => canAct(r) && r.kind === kind).forEach(r => { n[k(r)] = true; }); return n; }); };
+  const doGo = (kind: 'pickup' | 'drop') => {
+    const ch = selRows.filter(r => r.kind === kind); if (!ch.length) return;
+    exitSel();
+    if (kind === 'pickup') onLoaded(ch[0].st, ch.slice(1).map(r => r.st)); else onUnload(ch[0].st, ch.slice(1).map(r => r.st));
+  };
+  const doPlace = (pl: JPlace, kind: 'pickup' | 'drop') => { const ch = pl.rows.filter(r => r.kind === kind && canAct(r)); if (!ch.length) return; if (kind === 'pickup') onLoaded(ch[0].st, ch.slice(1).map(r => r.st)); else onUnload(ch[0].st, ch.slice(1).map(r => r.st)); };
 
   // Personerna på ett stopp: rund avatar, SMS (bara mobil) och Ring.
   const peopleRows = (st: any) => {
-    const tel = (st.tel || []).slice(0, 3);
+    const tel = (st.tel || []).slice(0, 4);
     if (!tel.length) return null;
     return (
       <View style={o.people}>
@@ -240,15 +284,15 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
             <Face label={t.label} />
             <View style={{flex: 1, minWidth: 0}}>
               <Text style={o.pName} numberOfLines={1}>{String(t.label).replace(/\s*\(mobil\)/i, '')}</Text>
-              <Text style={o.pNum}>{/\(mobil\)/i.test(t.label) ? 'Mobil · ' : ''}{prettyPhone(t.num)}</Text>
+              <Text style={o.pNum}>{prettyPhone(t.num)}{t.src ? `  ·  ${t.src}` : ''}</Text>
             </View>
             {isMobile(t.num) && (
               <Pressable hitSlop={6} style={o.pBtn} onPress={() => setSms({name: String(t.label).replace(/\s*\(mobil\)/i, ''), num: t.num, who: st.who})}>
-                <Bi n="chat-dots-fill" size={18} color={C.people} />
+                <Bi n="chat-dots-fill" size={17} color={C.people} />
               </Pressable>
             )}
             <Pressable hitSlop={6} style={o.pBtn} onPress={() => dial(t.num)}>
-              <Bi n="telephone-fill" size={18} color={C.people} />
+              <Bi n="telephone-fill" size={17} color={C.people} />
             </Pressable>
           </View>
         ))}
@@ -256,7 +300,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     );
   };
 
-  // ---- Senare dagar: en rad per ORDER (hämta + lämna ihop), inte per stopp ----
+  // ---- Senare dagar: en rad per ORDER (hämta + lämna ihop) ----
   const laterOrders = (() => {
     const by: Record<string, any> = {}; const out: any[] = [];
     for (const st of later) {
@@ -267,434 +311,293 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     return out;
   })();
   const when = (st: any) => (st ? whenText(st.tEarliest || st.tLatest) : '');
-  const plannedCard = (g: any) => {
-    const any = g.pick || g.drop;
-    const c = cargo[g.cid] || {};
-    const gName = c.goods || c.name || '';
-    const goods = [c.pal ? `${c.pal} pall` : '', c.kg ? `${c.kg} kg` : '', /^order\b/i.test(gName) ? '' : gName].filter(Boolean).join(' · ');
-    const orderLine = [any.orderNo && `Order ${any.orderNo}`, any.freightBill && any.freightBill !== any.orderNo && `Fraktsedel ${any.freightBill}`, any.service].filter(Boolean).join('  ·  ');
-    const notes = uniqNotes([g.pick && g.pick.adrMsg, g.drop && g.drop.adrMsg, any.info], goods);
-    // Du bestämmer: går det att lasta tidigare än planerat drar du bara Lastad.
-    const os = ost[g.cid] || {};
-    const P = g.pick;
-    const loaded = !P || !!os.loadedAt || !!(P.live && ((P.live.loadSt && P.live.curId === P.live.loadSt.id) || P.live.serverDone));
-    const leg = (st: any, pickup: boolean) => st && (
-      <View style={o.leg}>
-        <View style={o.headRow}>
-          <View style={[o.verb, {backgroundColor: pickup ? C.accentSoft : C.okSoft}]}>
-            <Bi n={pickup ? 'box-seam-fill' : 'check-circle-fill'} size={12} color={pickup ? C.accentInk : C.accent2} />
-            <Text style={[o.verbTxt, {color: pickup ? C.accentInk : C.accent2}]}>{pickup ? 'HÄMTA' : 'LÄMNA'}</Text>
-          </View>
-          <Text style={o.legWhen}>{when(st)}</Text>
+
+  // ---- En rad ----
+  const orderRow = (r: JRow) => {
+    const on = !!sel[k(r)], other = otherOf(r), q = qty(r), act = r.state === 'act';
+    const pick = r.kind === 'pickup', bad = syncBad(r);
+    const t1 = pick ? (other ? placeName(other) : goodsOf(r) || 'Order') : (r.st.who || goodsOf(r) || 'Order');
+    const dest = other ? [other.adr, other.area].filter(Boolean).join(', ') : '';
+    const sub: React.ReactNode[] = [];
+    if (r.st.tidspass) sub.push(<Text key="tp" style={o.tp}>{r.st.tidspass.time ? `Tidspass ${r.st.tidspass.time}` : 'Tidspassning'}  </Text>);
+    if (r.st.own) sub.push(<Text key="own" style={o.ownTag}>{(r.st.own.from || 'EGET').toUpperCase()}  </Text>);
+    if (r.st.orderNo) sub.push(<Text key="no" style={o.mono}>{r.st.orderNo}</Text>);
+    const rest = !act ? `väntar på lastning${other ? ` · hämtas hos ${placeName(other)}` : ''}`
+      : pick ? (dest ? `→ ${dest}` : 'mottagarens adress saknas i ordern')
+      : [goodsOf(r), other ? `från ${placeName(other)}` : ''].filter(Boolean).join(' · ');
+    if (rest) sub.push(<Text key="r">{sub.length ? (pick && act ? ' ' : ' · ') : ''}{rest}</Text>);
+    return (
+      <Pressable key={k(r)} style={[o.jr, on && o.jrOn]} android_ripple={{color: C.edge}}
+        onPress={() => (selMode ? toggle(r) : setOpenRow(r))} onLongPress={() => (selMode ? toggle(r) : startSel(r))} delayLongPress={350}>
+        {selMode && canAct(r)
+          ? <View style={[o.jck, on && o.jckOn]}>{on ? <Bi n="check2" size={14} color="#000000" /> : null}</View>
+          : <View style={[o.mk, act ? (pick ? o.mkP : o.mkD) : null, bad && {backgroundColor: C.bad}]} />}
+        <View style={{flex: 1, minWidth: 0}}>
+          <Text style={[o.jt1, !act && {color: C.faint}]} numberOfLines={1}>{t1}</Text>
+          {bad
+            ? <Text style={[o.jt2, {color: C.bad}]} numberOfLines={1} onPress={() => onRetry(r.cid)}>Inte bekräftad i Opter – tryck för att skicka igen</Text>
+            : <Text style={o.jt2} numberOfLines={1}>{sub}</Text>}
         </View>
-        <Text style={o.legWho} numberOfLines={2}>{st.who || '—'}</Text>
-        <View style={o.adrRow}><Bi n="geo-alt-fill" size={13} color={C.faint} /><Text style={o.adr} numberOfLines={2}>{[st.adr, st.area].filter(Boolean).join(', ')}</Text></View>
-        {!!st.code && <View style={o.codeChip}><Bi n="key-fill" size={13} color={C.onAccent} /><Text style={o.codeTxt}>Portkod {st.code}</Text></View>}
-        {peopleRows(st)}
-        <NavButton st={st} small onMore={() => { setPlanned(null); setNavFor(st); }} />
-        {pickup ? (loaded
-          ? <View style={o.syncRow}><Bi n="check-circle-fill" size={14} color={C.accent2} /><Text style={[o.sync, {color: C.accent2}]}>Lastad{os.loadedAt ? ` ${hhmm(new Date(os.loadedAt))}` : ''} – godset är ombord</Text></View>
-          : <Slider key={'p' + g.cid} label="Dra för Lastad" tone="go" onDone={() => { setPlanned(null); onLoaded(st); }} />)
-        : (loaded
-          ? <Slider key={'d' + g.cid} label="Dra för Lossad" tone="ok" onDone={() => { setPlanned(null); onUnload(st); }} />
-          : <Text style={o.meta}>Lossas när godset är lastat.</Text>)}
-      </View>
-    );
-    return (
-      <View style={o.hero}>
-        <View style={o.headRow}>
-          <Bi n={g.today ? "box-seam" : "calendar-event"} size={15} color={C.dim} />
-          <Text style={o.num}>{g.today ? 'Hela ordern' : 'Planerad order'}{any.orderNo ? ` ${any.orderNo}` : ''}</Text>
-        </View>
-        {leg(g.pick, true)}
-        {leg(g.drop, false)}
-        {notes.length > 0 && <View style={o.info}><Bi n="info-circle" size={15} color={C.dim} style={{marginTop: 1}} /><Text style={o.infoTxt}>{notes.join('\n')}</Text></View>}
-        {(!!goods || !!orderLine) && <Text style={o.orderLine}>{[goods, orderLine].filter(Boolean).join('  ·  ')}</Text>}
-      </View>
+        {q ? <View style={o.jq}><Text style={[o.jqN, !act && {color: C.faint}]}>{q.n}</Text><Text style={o.jqU}>{q.u.toUpperCase()}</Text></View> : null}
+      </Pressable>
     );
   };
-
-  // ---- B: ett ställe i taget. Alla stopp på samma adress slås ihop (det gör RUTT – Opter har ingen sådan logik). ----
-  type Place = {key: string; st: any; drops: Row[]; picks: Row[]; eta: any; late: number};
-  const places: Place[] = useMemo(() => {
-    const out: Place[] = [];
-    for (const r of rows) {
-      let pl = out.find(x => samePlace(x.st, r.st));
-      if (!pl) out.push(pl = {key: r.kind + r.cid, st: r.st, drops: [], picks: [], eta: r.plan && r.plan.eta, late: 0});
-      (r.kind === 'drop' ? pl.drops : pl.picks).push(r);
-      if (r.plan && r.plan.late) pl.late = Math.max(pl.late, r.plan.late);
-    }
-    return out;
-  }, [rows]);
-  const heroPl = places.find(pl => pl.key === focus) || places[0];
-  const multi = !perm || perm.multi !== false; // kontoret kan stänga av flera order samtidigt
-  const otherOf = (r: Row) => r.kind === 'pickup'
-    ? (allStops.find((s: any) => s.drop === r.cid) || later.find((s: any) => s.drop === r.cid))
-    : (allStops.find((s: any) => s.pickup === r.cid) || later.find((s: any) => s.pickup === r.cid));
-  const k = (r: Row) => r.kind + r.cid;
-  // Bockat: alla som standard (bocka ur det som inte ska med). Utan "flera"-behörighet: en i taget.
-  const isOn = (list: Row[], r: Row) => (multi ? !unsel[k(r)] : (radio[list[0].kind] || k(list[0])) === k(r));
-  const toggle = (list: Row[], r: Row) => { if (multi) setUnsel(u => ({...u, [k(r)]: !u[k(r)]})); else setRadio(x => ({...x, [r.kind]: k(r)})); };
-  const goodsOf = (r: Row) => { const c = cargo[r.cid] || {}; const g = c.goods || c.name || ''; return [/^order\b/i.test(g) ? '' : g, r.st.kolli ? `${r.st.kolli} kolli` : c.pal ? `${c.pal} pall` : ''].filter(Boolean).join(' · ') || 'Order'; };
-  const syncBad = (r: Row) => { const sy = (ost[r.cid] || {}).sync || {}; const v = r.kind === 'pickup' ? sy.load : sy.unload; return v === 'failed' || v === 'unconfirmed'; };
-  const placeName = (st: any) => st.who || [st.adr, st.area].filter(Boolean).join(', ') || '—';
-
-  const ordRow = (list: Row[], r: Row) => {
-    const on = isOn(list, r), other = otherOf(r);
-    const nEd = ((ost[r.cid] || {}).edits || []).length;
-    return (
-      <View key={k(r)} style={o.li}>
-        <Pressable hitSlop={12} onPress={() => toggle(list, r)} style={{paddingVertical: 4}}><View style={[o.ck, on && o.ckOn]}>{on ? <Bi n="check2" size={14} color="#FFFFFF" /> : null}</View></Pressable>
-        <Pressable style={[{flex: 1, minWidth: 0}, !on && {opacity: 0.5}]} onPress={() => other && setPlaceSheet({st: other, role: r.kind === 'pickup' ? 'MOTTAGARE · dit godset ska' : 'AVSÄNDARE · där det hämtades'})}>
-          <Text style={o.liT} numberOfLines={1}>{r.st.own ? <Text style={o.ownTag}>{(r.st.own.from || 'EGET').toUpperCase()}  </Text> : null}{goodsOf(r)}</Text>
-          <Text style={o.ordS} numberOfLines={2}>{other ? <>{r.kind === 'pickup' ? 'Ska till ' : 'Från '}<Text style={o.ordSB}>{placeName(other)}</Text>{[other.adr, [other.zip, other.area].filter(Boolean).join(' ')].filter(Boolean).length ? `, ${[other.adr, [other.zip, other.area].filter(Boolean).join(' ')].filter(Boolean).join(', ')}` : r.kind === 'pickup' ? ' – adress saknas i ordern' : ''}</> : null}{r.st.orderNo ? `  ·  ${r.st.orderNo}` : ''}</Text>
-          {syncBad(r) ? <Text style={[o.ordS, {color: C.bad}]} onPress={() => onRetry(r.cid)}>Inte bekräftad i Opter – tryck för att skicka igen</Text> : null}
-        </Pressable>
-        <Pressable hitSlop={8} style={o.liMore} onPress={() => onEdit(r.cid, r.st)}>
-          <Bi n="three-dots" size={18} color={nEd ? C.accentInk : C.dim} />
-        </Pressable>
-      </View>
-    );
-  };
-  const section = (list: Row[]) => {
-    if (!list.length) return null;
-    const pickup = list[0].kind === 'pickup';
-    const head = <Text style={o.secLbl}>{pickup ? 'HÄMTA HÄR' : 'LOSSA HÄR'} · {list.length} order</Text>;
-    if (list.length <= 4) return <View>{head}{list.map(r => ordRow(list, r))}</View>;
-    // Många order: grupperat på vart de ska (eller varifrån de kom).
-    const groups: {name: string; area: string; rs: Row[]}[] = [];
-    for (const r of list) { const ot = otherOf(r); const nm = ot ? placeName(ot) : '—'; let g = groups.find(x => x.name === nm); if (!g) groups.push(g = {name: nm, area: (ot && ot.area) || '', rs: []}); g.rs.push(r); }
-    return (
-      <View>
-        {head}
-        {groups.map(g => {
-          const nOn = g.rs.filter(r => isOn(list, r)).length, gk = (pickup ? 'p' : 'd') + g.name, open = !!openG[gk];
-          return (
-            <View key={gk} style={o.grpBox}>
-              <View style={o.grpRow}>
-                {multi ? (
-                  <Pressable hitSlop={10} onPress={() => { const all = nOn === g.rs.length; setUnsel(u => { const n = {...u}; g.rs.forEach(r => { n[k(r)] = all; }); return n; }); }}>
-                    <View style={[o.ck, nOn === g.rs.length && o.ckOn, nOn > 0 && nOn < g.rs.length && o.ckPart]}>{nOn === g.rs.length ? <Bi n="check2" size={14} color="#FFFFFF" /> : nOn ? <Bi n="three-dots" size={12} color={C.accent2} /> : null}</View>
-                  </Pressable>
-                ) : null}
-                <View style={{flex: 1, minWidth: 0}}>
-                  <Text style={o.ordT} numberOfLines={1}>{pickup ? '→ ' : '← '}{g.name}</Text>
-                  <Text style={o.ordS}>{nOn} av {g.rs.length} order{g.area ? ` · ${g.area}` : ''}</Text>
-                </View>
-                <Pressable style={o.chipBtn} onPress={() => setOpenG(x => ({...x, [gk]: !open}))}><Text style={o.chipTxt}>{open ? 'Dölj' : 'Visa'}</Text></Pressable>
-              </View>
-              {open ? g.rs.map(r => ordRow(list, r)) : null}
-            </View>
-          );
-        })}
-      </View>
-    );
-  };
-  function resetSel() { setUnsel({}); setRadio({}); setOpenG({}); setFocus(null); }
-  const doLoad = (list: Row[]) => { const ch = list.filter(r => isOn(list, r)); if (!ch.length) return; resetSel(); onLoaded(ch[0].st, ch.slice(1).map(r => r.st)); };
-  const doUnload = (list: Row[]) => { const ch = list.filter(r => isOn(list, r)); if (!ch.length) return; resetSel(); onUnload(ch[0].st, ch.slice(1).map(r => r.st)); };
-
-  // ---- A · Fokus: ett ställe, stort ----
-  const heroIdx = Math.max(0, places.indexOf(heroPl));
-  const goTo = (i: number) => { const pl = places[Math.max(0, Math.min(places.length - 1, i))]; if (!pl) return; setUnsel({}); setRadio({}); setOpenG({}); setFocus(i === 0 ? null : pl.key); };
-  const focusView = (pl: Place) => {
+  const placeBlock = (pl: JPlace, i: number) => {
+    const act = pl.rows.filter(r => r.state === 'act');
+    const hasP = act.some(r => r.kind === 'pickup'), hasD = act.some(r => r.kind === 'drop');
+    const isNext = nextPl === pl;
     const st = pl.st;
-    const all = [...pl.drops, ...pl.picks];
-    const latest = all.map(r => r.st.tLatest).filter(Boolean)[0];
-    const notes = uniqNotes(all.flatMap(r => [r.st.adrMsg, r.st.info]), '');
-    // Avisering: närmaste som inte är gjord.
-    const av = pl.drops.map(r => ({r, a: r.st.avise})).find(x => x.a && !(ost[x.r.cid] || {}).avisedAt);
-    const avAt = av && av.r.plan && av.r.plan.eta ? new Date(new Date(av.r.plan.eta).getTime() - av.a.min * 60000) : null;
-    const avDue = avAt && now >= avAt.getTime();
-    const next = places[heroIdx + 1];
+    const sameTitle = titleOf(pl) === st.adr;
+    const meta = [sameTitle ? st.area : [st.adr, st.area].filter(Boolean).join(', '), pl.eta ? `ca ${hhmm(pl.eta)}` : '', st.code ? `Portkod ${st.code}` : ''].filter(Boolean).join('  ·  ');
+    const selAble = selMode && pl.rows.some(canAct);
     return (
-      <View>
-        <View style={o.fTags}>
-          {pl.drops.length ? <View style={[o.verb, {backgroundColor: C.okSoft}]}><Text style={[o.verbTxt, {color: C.accent2}]}>LOSSA {pl.drops.length}</Text></View> : null}
-          {pl.picks.length ? <View style={[o.verb, {backgroundColor: C.accentSoft}]}><Text style={[o.verbTxt, {color: C.accentInk}]}>HÄMTA {pl.picks.length}</Text></View> : null}
-          {pl.late ? <View style={o.lateTag}><Text style={o.lateTxt}>{pl.late} min sen</Text></View> : null}
-        </View>
-        <Pressable onPress={() => setPlaceSheet({st, role: pl.picks.length && !pl.drops.length ? 'AVSÄNDARE' : 'MOTTAGARE', rows: all})}>
-          <Text style={o.fName}>{placeName(st)}</Text>
-          <Text style={o.fAdr}>{[st.adr, st.area].filter(Boolean).join(', ')}</Text>
-        </Pressable>
-        <View style={o.fMeta}>
-          <Bi n="clock" size={13} color={C.dim} />
-          <Text style={o.fMetaTxt}>{[pl.eta ? `ca ${hhmm(pl.eta)}` : '', latest ? `senast ${whenText(latest)}` : ''].filter(Boolean).join('  ·  ') || 'Ingen tid angiven'}</Text>
-        </View>
-        {all.filter(r => r.st.tidspass).slice(0, 1).map(r => (
-          <View key="tp" style={[o.avise, {backgroundColor: C.accent}]}>
-            <Bi n="alarm-fill" size={16} color={C.onAccent} />
-            <Text style={[o.aviseT, {flex: 1, fontSize: 14, color: C.onAccent}]}>{r.st.tidspass.time ? `Tidspassning kl ${r.st.tidspass.time}` : 'Tidspassning – tiden står inte i ordern'}</Text>
-          </View>
-        ))}
-        {!!st.code && (
-          <View style={o.fCode}><Bi n="key-fill" size={18} color={C.accentInk} /><Text style={o.fCodeT}>{st.code}</Text><Text style={o.fCodeL}>PORTKOD</Text></View>
-        )}
-        {notes.length > 0 && (
-          <Pressable style={o.info} onPress={() => setPlaceSheet({st, role: 'INFO', rows: all})}>
-            <Bi n="info-circle" size={15} color={C.dim} style={{marginTop: 1}} />
-            <Text style={o.infoTxt} numberOfLines={3}>{notes.join(' · ')}</Text>
-          </Pressable>
-        )}
-        {avAt && (
-          <Pressable style={[o.avise, avDue && o.aviseDue]} onPress={() => { if (av!.a.who) dial(av!.a.who.num); onAvised(av!.r.cid); }}>
-            <Bi n="bell-fill" size={16} color={avDue ? C.onAccent : C.accentInk} />
-            <Text style={[o.aviseT, {flex: 1, fontSize: 14}, avDue && {color: C.onAccent}]} numberOfLines={1}>{avDue ? 'Avisera nu' : `Avisera kl ${hhmm(avAt)}`}{av!.a.who ? ` · ${av!.a.who.label}` : ''}</Text>
-            <Text style={[o.aviseCall, avDue && {color: C.onAccent}]}>{av!.a.who ? 'Ring' : 'Klar'}</Text>
-          </Pressable>
-        )}
-        {section(pl.drops)}
-        {section(pl.picks)}
-        {next ? (
-          <Pressable style={o.fNext} onPress={() => goTo(heroIdx + 1)}>
-            <Text style={o.fNextTxt} numberOfLines={1}>Sedan: <Text style={{color: C.ink, fontWeight: '800'}}>{placeName(next.st)}</Text>{next.eta ? `  ·  ${hhmm(next.eta)}` : ''}</Text>
-            <Bi n="chevron-right" size={13} color={C.faint} />
-          </Pressable>
-        ) : null}
-        {focus ? (
-          <Pressable hitSlop={10} onPress={() => setFocus(null)} style={{alignSelf: 'center', marginTop: 10}}>
-            <Text style={o.link}>Tillbaka till nästa i ordningen</Text>
-          </Pressable>
-        ) : null}
-      </View>
-    );
-  };
-  // "Säg till": färdig text om vad du hämtar/lämnar här – antal pall, ställe, gata, ordernummer.
-  const tellText = (pl: Place) => {
-    const st = pl.st;
-    const pals = (rs: Row[]) => rs.reduce((n, r) => n + ((cargo[r.cid] && Number(cargo[r.cid].pal)) || 0), 0);
-    const pt = (n: number) => (n > 0 ? `${n} pall` : '');
-    const pick = pl.picks.filter(r => isOn(pl.picks, r)), drop = pl.drops.filter(r => isOn(pl.drops, r));
-    const what = [drop.length ? `lämnar ${pt(pals(drop)) || (drop.length > 1 ? drop.length + ' order' : 'leveransen')}` : '', pick.length ? `hämtar ${pt(pals(pick)) || (pick.length > 1 ? pick.length + ' order' : 'godset')}` : ''].filter(Boolean).join(' och ');
-    const where = [st.who, st.adr, st.area].filter(Boolean).filter((x: string, i: number, a: string[]) => a.indexOf(x) === i).join(', ');
-    const nos = [...new Set([...drop, ...pick].map(r => r.st.orderNo).filter(Boolean).map(String))];
-    const t = `Jag ${what || 'är'} hos ${where || placeName(st)}.` + (nos.length ? ` Order ${nos.join(', ')}.` : '');
-    return t.charAt(0).toUpperCase() + t.slice(1);
-  };
-  // Tummzonen: GPS · Ring · SMS + dragknappen för stället som visas.
-  const dock = (pl: Place) => {
-    const st = pl.st;
-    const tel = st.tel || [];
-    const mob = tel.find((t: any) => isMobile(t.num));
-    const nDrop = pl.drops.filter(r => isOn(pl.drops, r)).length, nPick = pl.picks.filter(r => isOn(pl.picks, r)).length;
-    return (
-      <View style={o.dock}>
-        <View style={o.dockRow}>
-          <Pressable style={[o.round, {backgroundColor: C.accent}]} onPress={() => navigate(st)} onLongPress={() => setNavFor(st)} android_ripple={{color: C.edge}}>
-            <Bi n="cursor-fill" size={18} color={C.onAccent} /><Text style={[o.roundTxt, {color: C.onAccent}]}>GPS</Text>
-          </Pressable>
-          <Pressable disabled={!tel.length} style={[o.round, !tel.length && {opacity: 0.35}]} onPress={() => (tel.length === 1 ? dial(tel[0].num) : setCallStop(st))} android_ripple={{color: C.edge}}>
-            <Bi n="telephone-fill" size={18} color={C.people} /><Text style={[o.roundTxt, {color: C.people}]}>Ring</Text>
-          </Pressable>
-          <Pressable disabled={!mob} style={[o.round, !mob && {opacity: 0.35}]} onPress={() => mob && setSms({name: String(mob.label).replace(/\s*\(mobil\)/i, ''), num: mob.num, who: st.who})} android_ripple={{color: C.edge}}>
-            <Bi n="chat-dots-fill" size={18} color={C.people} /><Text style={[o.roundTxt, {color: C.people}]}>SMS</Text>
-          </Pressable>
-          <Pressable style={o.round} onPress={() => setTell({text: tellText(pl), mob, who: placeName(st)})} android_ripple={{color: C.edge}}>
-            <Bi n="megaphone-fill" size={18} color={C.people} /><Text style={[o.roundTxt, {color: C.people}]}>Säg till</Text>
-          </Pressable>
-        </View>
-        {pl.drops.length > 0 && (
-          <Slider style={{marginTop: 8}} key={'d' + pl.key + nDrop} label={`Dra för Lossad${nDrop > 1 ? ` · ${nDrop}` : ''}`} tone="ok" onDone={() => doUnload(pl.drops)} />
-        )}
-        {(() => {
-          // Som Opter: lossa flera order på samma ställe fast de står på olika adresser (t.ex. Birger Jarlsg 14/18, Stureplan 2).
-          const mine = new Set(pl.drops.map((r: Row) => k(r)));
-          const other = rows.filter(r => r.kind === 'drop' && !mine.has(k(r))).length;
-          if (!other || (perm && perm.delivery === false)) return null;
-          return (
-            <Pressable style={o.moreDrop} onPress={() => { const n: Record<string, boolean> = {}; pl.drops.filter((r: Row) => isOn(pl.drops, r)).forEach((r: Row) => { n[k(r)] = true; }); setSel(n); setMark(true); }} android_ripple={{color: C.edge}}>
-              <Bi n="check-square-fill" size={16} color={C.accent2} />
-              <Text style={o.moreDropT}>Lossa även order till andra adresser här · {other} till i bilen</Text>
-              <Bi n="chevron-right" size={13} color={C.dim} />
-            </Pressable>
-          );
-        })()}
-        {pl.picks.length > 0 && (
-          <Slider style={{marginTop: 8}} key={'p' + pl.key + nPick} label={`Dra för Lastad${nPick > 1 ? ` · ${nPick}` : ''}`} tone="go" onDone={() => doLoad(pl.picks)} />
-        )}
-      </View>
-    );
-  };
-
-  // Mottagare / avsändare / ställe – allt på ett ställe.
-  const placeSheetView = () => {
-    const ps = placeSheet; if (!ps) return null;
-    const st = ps.st;
-    const notes = uniqNotes(ps.rows ? ps.rows.flatMap((r: Row) => [r.st.adrMsg, r.st.info]) : [st.adrMsg, st.info], '');
-    const t = st.tLatest || st.tEarliest;
-    return (
-      <Sheet open onClose={() => setPlaceSheet(null)} scroll>
-        <Text style={o.secLbl}>{ps.role === 'INFO' ? 'INFO OCH KONTAKTER' : ps.role}</Text>
-        <View style={o.heroTop}>
+      <View key={pl.key} style={{marginTop: i === 0 ? 4 : 14}}>
+        <Pressable style={o.sh} onPress={() => (selMode ? togglePlace(pl) : setPlaceSheet({st, role: hasP && !hasD ? 'HÄMTA HÄR' : 'LÄMNA HÄR', rows: pl.rows, pl}))} onLongPress={() => { if (!selMode && multi && pl.rows.some(canAct)) { setSelMode(true); const n: Record<string, boolean> = {}; pl.rows.filter(canAct).forEach(r => { n[k(r)] = true; }); setSel(n); } }} delayLongPress={350} android_ripple={{color: C.edge}}>
+          <View style={[o.ix, isNext && o.ixNext]}><Text style={[o.ixT, isNext && {color: '#000000'}]}>{i + 1}</Text></View>
           <View style={{flex: 1, minWidth: 0}}>
-            <Text style={o.pn}>{placeName(st)}</Text>
-            <Text style={o.pa}>{[st.adr, st.zip, st.area].filter(Boolean).join(', ')}</Text>
+            <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
+              {hasD || !act.length ? <Text style={[o.vb, {color: act.length ? C.accent2 : C.faint}]}>LÄMNA</Text> : null}
+              {hasP ? <Text style={[o.vb, {color: C.accentInk}]}>HÄMTA</Text> : null}
+              <Text style={o.shName} numberOfLines={1}>{titleOf(pl)}</Text>
+            </View>
+            {meta ? <Text style={[o.shMeta, pl.late ? {color: C.bad} : null]} numberOfLines={1}>{meta}{pl.late ? `  ·  ${pl.late} min sen` : ''}</Text> : null}
           </View>
-          <Pressable style={o.gpsBig} onPress={() => { setPlaceSheet(null); navigate(st); }} onLongPress={() => { setPlaceSheet(null); setNavFor(st); }}>
-            <Bi n="cursor-fill" size={22} color={C.onAccent} />
-          </Pressable>
-        </View>
-        <View style={o.step}>
-          {!!st.code && <View style={o.code}><Bi n="key-fill" size={13} color={C.accentInk} /><Text style={o.codeT}>{st.code}</Text></View>}
-          {t ? <Text style={o.num}>{st.tEarliest && st.tLatest ? `${whenText(st.tEarliest)} – ${whenText(st.tLatest)}` : whenText(t)}</Text> : null}
-          {st.req && st.req.sig ? <View style={o.reqTag}><Text style={o.reqTxt}>SIGNATUR KRÄVS</Text></View> : null}
+          {selAble
+            ? <Pressable hitSlop={10} onPress={() => togglePlace(pl)} style={o.allBtn}><Text style={o.allTxt}>Alla</Text></Pressable>
+            : <Text style={o.shQty}>{qtyTxt(sumQty(act.length ? act : pl.rows))}</Text>}
+        </Pressable>
+        <View style={o.jg}>{pl.rows.map(orderRow)}</View>
+      </View>
+    );
+  };
+
+  // ---- Bladet för en order ----
+  const rowSheet = () => {
+    const r = openRow; if (!r) return null;
+    const pick = r.kind === 'pickup', other = otherOf(r), st = r.st, q = qty(r), act = r.state === 'act';
+    const notes = uniqNotes([st.adrMsg, st.info], goodsOf(r));
+    const kv: [string, string, boolean?][] = [];
+    if (st.freightBill && st.freightBill !== st.orderNo) kv.push(['Fraktsedel', String(st.freightBill), true]);
+    if (st.orderNo) kv.push(['Order', String(st.orderNo), true]);
+    if (goodsOf(r)) kv.push(['Gods', goodsOf(r)]);
+    if (q) kv.push([q.u === 'kli' ? 'Kolli' : 'Pall', String(q.n)]);
+    const t = st.tEarliest || st.tLatest;
+    if (t) kv.push([pick ? 'Hämtas' : 'Lämnas', st.tEarliest && st.tLatest ? `${whenText(st.tEarliest)} – ${whenText(st.tLatest)}` : whenText(t)]);
+    if (other) kv.push([pick ? 'Ska till' : 'Från', [placeName(other), other.adr, [other.zip, other.area].filter(Boolean).join(' ')].filter(Boolean).filter((x: any, i: number, a: any[]) => a.indexOf(x) === i).join(', ')]);
+    const close = () => setOpenRow(null);
+    return (
+      <Sheet open onClose={close} scroll>
+        <Text style={[o.vb, {color: pick ? C.accentInk : C.accent2}]}>{pick ? 'HÄMTA' : 'LÄMNA'}{st.orderNo ? `  ·  ORDER ${st.orderNo}` : ''}</Text>
+        <Text style={o.rsTitle}>{st.who || placeName(st)}</Text>
+        <Text style={o.rsAdr}>{[st.adr, [st.zip, st.area].filter(Boolean).join(' ')].filter(Boolean).join(', ')}</Text>
+        {st.tidspass ? <View style={o.tpBox}><Bi n="alarm-fill" size={15} color="#000000" /><Text style={o.tpBoxT}>{st.tidspass.time ? `Tidspassning kl ${st.tidspass.time}` : 'Tidspassning – tiden står inte i ordern'}</Text></View> : null}
+        {st.code ? <View style={o.codeRow}><Bi n="key-fill" size={15} color={C.accentInk} /><Text style={o.codeV}>{st.code}</Text><Text style={o.codeL}>PORTKOD</Text></View> : null}
+        <View style={o.kv}>
+          {kv.map(([a, b, mono], i) => (
+            <View key={a} style={[o.kvRow, i > 0 && o.kvLine]}><Text style={o.kvK}>{a}</Text><Text style={[o.kvV, mono && o.mono, mono && {fontSize: 14, color: C.ink}]}>{b}</Text></View>
+          ))}
         </View>
         {notes.length > 0 && <View style={o.info}><Bi n="info-circle" size={15} color={C.dim} style={{marginTop: 1}} /><Text style={o.infoTxt}>{notes.join('\n\n')}</Text></View>}
         {peopleRows(st)}
-        {ps.rows && ps.rows.length ? (
-          <View style={{marginTop: 14}}>
-            <Text style={o.secLbl}>ORDER HÄR · tryck för tillägg, bild, avvikelse</Text>
-            {ps.rows.map((r: Row) => (
-              <Pressable key={k(r)} style={o.ord} onPress={() => { setPlaceSheet(null); onEdit(r.cid, r.st); }}>
-                <Bi n={r.kind === 'pickup' ? 'box-seam-fill' : 'check-circle-fill'} size={14} color={r.kind === 'pickup' ? C.accentInk : C.accent2} />
-                <Text style={[o.ordT, {flex: 1}]} numberOfLines={1}>{goodsOf(r)}<Text style={o.ordNo}>{r.st.orderNo ? `  ·  ${r.st.orderNo}` : ''}</Text></Text>
-                <Bi n="three-dots" size={16} color={C.dim} />
-              </Pressable>
-            ))}
-          </View>
+        {onAddNum ? <Pressable hitSlop={6} style={o.addNum} onPress={() => setAddNum({cid: String(r.cid), label: '', num: ''})}><Bi n="plus-lg" size={13} color={C.accentInk} /><Text style={o.addNumT}>Lägg till nummer på jobbet</Text></Pressable> : null}
+        <View style={o.rsBtns}>
+          <Pressable style={o.sqBtn} onPress={() => navigate(st)} onLongPress={() => { close(); setNavFor(st); }}><Bi n="cursor-fill" size={18} color={C.ink} /></Pressable>
+          {pick ? <Pressable style={[o.bigBtn, {backgroundColor: C.panel2, flex: 1.25}]} onPress={() => { const rs = rows.filter(x => x.kind === 'pickup' && x.state === 'act' && samePlace(x.st, st)); close(); setShop(rs.length ? rs : [r]); }}><Text style={o.bigBtnT} numberOfLines={1}>Visa för butiken</Text></Pressable> : null}
+          {act && canAct(r) ? <Pressable style={[o.bigBtn, {backgroundColor: pick ? C.accent : C.accent2}]} onPress={() => { close(); if (pick) onLoaded(st); else onUnload(st); }}><Text style={[o.bigBtnT, {color: pick ? '#000000' : '#FFFFFF'}]}>{pick ? 'Lastad' : 'Lossad'}</Text></Pressable> : null}
+        </View>
+        <Pressable style={o.moreRow} onPress={() => { close(); onEdit(r.cid, st); }}>
+          <Bi n="three-dots" size={16} color={C.dim} /><Text style={o.moreRowT}>Mer: status, tid, tillägg, bild, avvikelse, ändring</Text>
+        </Pressable>
+      </Sheet>
+    );
+  };
+
+  // ---- Visa för butiken: vit helskärm med det de frågar efter vid hämtning ----
+  const shopView = () => {
+    const rs = shop || [];
+    const tot = sumQty(rs);
+    return (
+      <Modal visible={!!shop} animationType="slide" onRequestClose={() => setShop(null)} statusBarTranslucent>
+        <View style={[o.shop, {paddingTop: insets.top + 14, paddingBottom: insets.bottom + 12}]}>
+          <Text style={o.shopK}>RUTT{me ? ` · ${me}` : ''}</Text>
+          <Text style={o.shopH}>Jag ska hämta {rs.length} {rs.length === 1 ? 'sändning' : 'sändningar'}</Text>
+          <ScrollView style={{flex: 1}}>
+            {rs.map(r => { const ot = otherOf(r), q = qty(r); return (
+              <View key={k(r)} style={o.shopRow}>
+                <View style={{width: 116}}><Text style={o.shopNo}>{r.st.freightBill || r.st.orderNo || ''}</Text>{r.st.freightBill && r.st.orderNo && r.st.freightBill !== r.st.orderNo ? <Text style={o.shopNo2}>order {r.st.orderNo}</Text> : null}</View>
+                <View style={{flex: 1, minWidth: 0}}>
+                  <Text style={o.shopTo}>{ot ? placeName(ot) : goodsOf(r) || '—'}</Text>
+                  <Text style={o.shopAdr}>{ot ? [ot.adr, ot.area].filter(Boolean).join(', ') || 'adress saknas i ordern' : ''}</Text>
+                </View>
+                <Text style={o.shopQ}>{q ? `${q.n}` : ''}<Text style={o.shopU}>{q ? ` ${q.u}` : ''}</Text></Text>
+              </View>
+            ); })}
+            <View style={o.shopTot}><Text style={o.shopTotT}>Totalt</Text><Text style={o.shopTotT}>{qtyTxt(tot) || `${rs.length} st`}</Text></View>
+          </ScrollView>
+          <Pressable style={o.shopClose} onPress={() => setShop(null)}><Text style={o.shopCloseT}>Stäng</Text></Pressable>
+        </View>
+      </Modal>
+    );
+  };
+
+  // ---- Mottagare / avsändare / ställe – allt om stoppet ----
+  const placeSheetView = () => {
+    const ps = placeSheet; if (!ps) return null;
+    const st = ps.st, pl: JPlace | undefined = ps.pl;
+    const notes = uniqNotes(ps.rows ? ps.rows.flatMap((r: Row) => [r.st.adrMsg, r.st.info]) : [st.adrMsg, st.info], '');
+    const tel = st.tel || [], mob = tel.find((t: any) => isMobile(t.num));
+    const picks = pl ? pl.rows.filter(r => r.kind === 'pickup' && r.state === 'act') : [];
+    const close = () => setPlaceSheet(null);
+    // Avisering: närmaste som inte är gjord.
+    const av = pl ? pl.rows.filter(r => r.kind === 'drop').map(r => ({r, a: r.st.avise})).find(x => x.a && !(ost[x.r.cid] || {}).avisedAt) : null;
+    const avAt = av && av.r.plan && av.r.plan.eta ? new Date(new Date(av.r.plan.eta).getTime() - av.a.min * 60000) : null;
+    return (
+      <Sheet open onClose={close} scroll>
+        <Text style={[o.vb, {color: C.faint}]}>{ps.role}</Text>
+        <Text style={o.rsTitle}>{pl ? titleOf(pl) : placeName(st)}</Text>
+        <Text style={o.rsAdr}>{[st.adr, st.zip, st.area].filter(Boolean).join(', ')}</Text>
+        {st.code ? <View style={o.codeRow}><Bi n="key-fill" size={15} color={C.accentInk} /><Text style={o.codeV}>{st.code}</Text><Text style={o.codeL}>PORTKOD</Text></View> : null}
+        {avAt ? (
+          <Pressable style={[o.avise, now >= avAt.getTime() && o.aviseDue]} onPress={() => { if (av!.a.who) dial(av!.a.who.num); onAvised(av!.r.cid); }}>
+            <Bi n="bell-fill" size={15} color={now >= avAt.getTime() ? '#000000' : C.accentInk} />
+            <Text style={[o.aviseT, {flex: 1}, now >= avAt.getTime() && {color: '#000000'}]} numberOfLines={1}>{now >= avAt.getTime() ? 'Avisera nu' : `Avisera kl ${hhmm(avAt)}`}{av!.a.who ? ` · ${av!.a.who.label}` : ''}</Text>
+            <Text style={[o.aviseT, now >= avAt.getTime() && {color: '#000000'}]}>{av!.a.who ? 'Ring' : 'Klar'}</Text>
+          </Pressable>
         ) : null}
-        <Pressable style={{alignSelf: 'center', paddingVertical: 14}} onPress={() => { setPlaceSheet(null); setNavFor(st); }}>
+        {notes.length > 0 && <View style={o.info}><Bi n="info-circle" size={15} color={C.dim} style={{marginTop: 1}} /><Text style={o.infoTxt}>{notes.join('\n\n')}</Text></View>}
+        {peopleRows(st)}
+        <View style={o.rsBtns}>
+          <Pressable style={[o.bigBtn, {backgroundColor: C.accent}]} onPress={() => { close(); navigate(st); }} onLongPress={() => { close(); setNavFor(st); }}><Bi n="cursor-fill" size={16} color="#000000" /><Text style={[o.bigBtnT, {color: '#000000'}]}>Navigera</Text></Pressable>
+          <Pressable style={[o.bigBtn, {backgroundColor: C.panel2}]} onPress={() => { close(); setTell({text: tellText(pl, st), mob, who: placeName(st)}); }}><Bi n="megaphone-fill" size={15} color={C.people} /><Text style={o.bigBtnT}>Säg till</Text></Pressable>
+          {picks.length ? <Pressable style={[o.bigBtn, {backgroundColor: C.panel2}]} onPress={() => { close(); setShop(picks); }}><Bi n="display" size={15} color={C.ink} /><Text style={o.bigBtnT}>Butiken</Text></Pressable> : null}
+        </View>
+        <Pressable style={{alignSelf: 'center', paddingVertical: 12}} onPress={() => { close(); setNavFor(st); }}>
           <Text style={o.link}>Öppna i annan kartapp</Text>
         </Pressable>
       </Sheet>
     );
   };
+  // "Säg till": färdig text om vad du hämtar/lämnar här.
+  const tellText = (pl: JPlace | undefined, st: any) => {
+    const rs = pl ? pl.rows.filter(r => r.state === 'act') : [];
+    const picks = rs.filter(r => r.kind === 'pickup'), drops = rs.filter(r => r.kind === 'drop');
+    const what = [drops.length ? `lämnar ${qtyTxt(sumQty(drops)) || (drops.length > 1 ? drops.length + ' order' : 'leveransen')}` : '', picks.length ? `hämtar ${qtyTxt(sumQty(picks)) || (picks.length > 1 ? picks.length + ' order' : 'godset')}` : ''].filter(Boolean).join(' och ');
+    const where = [st.who, st.adr, st.area].filter(Boolean).filter((x: string, i: number, a: string[]) => a.indexOf(x) === i).join(', ');
+    const nos = [...new Set(rs.map(r => r.st.orderNo).filter(Boolean).map(String))];
+    const t = `Jag ${what || 'är'} hos ${where || placeName(st)}.` + (nos.length ? ` Order ${nos.join(', ')}.` : '');
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  };
 
-  // ---- Markera: alla order per ställe, bocka valfria → Lastad och/eller Lossad ----
-  const markView = () => {
-    const selRows = rows.filter(r => sel[k(r)]);
-    const nP = selRows.filter(r => r.kind === 'pickup').length, nD = selRows.filter(r => r.kind === 'drop').length;
-    const canP = !perm || perm.pickup !== false, canD = !perm || perm.delivery !== false;
+  // ---- Siffrorna överst ----
+  const left = rows; const cidsLeft = new Set(left.map(r => r.cid));
+  const leftQ = sumQty(left.filter(r => r.kind === 'drop'));
+  const strip = (
+    <View style={o.strip}>
+      <View style={o.stat}><Text style={o.statN}>{cidsLeft.size}</Text><Text style={o.statL}>ORDER KVAR</Text></View>
+      <View style={o.stat}><Text style={o.statN}>{leftQ.kli || leftQ.pal || 0}</Text><Text style={o.statL}>{leftQ.kli ? 'KOLLI KVAR' : 'PALL KVAR'}</Text></View>
+      <View style={o.stat}><Text style={o.statN}>{places.length}</Text><Text style={o.statL}>STOPP KVAR</Text></View>
+      {onReorder && places.length > 1 ? <Pressable style={o.stripBtn} hitSlop={6} onPress={() => setReorder(true)}><Bi n="list-ul" size={16} color={C.ink} /><Text style={o.stripBtnT}>Ordning</Text></Pressable> : null}
+    </View>
+  );
+  const selBar = (
+    <View style={o.selBar}>
+      <Pressable hitSlop={12} onPress={exitSel} style={{paddingRight: 6}}><Bi n="x-lg" size={18} color={C.ink} /></Pressable>
+      <Text style={o.selN}>{selRows.length} valda</Text>
+      <Pressable hitSlop={10} onPress={selectAll}><Text style={o.selAll}>Markera alla</Text></Pressable>
+    </View>
+  );
+  // ---- Nere: nästa stopp, eller knapparna när du markerat ----
+  const nextDock = () => {
+    const pl = nextPl; if (!pl) return null;
+    const st = pl.st, tel = st.tel || [];
+    const dr = pl.rows.filter(r => r.kind === 'drop' && canAct(r)), pk = pl.rows.filter(r => r.kind === 'pickup' && canAct(r));
     return (
-      <View style={{flex: 1}}>
-        <View style={o.markHead}>
-          <View style={{flex: 1}}><Text style={o.restTitle}>Markera</Text><Text style={o.restSum}>Bocka det du gjort – välj sen Lastad eller Lossad</Text></View>
-          <Pressable style={o.chipBtn} onPress={() => { setMark(false); setSel({}); }}><Text style={o.chipTxt}>Klar</Text></Pressable>
+      <View style={[o.dock2, {paddingBottom: 10}]}>
+        <View style={o.dockHead}>
+          <Text style={o.dockL} numberOfLines={1}>NÄSTA  <Text style={o.dockN}>{titleOf(pl)}</Text></Text>
+          <Pressable style={o.sqSm} onPress={() => navigate(st)} onLongPress={() => setNavFor(st)}><Bi n="cursor-fill" size={16} color="#000000" /></Pressable>
+          <Pressable disabled={!tel.length} style={[o.sqSm, {backgroundColor: C.peopleSoft}, !tel.length && {opacity: 0.35}]} onPress={() => (tel.length === 1 ? dial(tel[0].num) : setCallStop(st))}><Bi n="telephone-fill" size={16} color={C.people} /></Pressable>
         </View>
-        <FlatList
-          data={places}
-          keyExtractor={pl => pl.key}
-          style={{flex: 1}}
-          contentContainerStyle={{paddingHorizontal: 14, paddingBottom: bottom + 70}}
-          renderItem={({item: pl}) => {
-            const all = [...pl.drops, ...pl.picks], nOn = all.filter(r => sel[k(r)]).length;
-            return (
-              <View style={o.markBox}>
-                <View style={o.grpRow}>
-                  <Pressable hitSlop={10} onPress={() => { const allOn = nOn === all.length; setSel(x => { const n = {...x}; all.forEach(r => { n[k(r)] = !allOn; }); return n; }); }}>
-                    <View style={[o.ck, nOn === all.length && o.ckOn, nOn > 0 && nOn < all.length && o.ckPart]}>{nOn === all.length ? <Bi n="check2" size={14} color="#FFFFFF" /> : nOn ? <Bi n="three-dots" size={12} color={C.accent2} /> : null}</View>
-                  </Pressable>
-                  <View style={{flex: 1, minWidth: 0}}>
-                    <Text style={o.ordT} numberOfLines={1}>{placeName(pl.st)}</Text>
-                    <Text style={o.ordS}>{pl.eta ? `ca ${hhmm(pl.eta)} · ` : ''}{[pl.drops.length ? `Lossa ${pl.drops.length}` : '', pl.picks.length ? `Hämta ${pl.picks.length}` : ''].filter(Boolean).join(' · ')}</Text>
-                  </View>
-                  <Pressable style={o.gpsSm} onPress={() => navigate(pl.st)} onLongPress={() => setNavFor(pl.st)}><Bi n="cursor-fill" size={14} color={C.ink} /></Pressable>
-                </View>
-                {all.map(r => {
-                  const on = !!sel[k(r)], other = otherOf(r);
-                  return (
-                    <Pressable key={k(r)} style={o.ord} onPress={() => setSel(x => ({...x, [k(r)]: !on}))}>
-                      <View style={[o.ck, on && o.ckOn]}>{on ? <Bi n="check2" size={14} color="#FFFFFF" /> : null}</View>
-                      <View style={{flex: 1, minWidth: 0}}>
-                        <Text style={o.ordT} numberOfLines={1}>{r.kind === 'pickup' ? 'Hämta' : 'Lossa'} · {goodsOf(r)}<Text style={o.ordNo}>{r.st.orderNo ? `  ·  ${r.st.orderNo}` : ''}</Text></Text>
-                        <Text style={o.ordS} numberOfLines={2}>{r.kind === 'pickup' ? `Ska till ${other ? [placeName(other), other.adr, other.area].filter(Boolean).filter((x: any, i: number, arr: any[]) => arr.indexOf(x) === i).join(', ') : ''}` : `i bilen${other ? `, från ${placeName(other)}` : ''}`}</Text>
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            );
-          }}
-        />
-        {selRows.length > 0 && (
-          <View style={[o.bar, {paddingBottom: 10}]}>
-            <Text style={o.barCnt}>{selRows.length} valda</Text>
-            <Pressable disabled={!nP || !canP} style={[o.barBtn, {backgroundColor: C.accent}, (!nP || !canP) && {opacity: 0.35}]} onPress={() => { const ps = selRows.filter(r => r.kind === 'pickup'); setMark(false); setSel({}); onLoaded(ps[0].st, ps.slice(1).map(r => r.st)); }}>
-              <Text style={[o.barTxt, {color: C.onAccent}]}>Lastad{nP ? ` · ${nP}` : ''}</Text>
-            </Pressable>
-            <Pressable disabled={!nD || !canD} style={[o.barBtn, {backgroundColor: C.accent2}, (!nD || !canD) && {opacity: 0.35}]} onPress={() => { const ds = selRows.filter(r => r.kind === 'drop'); setMark(false); setSel({}); onUnload(ds[0].st, ds.slice(1).map(r => r.st)); }}>
-              <Text style={[o.barTxt, {color: '#FFFFFF'}]}>Lossad{nD ? ` · ${nD}` : ''}</Text>
-            </Pressable>
-          </View>
-        )}
+        {dr.length ? <Slider key={'d' + pl.key + dr.length} label={`Dra för Lossad${dr.length > 1 ? ` · ${dr.length}` : ''}`} tone="ok" onDone={() => doPlace(pl, 'drop')} /> : null}
+        {pk.length ? <Slider style={dr.length ? {marginTop: 8} : undefined} key={'p' + pl.key + pk.length} label={`Dra för Lastad${pk.length > 1 ? ` · ${pk.length}` : ''}`} tone="go" onDone={() => doPlace(pl, 'pickup')} /> : null}
       </View>
     );
   };
+  const selDock = (
+    <View style={[o.dock2, o.selDock]}>
+      {nP ? <Pressable style={[o.bigBtn, {backgroundColor: C.accent, flex: 1}]} onPress={() => doGo('pickup')}><Text style={[o.bigBtnT, {color: '#000000'}]}>Lastad · {nP}</Text></Pressable> : null}
+      {nD ? <Pressable style={[o.bigBtn, {backgroundColor: C.accent2, flex: 1}]} onPress={() => doGo('drop')}><Text style={[o.bigBtnT, {color: '#FFFFFF'}]}>Lossad · {nD}</Text></Pressable> : null}
+      {!nP && !nD ? <View style={[o.bigBtn, {backgroundColor: C.panel2, flex: 1}]}><Text style={[o.bigBtnT, {color: C.faint}]}>Välj order</Text></View> : null}
+    </View>
+  );
 
   return (
     <View style={{flex: 1}}>
-      {mark ? markView() : (
-      <>
-        {heroPl ? (
-          <View style={o.fBar}>
-            <Pressable hitSlop={8} disabled={heroIdx === 0} style={[o.fArrow, heroIdx === 0 && {opacity: 0.3}]} onPress={() => goTo(heroIdx - 1)}><Bi n="chevron-left" size={16} color={C.ink} /></Pressable>
-            <Pressable style={o.fCount} onPress={() => setListOpen(true)} hitSlop={6}>
-              <View style={o.dots}>{places.slice(0, 9).map((pl, i) => <View key={pl.key} style={[o.dot, i === heroIdx && o.dotOn]} />)}</View>
-              <Text style={o.fCountTxt}>Ställe {heroIdx + 1} av {places.length}</Text>
-            </Pressable>
-            <Pressable hitSlop={8} disabled={heroIdx >= places.length - 1} style={[o.fArrow, heroIdx >= places.length - 1 && {opacity: 0.3}]} onPress={() => goTo(heroIdx + 1)}><Bi n="chevron-right" size={16} color={C.ink} /></Pressable>
-            <View style={{flex: 1}} />
-            {multi && rows.length > 1 ? (
-              <Pressable style={o.reBtn} hitSlop={6} onPress={() => { setSel({}); setMark(true); }}>
-                <Bi n="check-square-fill" size={13} color={C.ink} /><Text style={o.reTxt}>Markera</Text>
-              </Pressable>
-            ) : null}
-            {onReorder && orderItems.length > 1 ? (
-              <Pressable style={[o.reBtn, {marginLeft: 6}]} hitSlop={6} onPress={() => setReorder(true)}>
-                <Bi n="list-ul" size={14} color={C.ink} />
-              </Pressable>
-            ) : null}
+      {selMode ? selBar : (places.length ? strip : null)}
+      <ScrollView style={{flex: 1}} contentContainerStyle={{paddingHorizontal: 12, paddingBottom: 18}} keyboardShouldPersistTaps="handled">
+        {places.length ? places.map(placeBlock) : (
+          <View style={o.allDoneBox}>
+            <Bi n="check2-all" size={40} color={C.accent2} />
+            <Text style={o.allDoneBig}>Allt klart</Text>
+            <Text style={o.allDone}>Det du gjort finns under Klart – där kan du ändra i efterhand.</Text>
           </View>
-        ) : null}
-        <ScrollView style={{flex: 1}} contentContainerStyle={{paddingHorizontal: 18, paddingBottom: 24}} keyboardShouldPersistTaps="handled">
-          {heroPl ? focusView(heroPl) : (
-            <View style={o.allDoneBox}>
-              <Bi n="check2-all" size={40} color={C.accent2} />
-              <Text style={o.allDoneBig}>Allt klart</Text>
-              <Text style={o.allDone}>Snyggt jobbat! Det du gjort finns under Klart – där kan du ändra i efterhand.</Text>
-            </View>
-          )}
-          {later.length ? (
-            <View style={{marginTop: 22}}>
-              <View style={o.restHead}><Text style={o.restTitle}>Senare dagar</Text><Text style={o.restSum}>{laterOrders.length} order</Text></View>
+        )}
+        {laterOrders.length ? (
+          <View style={{marginTop: 20}}>
+            <View style={o.sh}><Text style={[o.vb, {color: C.faint}]}>SENARE DAGAR</Text><View style={{flex: 1}} /><Text style={o.shQty}>{laterOrders.length} order</Text></View>
+            <View style={o.jg}>
               {laterOrders.map((g: any) => (
-                <Pressable key={g.cid} style={o.row} onPress={() => setPlanned(g)}>
-                  <View style={[o.rowIco, {backgroundColor: C.panel2}]}><Bi n="calendar-event" size={14} color={C.dim} /></View>
+                <Pressable key={g.cid} style={o.jr} onPress={() => setPlanned(g)} android_ripple={{color: C.edge}}>
+                  <View style={o.mk} />
                   <View style={{flex: 1, minWidth: 0}}>
-                    <Text style={o.rowWho} numberOfLines={1}>{[g.pick && g.pick.who, g.drop && g.drop.who].filter(Boolean).join('  →  ') || '—'}</Text>
-                    <Text style={o.rowMeta} numberOfLines={1}>{[g.pick && `Hämta ${when(g.pick)}`, g.drop && `Lämna ${when(g.drop)}`].filter(Boolean).join(' · ')}</Text>
+                    <Text style={o.jt1} numberOfLines={1}>{[g.pick && g.pick.who, g.drop && g.drop.who].filter(Boolean).join('  →  ') || '—'}</Text>
+                    <Text style={o.jt2} numberOfLines={1}>{[g.pick && `Hämta ${when(g.pick)}`, g.drop && `Lämna ${when(g.drop)}`].filter(Boolean).join(' · ')}</Text>
                   </View>
-                  <Bi n="chevron-right" size={14} color={C.faint} />
+                  <Bi n="chevron-right" size={13} color={C.faint} />
                 </Pressable>
               ))}
             </View>
-          ) : null}
-        </ScrollView>
-        {heroPl ? dock(heroPl) : null}
-      </>)}
+          </View>
+        ) : null}
+      </ScrollView>
+      {selMode ? selDock : nextDock()}
 
-      <Sheet open={listOpen} onClose={() => setListOpen(false)} title="Alla ställen idag" sub={`${places.length} ställen · klar ${p.end ? hhmm(p.end) : '–'} · ${Math.round(p.totKm || 0)} km${route.manual ? ' · din ordning' : ''}`} scroll>
-        {places.map((pl, i) => (
-          <Pressable key={pl.key} style={[o.row, i === heroIdx && {borderColor: C.accent, borderWidth: 2}]} onPress={() => { setListOpen(false); goTo(i); }}>
-            <Text style={[o.rowEta, {width: 44}, pl.late ? {color: C.bad} : null]}>{pl.eta ? hhmm(pl.eta) : ''}</Text>
-            <View style={{flex: 1, minWidth: 0}}>
-              <Text style={o.rowWho} numberOfLines={1}>{placeName(pl.st)}</Text>
-              <Text style={o.rowMeta} numberOfLines={1}>{[pl.drops.length ? `Lossa ${pl.drops.length}` : '', pl.picks.length ? `Hämta ${pl.picks.length}` : '', pl.st.area || ''].filter(Boolean).join(' · ')}</Text>
-            </View>
-            <Pressable style={o.gpsSm} hitSlop={6} onPress={() => navigate(pl.st)} onLongPress={() => setNavFor(pl.st)}><Bi n="cursor-fill" size={14} color={C.ink} /></Pressable>
-          </Pressable>
-        ))}
-      </Sheet>
+      {rowSheet()}
+      {shopView()}
       {placeSheetView()}
       <CallSheet st={callStop} onClose={() => setCallStop(null)} />
       <SmsSheet to={sms} onClose={() => setSms(null)} />
       <TellSheet t={tell} targets={tellTo} onClose={() => setTell(null)} onSend={(id, text) => { setTell(null); onTell && onTell(id, text); }} onSms={(num, text) => { setTell(null); Linking.openURL(`sms:${num}?body=${encodeURIComponent(text)}`).catch(() => {}); }} />
       <NavSheet st={navFor} onClose={() => setNavFor(null)} />
-      {onReorder ? <ReorderSheet open={reorder} items={orderItems} manual={!!route.manual} onClose={() => setReorder(false)} onSave={keys => { setReorder(false); setFocus(null); onReorder(keys); }} /> : null}
+      {onReorder ? <ReorderSheet open={reorder} items={(route.order || []).map((s: any, i: number) => ({key: s.pickup ? 'p' + s.pickup : 'd' + s.drop, kind: s.pickup ? 'pickup' : 'drop', cid: s.pickup || s.drop, st: s, plan: (route.plan.rows || [])[i]}))} manual={!!route.manual} onClose={() => setReorder(false)} onSave={keys => { setReorder(false); onReorder(keys); }} /> : null}
+      <Sheet open={!!addNum} onClose={() => setAddNum(null)} title="Lägg till nummer på jobbet" sub="Syns under Ring på stoppet så länge ordern finns">
+        {addNum ? (
+          <View style={{gap: 8, marginTop: 4}}>
+            <TextInput style={o.numIn} value={addNum.label} onChangeText={t => setAddNum({...addNum, label: t})} placeholder="Namn, t.ex. Katta Stena" placeholderTextColor={C.faint} />
+            <TextInput style={[o.numIn, o.mono, {fontSize: 16}]} value={addNum.num} onChangeText={t => setAddNum({...addNum, num: t})} placeholder="Nummer" placeholderTextColor={C.faint} keyboardType="phone-pad" />
+            <Pressable style={[o.bigBtn, {backgroundColor: C.accent}, String(addNum.num).replace(/\D/g, '').length < 6 && {opacity: 0.4}]} disabled={String(addNum.num).replace(/\D/g, '').length < 6}
+              onPress={() => { onAddNum && onAddNum(addNum.cid, {label: addNum.label.trim() || 'Nummer', num: addNum.num.replace(/[^0-9+]/g, '')}); setAddNum(null); }}>
+              <Text style={[o.bigBtnT, {color: '#000000'}]}>Spara på jobbet</Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </Sheet>
       <Sheet open={!!planned} onClose={() => setPlanned(null)} scroll>
-        {planned ? plannedCard(planned) : null}
-        {planned && !planned.today ? <Text style={o.plannedNote}>Planerad {when(planned.pick || planned.drop) || 'senare'} – men det är du som bestämmer. Kan du lasta tidigare drar du bara Lastad.</Text> : null}
+        {planned ? (
+          <View>
+            <Text style={[o.vb, {color: C.faint}]}>PLANERAD ORDER{(planned.pick || planned.drop || {}).orderNo ? `  ·  ${(planned.pick || planned.drop).orderNo}` : ''}</Text>
+            {[planned.pick, planned.drop].filter(Boolean).map((s: any) => (
+              <View key={s.pickup ? 'p' : 'd'} style={{marginTop: 10}}>
+                <Text style={[o.vb, {color: s.pickup ? C.accentInk : C.accent2}]}>{s.pickup ? 'HÄMTA' : 'LÄMNA'}  <Text style={{color: C.dim}}>{when(s)}</Text></Text>
+                <Text style={o.rsTitle}>{s.who || '—'}</Text>
+                <Text style={o.rsAdr}>{[s.adr, s.area].filter(Boolean).join(', ')}</Text>
+                {peopleRows(s)}
+              </View>
+            ))}
+            {planned.pick ? <View style={{marginTop: 12}}><Slider label="Dra för Lastad nu" tone="go" onDone={() => { const p0 = planned.pick; setPlanned(null); onLoaded(p0); }} /></View> : null}
+            <Text style={o.plannedNote}>Planerad {when(planned.pick || planned.drop) || 'senare'} – men det är du som bestämmer. Kan du lasta tidigare drar du bara Lastad.</Text>
+          </View>
+        ) : null}
       </Sheet>
     </View>
   );
@@ -718,6 +621,83 @@ function CallSheet({st, onClose}: {st: any; onClose: () => void}) {
 }
 
 const o = themed(() => StyleSheet.create({
+
+  // ---- Jobblistan (A) ----
+  mono: {fontFamily: FONT.mono, fontSize: 12.5, color: C.faint},
+  tp: {color: C.accentInk, fontWeight: '700'},
+  strip: {flexDirection: 'row', alignItems: 'center', marginHorizontal: 12, marginBottom: 6, backgroundColor: C.panel, borderRadius: R},
+  stat: {flex: 1, paddingVertical: 7, paddingHorizontal: 10},
+  statN: {color: C.ink, fontFamily: FONT.cond, fontSize: 19, fontWeight: '700', lineHeight: 21},
+  statL: {color: C.faint, fontFamily: FONT.cond, fontSize: 10.5, fontWeight: '600', letterSpacing: 0.8},
+  stripBtn: {flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, height: 34, marginRight: 6, borderRadius: R, backgroundColor: C.panel2},
+  stripBtnT: {color: C.ink, fontFamily: FONT.cond, fontSize: 13.5, fontWeight: '600'},
+  selBar: {flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 12, marginBottom: 6, height: 46, paddingHorizontal: 12, borderRadius: R, backgroundColor: C.accentSoft},
+  selN: {flex: 1, color: C.ink, fontFamily: FONT.cond, fontSize: 18, fontWeight: '700'},
+  selAll: {color: C.accentInk, fontFamily: FONT.cond, fontSize: 15, fontWeight: '700'},
+  sh: {flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 6, paddingHorizontal: 2},
+  ix: {minWidth: 24, height: 24, borderRadius: 4, paddingHorizontal: 5, backgroundColor: C.edge, alignItems: 'center', justifyContent: 'center'},
+  ixNext: {backgroundColor: C.accent},
+  ixT: {color: C.dim, fontFamily: FONT.cond, fontSize: 13.5, fontWeight: '700'},
+  vb: {fontFamily: FONT.cond, fontSize: 12.5, fontWeight: '700', letterSpacing: 1.1},
+  shName: {flex: 1, color: C.ink, fontFamily: FONT.cond, fontSize: 16.5, fontWeight: '600'},
+  shMeta: {color: C.dim, fontSize: 12.5, marginTop: 1},
+  shQty: {color: C.dim, fontFamily: FONT.cond, fontSize: 14, fontWeight: '600'},
+  allBtn: {paddingHorizontal: 12, height: 30, borderRadius: R, backgroundColor: C.accentSoft, alignItems: 'center', justifyContent: 'center'},
+  allTxt: {color: C.accentInk, fontFamily: FONT.cond, fontSize: 14, fontWeight: '700'},
+  jg: {backgroundColor: C.panel, borderRadius: R, overflow: 'hidden'},
+  jr: {flexDirection: 'row', alignItems: 'center', gap: 11, minHeight: 54, paddingVertical: 7, paddingHorizontal: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.edge, marginTop: -StyleSheet.hairlineWidth},
+  jrOn: {backgroundColor: C.accentSoft},
+  mk: {width: 8, height: 8, borderRadius: 2, backgroundColor: C.edge},
+  mkP: {backgroundColor: C.accent},
+  mkD: {backgroundColor: C.accent2},
+  jck: {width: 22, height: 22, borderRadius: 4, borderWidth: 2, borderColor: C.faint, alignItems: 'center', justifyContent: 'center'},
+  jckOn: {backgroundColor: C.accent, borderColor: C.accent},
+  jt1: {color: C.ink, fontFamily: FONT.cond, fontSize: 16.5, fontWeight: '600'},
+  jt2: {color: C.dim, fontSize: 13, marginTop: 1},
+  jq: {alignItems: 'flex-end', minWidth: 40},
+  jqN: {color: C.ink, fontFamily: FONT.cond, fontSize: 17, fontWeight: '700', lineHeight: 19},
+  jqU: {color: C.faint, fontFamily: FONT.cond, fontSize: 10.5, fontWeight: '600', letterSpacing: 0.6},
+  rsTitle: {color: C.ink, fontFamily: FONT.cond, fontSize: 25, fontWeight: '700', lineHeight: 28, marginTop: 2},
+  rsAdr: {color: C.dim, fontSize: 14.5, marginTop: 2},
+  tpBox: {flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.accent, borderRadius: R, paddingHorizontal: 10, paddingVertical: 8, marginTop: 10},
+  tpBoxT: {color: '#000000', fontFamily: FONT.cond, fontSize: 16, fontWeight: '700'},
+  codeRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10},
+  codeV: {color: C.ink, fontFamily: FONT.mono, fontSize: 22, fontWeight: '600', letterSpacing: 2},
+  codeL: {color: C.faint, fontFamily: FONT.cond, fontSize: 11.5, fontWeight: '700', letterSpacing: 1},
+  kv: {marginTop: 10},
+  kvRow: {flexDirection: 'row', justifyContent: 'space-between', gap: 14, paddingVertical: 9},
+  kvLine: {borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.edge},
+  kvK: {color: C.dim, fontSize: 14, minWidth: 82},
+  kvV: {color: C.ink, fontSize: 14.5, fontWeight: '600', flexShrink: 1, textAlign: 'right'},
+  addNum: {flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingVertical: 8},
+  addNumT: {color: C.accentInk, fontFamily: FONT.cond, fontSize: 14.5, fontWeight: '700'},
+  rsBtns: {flexDirection: 'row', gap: 6, marginTop: 12},
+  sqBtn: {width: 50, height: 50, borderRadius: R, backgroundColor: C.panel2, alignItems: 'center', justifyContent: 'center'},
+  sqSm: {width: 44, height: 44, borderRadius: R, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center'},
+  bigBtn: {flex: 1, height: 50, borderRadius: R, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 10},
+  bigBtnT: {color: C.ink, fontFamily: FONT.cond, fontSize: 17, fontWeight: '700'},
+  moreRow: {flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12, marginTop: 4},
+  moreRowT: {color: C.dim, fontSize: 13.5, fontWeight: '600'},
+  dock2: {paddingHorizontal: 12, paddingTop: 8, backgroundColor: C.bg, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.edge},
+  selDock: {flexDirection: 'row', gap: 6, paddingBottom: 10},
+  dockHead: {flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8},
+  dockL: {flex: 1, color: C.faint, fontFamily: FONT.cond, fontSize: 12.5, fontWeight: '700', letterSpacing: 1},
+  dockN: {color: C.ink, fontFamily: FONT.cond, fontSize: 16.5, fontWeight: '600', letterSpacing: 0},
+  numIn: {backgroundColor: C.panel2, color: C.ink, borderRadius: R, paddingHorizontal: 12, height: 48, fontSize: 16},
+  shop: {flex: 1, backgroundColor: '#FFFFFF', paddingHorizontal: 18},
+  shopK: {color: '#7e8794', fontFamily: FONT.cond, fontSize: 13, fontWeight: '700', letterSpacing: 1.4},
+  shopH: {color: '#0b0f14', fontFamily: FONT.cond, fontSize: 30, fontWeight: '700', lineHeight: 33, marginTop: 2, marginBottom: 10},
+  shopRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#e4e7eb'},
+  shopNo: {color: '#0b0f14', fontFamily: FONT.mono, fontSize: 15, fontWeight: '600'},
+  shopNo2: {color: '#7e8794', fontFamily: FONT.mono, fontSize: 11.5, marginTop: 2},
+  shopTo: {color: '#0b0f14', fontFamily: FONT.cond, fontSize: 19, fontWeight: '700', lineHeight: 21},
+  shopAdr: {color: '#465361', fontSize: 13.5, marginTop: 1},
+  shopQ: {color: '#0b0f14', fontFamily: FONT.cond, fontSize: 21, fontWeight: '700'},
+  shopU: {color: '#7e8794', fontSize: 13, fontWeight: '600'},
+  shopTot: {flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 2, borderTopColor: '#0b0f14', paddingTop: 8, marginTop: 2},
+  shopTotT: {color: '#0b0f14', fontFamily: FONT.cond, fontSize: 21, fontWeight: '700'},
+  shopClose: {height: 52, borderRadius: R, backgroundColor: '#f0f2f5', alignItems: 'center', justifyContent: 'center', marginTop: 10},
+  shopCloseT: {color: '#0b0f14', fontFamily: FONT.cond, fontSize: 18, fontWeight: '700'},
   hero: {backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, borderRadius: 14, padding: 16, marginBottom: 6},
   headRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
   verb: {flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4},

@@ -5,6 +5,8 @@
 import 'react-native-url-polyfill/auto';
 import {Buffer} from 'buffer';
 global.Buffer = global.Buffer || Buffer;
+// Barlow som typsnitt i hela appen – måste laddas innan något använder Text.
+import './src/fontpatch';
 
 import {AppRegistry} from 'react-native';
 import App from './App';

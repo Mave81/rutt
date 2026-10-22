@@ -6,6 +6,7 @@ import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
+import com.facebook.react.common.assets.ReactFontManager
 
 class MainApplication : Application(), ReactApplication {
 
@@ -24,6 +25,13 @@ class MainApplication : Application(), ReactApplication {
   override fun onCreate() {
     super.onCreate()
     CrashCatcher.install(this)
+    // Typsnitt (Barlow, Barlow Semi Condensed, IBM Plex Mono) med vikter – se src/fontpatch.js
+    try {
+      val fm = ReactFontManager.getInstance()
+      fm.addCustomFont(this, "Barlow", R.font.barlow)
+      fm.addCustomFont(this, "BarlowCond", R.font.barlowcond)
+      fm.addCustomFont(this, "PlexMono", R.font.plexmono)
+    } catch (e: Throwable) {}
     loadReactNative(this)
   }
 }

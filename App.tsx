@@ -25,6 +25,10 @@ import PlanDay from './src/ui/PlanDay';
 import MediaViewer from './src/ui/MediaViewer';
 import SedelSheet from './src/ui/SedelSheet';
 import {Egen, EGNA_KEY, isEgen, toStops, cargoOf, statusSms, opterSms} from './src/egna';
+import * as SND from './src/sounds';
+import RevokedView, {RevokedBar, RevEntry, REVOKED_KEY} from './src/ui/RevokedView';
+import ChatView, {stripEmoji} from './src/ui/ChatView';
+import SoundSettings from './src/ui/SoundSettings';
 const TRAVEL = require('./src/opter/travel');
 import {baseDriveMin, SERVICE_MIN, PAL_MIN} from './src/opter/optimizer';
 import {Buffer} from 'buffer';
@@ -44,7 +48,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '21 okt · 3.42 · förseningsorsak + lossa flera adresser';
+const BUILD = '22 okt · 3.43 · jobblista A, återkallade, chatt, ljud, Barlow';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -146,6 +150,13 @@ function AppInner(): React.JSX.Element {
     const b = AppState.addEventListener('change', (st: string) => { if (st === 'active') take(); });
     return () => { a.remove(); b.remove(); };
   }, []);
+  // Nummer du lagt på ett jobb (ur chatten eller för hand). cid → [{label, num}]. Visas under Ring på stoppet.
+  const [jobNums, setJobNums] = useState<Record<string, {label: string; num: string; at: number}[]>>({});
+  useEffect(() => { loadJSON('rutt.jobnums.v1', {}).then((v: any) => { if (v && typeof v === 'object') { const cut = Date.now() - 14 * 86400000; const n: any = {}; Object.keys(v).forEach(k => { const l = (v[k] || []).filter((x: any) => x && x.at > cut); if (l.length) n[k] = l; }); setJobNums(n); } }); }, []);
+  function addJobNum(cid: string, c: {label: string; num: string}) {
+    setJobNums(m => { const l = (m[cid] || []).filter(x => x.num !== c.num); const n = {...m, [cid]: [...l, {...c, at: Date.now()}]}; saveJSON('rutt.jobnums.v1', n); return n; });
+    flash(`Numret ligger nu på jobbet`, null);
+  }
   // Egna jobb (sedlar från Joel som du gjort till stopp). Klara jobb äldre än en vecka rensas.
   const [egna, setEgna] = useState<Egen[]>([]);
   const egnaLoaded = useRef(false);
@@ -169,7 +180,7 @@ function AppInner(): React.JSX.Element {
   const [sedelFor, setSedelFor] = useState<{media?: any; job?: Egen} | null>(null);
   const [smsOpter, setSmsOpter] = useState(false); // Lastat/Lossat-SMS även för Opter-order (Inställningar)
   useEffect(() => { loadJSON('rutt.smsopter.v1', false).then((v: any) => setSmsOpter(!!v)); }, []);
-  const [klartView, setKlartView] = useState<'idag' | 'dagbok'>('idag');
+  const [klartView, setKlartView] = useState<'idag' | 'dagbok' | 'aterkallade'>('idag');
 
   // Arbetstid, stopp-status och POD
   const [work, setWork] = useState<'igång' | 'rast' | 'lunch' | 'slut'>('igång');
@@ -322,21 +333,28 @@ function AppInner(): React.JSX.Element {
     // Lossade egna jobb visas bara samma dag (i Klart), sen försvinner de ur planen.
     const today = new Date().toDateString();
     const vis = egna.filter(e => !e.doneAt || new Date(e.doneAt).toDateString() === today);
-    if (!vis.length) return baseSrc;
+    const withNums = (src0: any) => {
+      if (!src0 || !Object.keys(jobNums).length) return src0;
+      return {...src0, stops: src0.stops.map((x: any) => { const l = jobNums[String(x.pickup || x.drop)]; if (!l || !l.length) return x; const have = new Set((x.tel || []).map((t: any) => String(t.num).replace(/\D/g, ''))); const add = l.filter(t => !have.has(String(t.num).replace(/\D/g, ''))).map(t => ({label: t.label, num: t.num, src: 'lagt på jobbet'})); return add.length ? {...x, tel: [...(x.tel || []), ...add]} : x; })};
+    };
+    if (!vis.length) return withNums(baseSrc);
     const st = vis.flatMap(e => toStops(e)); const cg: any = {}; for (const e of vis) cg[e.id] = cargoOf(e);
-    return baseSrc ? {...baseSrc, stops: [...baseSrc.stops, ...st], cargo: {...baseSrc.cargo, ...cg}} : {stops: st, cargo: cg, perm: null, opts: null};
-  }, [baseSrc, egna]);
+    return withNums(baseSrc ? {...baseSrc, stops: [...baseSrc.stops, ...st], cargo: {...baseSrc.cargo, ...cg}} : {stops: st, cargo: cg, perm: null, opts: null});
+  }, [baseSrc, egna, jobNums]);
   // ---- Var hör varje order hemma? Opters regler (live.tab) + dina tryck i RUTT ----
   const cidsAll: string[] = useMemo(() => (fullSrc ? [...new Set(fullSrc.stops.map((s: any) => String(s.pickup || s.drop)))] as string[] : []), [fullSrc]);
   const legs = (cid: string) => ({pick: fullSrc.stops.find((s: any) => String(s.pickup) === cid), drop: fullSrc.stops.find((s: any) => String(s.drop) === cid)});
-  const classOf = (cid: string): 'new' | 'todo' | 'done' | 'hidden' => {
+  const classOf = (cid: string): 'new' | 'todo' | 'done' | 'hidden' | 'revoked' => {
     const o = ost[cid] || {};
     if (o.rejectedAt || o.givenAt) return 'hidden';
     const {pick, drop} = legs(cid);
     const L = (pick && pick.live) || (drop && drop.live);
     const t0 = L ? L.tab : 'todo'; // demo: allt är att göra
     if (o.doneAt) return 'done';
-    if (t0 === 'new' || t0 === 'revoked') return o.acceptedAt ? 'todo' : 'new';
+    // Återkallad av kontoret (Opter SAS_Revoked): aldrig ny, aldrig i planen – egen lista (se RevokedView).
+    // Förr hamnade den som "ny", och var den redan bekräftad låg den kvar i planen (bugg t.o.m. 3.42).
+    if (t0 === 'revoked' || (L && L.revokedAny)) return 'revoked';
+    if (t0 === 'new') return o.acceptedAt ? 'todo' : 'new';
     return t0;
   };
   const cls = useMemo(() => { const m: Record<string, string> = {}; for (const c of cidsAll) m[c] = classOf(c); return m; }, [cidsAll, ost, fullSrc]);
@@ -877,6 +895,52 @@ function AppInner(): React.JSX.Element {
     if (!RL || !RL.keepAlive || Platform.OS !== 'android') return;
     RL.keepAlive(step === 'route' && live).then((v: any) => dlog('håll vaken: ' + v)).catch((e: any) => dlog('håll vaken fel: ' + String(e?.message || e)));
   }, [step, live]);
+  // ---- Återkallade order (Opter: SAS_Revoked). Egen lista + kvittera, notis med eget ljud. ----
+  const [revLog, setRevLog] = useState<RevEntry[]>([]);
+  const revLoaded = useRef(false);
+  useEffect(() => { loadJSON(REVOKED_KEY, []).then((v: any) => { const cut = Date.now() - 30 * 86400000; setRevLog(Array.isArray(v) ? v.filter((e: any) => e && e.at > cut) : []); revLoaded.current = true; }); }, []);
+  const revokedNow = useMemo(() => cidsAll.filter(c => cls[c] === 'revoked').map(cid => {
+    const {pick, drop} = legs(cid); const L = (pick && pick.live) || (drop && drop.live) || {}; const o = ost[cid] || {};
+    const d = drop || pick || {}, p0 = pick || {};
+    const m = [...msgs].reverse().find((x: any) => x.received && x.shiId && L.shiId && x.shiId === L.shiId);
+    return {cid, orderNo: d.orderNo || null, who: d.who || '', adr: [d.adr, d.area].filter(Boolean).join(', '), from: pick ? p0.who || '' : '', fromAdr: pick ? [p0.adr, p0.area].filter(Boolean).join(', ') : '',
+      inCar: !!(o.loadedAt || (pick && serverLoaded(pick))), open: !L.revokedConfirmed && !o.revokedAckAt, msg: m ? m.text : null};
+  }), [cidsAll, cls, ost, msgs]);
+  useEffect(() => {
+    if (!revLoaded.current || demo) return;
+    setRevLog(log => {
+      let changed = false; const now = Date.now(); const fresh: any[] = [];
+      const next = log.map(e => {
+        const cur = revokedNow.find(x => x.cid === e.cid); if (!cur) return e;
+        const upd = {...e, open: cur.open && !e.confirmedAt, inCar: e.inCar || cur.inCar, msg: cur.msg || e.msg, confirmedAt: e.confirmedAt || (!cur.open ? now : null)};
+        if (JSON.stringify(upd) !== JSON.stringify(e)) changed = true; return upd;
+      });
+      for (const x of revokedNow) if (!next.some(e => e.cid === x.cid)) { next.push({...x, at: now, confirmedAt: x.open ? null : now}); fresh.push(x); changed = true; }
+      if (!changed) return log;
+      saveJSON(REVOKED_KEY, next);
+      const open = fresh.filter(x => x.open);
+      if (open.length) {
+        const title = open.length === 1 ? `Återkallad: order ${open[0].orderNo || open[0].cid}` : `${open.length} order återkallade`;
+        const text = open.map(x => `${x.who || '—'}${x.adr ? ', ' + x.adr : ''}${x.inCar ? ' – ligger i bilen' : ' – lasta inte'}`).join('\n');
+        SND.notifyWith('revoked', 5600 + (Number(String(open[0].cid).replace(/\D/g, '').slice(-3)) || 0), title, text).then((v: any) => dlog('återkallad notis: ' + v)).catch(() => {});
+        dlog('återkallad: ' + open.map(x => x.cid).join(','));
+      }
+      return next;
+    });
+  }, [revokedNow, demo]);
+  async function confirmRevoked(cid: string) {
+    const {pick, drop} = fullSrc ? legs(cid) : ({} as any);
+    const L = (pick && pick.live) || (drop && drop.live);
+    const mark = (patch: any) => setRevLog(log => { const n = log.map(e => (e.cid === cid ? {...e, ...patch} : e)); saveJSON(REVOKED_KEY, n); return n; });
+    const done = () => { setOst(o => ({...o, [cid]: {...(o[cid] || {}), revokedAckAt: Date.now()}})); mark({open: false, confirmedAt: Date.now(), sending: false, failed: false}); };
+    if (!live || !L) { done(); flash('Kvitterad (inte skickad – ej inloggad)', null); return; }
+    mark({sending: true, failed: false});
+    try {
+      const r = await withTimeout<any>(client.confirmRevoked(L) as Promise<any>, 30000, 'Opter');
+      if (r.confirmed) { done(); if (r.rutt && r.rutt.stops) setOrders(r.rutt); flash('Återkallad order kvitterad i Opter', null); }
+      else { mark({sending: false, failed: true}); flash('Opter tog inte emot kvittensen – försök igen', null); }
+    } catch (e: any) { mark({sending: false, failed: true}); flash('Kunde inte nå Opter – försök igen', null); }
+  }
   // ---- Nytt uppdrag → notis på låsskärmen (som Opter). En gång per order; inte i demo. ----
   // Anropas direkt från hämtningen (fungerar även när appen ligger i bakgrunden) och från listan när den ändras.
   // cid → senaste notis. Står uppdraget kvar som nytt (inte bekräftat) påminner RUTT var 15:e minut, som Opter.
@@ -896,8 +960,28 @@ function AppInner(): React.JSX.Element {
     const line = (o: any) => { const p = o.pick || {}, d = o.drop || {}; const t = p.tEarliest && p.tEarliest.hhmm ? ` ${p.tEarliest.hhmm}` : ''; return `Hämta ${p.who || p.adr || '—'}${p.area ? ', ' + p.area : ''}${t} → ${d.who || d.adr || '—'}${d.area ? ', ' + d.area : ''}`; };
     const title = (fresh.length === 1 ? 'Nytt uppdrag' : `${fresh.length} nya uppdrag`) + (again ? ' – väntar på svar' : '');
     dlog((again ? 'påminnelse: ' : 'nya uppdrag: ') + fresh.map(o => o.cid).join(',') + ' · ' + AppState.currentState);
-    if (RL && RL.notify) RL.notify(4800 + (Number(String(fresh[0].cid).replace(/\D/g, '').slice(-4)) || 0), title, fresh.map(line).join('\n')).then((v: any) => dlog('notis visad: ' + v)).catch((e: any) => dlog('notis fel: ' + String(e?.message || e)));
+    SND.notifyWith(again ? 'reminder' : 'order', 4800 + (Number(String(fresh[0].cid).replace(/\D/g, '').slice(-4)) || 0), title, fresh.map(line).join('\n')).then((v: any) => dlog('notis visad: ' + v)).catch((e: any) => dlog('notis fel: ' + String(e?.message || e)));
   }
+  // ---- Nytt chattmeddelande från kontoret → notis med chattljudet (en gång per meddelande) ----
+  const chatSeen = useRef<Record<string, number> | null>(null);
+  useEffect(() => {
+    if (demo || !live) return;
+    (async () => {
+      const first = !chatSeen.current;
+      if (!chatSeen.current) { const v: any = await loadJSON('rutt.chatseen.v1', null); chatSeen.current = v && typeof v === 'object' ? v : {}; }
+      const S = chatSeen.current!, now = Date.now();
+      const keyOf = (m: any) => (m.serverId ? 'x' + m.serverId : 'i' + (m.key && m.key.identityId) + (m.text || '').slice(0, 20));
+      const inc = msgs.filter((m: any) => m.received && !m.confirmed && !S[keyOf(m)]);
+      if (!inc.length) return;
+      inc.forEach((m: any) => { S[keyOf(m)] = now; });
+      const ks = Object.keys(S).sort((a, b) => S[b] - S[a]).slice(0, 400); const keep: any = {}; ks.forEach(k => { keep[k] = S[k]; }); chatSeen.current = keep; saveJSON('rutt.chatseen.v1', keep);
+      // Första gången (ny installation) blir det inget notisregn för gamla meddelanden.
+      const recent = inc.filter((m: any) => !first || (m.created && now - m.created.getTime() < 30 * 60000));
+      if (!recent.length) return;
+      const last = recent[recent.length - 1];
+      SND.notifyWith('chat', 5200 + (recent.length % 50), recent.length === 1 ? (last.from || 'Kontoret') : `${recent.length} meddelanden från kontoret`, recent.map((m: any) => m.text).join('\n')).catch(() => {});
+    })();
+  }, [msgs, demo, live]);
   useEffect(() => { if (live) announce(newOrders as any); }, [newOrders, demo, live]);
   // ---- GPS: be om behörighet, starta tjänsten, skicka senaste position med serverns intervall ----
   useEffect(() => { loadJSON('rutt.gps.v1', true).then((v: any) => setGpsOn(v !== false)); }, []);
@@ -987,8 +1071,11 @@ function AppInner(): React.JSX.Element {
       setPending(p => p.map(x => (x.id === item.id ? {...x, state: 'failed'} : x)));
     }
   }
+  // Dagens order för chatten (ordernummer på meddelanden + "Lägg numret på jobbet").
+  const chatOrders = useMemo(() => cidsAll.filter(c => cls[c] === 'todo' || cls[c] === 'new' || cls[c] === 'done').map(cid => { const {pick, drop} = legs(cid); const st = drop || pick || {}; const L = (pick && pick.live) || (drop && drop.live) || {}; return {cid, orderNo: String(st.orderNo || cid), who: [st.who, st.adr].filter(Boolean).join(', '), shiId: L.shiId}; }), [cidsAll, cls]);
   async function sendMsg() {
-    const t = msgText.trim();
+    // Smileys syns inte i Opter-chatten – de tas bort (skrivrutan säger det innan du skickar).
+    const t = stripEmoji(msgText);
     if (!t) return;
     setMsgText('');
     if (demo || !client.logon) { setErr('Logga in mot Opter för att skicka meddelanden.'); return; }
@@ -1288,11 +1375,12 @@ function AppInner(): React.JSX.Element {
 
           {tab === 'klart' && (
             <View style={s.segRow}>
-              {([['idag', 'Idag'], ['dagbok', 'Dagbok']] as const).map(([k, t]) => (
-                <Pressable key={k} style={[s.segB, klartView === k && s.segOn2]} onPress={() => setKlartView(k)}><Text style={[s.segT, klartView === k && s.segTOn]}>{t}</Text></Pressable>
+              {([['idag', 'Idag'], ['dagbok', 'Dagbok'], ...(revLog.length ? [['aterkallade', `Återkallade${revLog.some(e => e.open) ? ' · ' + revLog.filter(e => e.open).length : ''}`]] : [])] as [any, string][]).map(([k, t]) => (
+                <Pressable key={k} style={[s.segB, klartView === k && s.segOn2]} onPress={() => setKlartView(k)}><Text style={[s.segT, klartView === k && s.segTOn, k === 'aterkallade' && revLog.some(e => e.open) && klartView !== k && {color: C.bad}]}>{t}</Text></Pressable>
               ))}
             </View>
           )}
+          {tab === 'klart' && klartView === 'aterkallade' && <RevokedView list={revLog} onConfirm={confirmRevoked} />}
           {tab === 'klart' && klartView === 'dagbok' && <DagbokView me={driverName || 'RUTT'} onSms={chefC ? (text: string) => { jobbet.send(chefC, text); flash(`Dagrapport till ${chefC.name.split(' ')[0]}`, null); } : undefined} />}
           {tab === 'klart' && klartView === 'idag' && <DoneView done={doneOrders} onRetry={retrySync} onOpen={(d: any) => (isEgen(d.cid) ? openOwn(d.cid) : setEditFor({cid: d.cid, st: d.st, done: true, start: (ost[d.cid] || {}).loadedAt || null}))} />}
           {tab === 'nytt' && <NewOrdersView orders={newOrders} cargo={fullSrc ? fullSrc.cargo : {}} onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={(o: any) => setOrderStatus(o, 'reject')} onForward={(orders.perm && orders.perm.giveAway === false) ? undefined : setForwardFor} />}
@@ -1307,6 +1395,7 @@ function AppInner(): React.JSX.Element {
             </View>
           )}
           {tab === 'plan' && planDay === 'imorgon' && later.length > 0 && <PlanDay route={laterRoute} cargo={fullSrc ? fullSrc.cargo : {}} onReorder={saveManualLater} starts={STARTS} startId={startId} onStart={pickStart} />}
+          {tab === 'plan' && <RevokedBar list={revLog} onConfirm={confirmRevoked} onOpen={() => { setTab('klart'); setKlartView('aterkallade'); }} />}
           {tab === 'plan' && (planDay === 'idag' || !later.length) && !orders.stops.length && !demo && (
             <View style={s.emptyBox}>
               <Bi n="inbox-fill" size={30} color={C.faint} />
@@ -1316,11 +1405,11 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && (planDay === 'idag' || !later.length) && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any, more: any[] = []) => setSignStop(more.length ? {...st, group: [st, ...more]} : st)} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any, more: any[] = []) => setSignStop(more.length ? {...st, group: [st, ...more]} : st)} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} me={driverName} onAddNum={addJobNum} />
           )}
           {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} laterRoute={laterRoute} />}
           {tab === 'chat' && <JobbetView j={jobbet} onMakeJob={(m: any) => setSedelFor({media: m})} live={live} opterUnread={unread} opterLast={chatList[chatList.length - 1]} onOpenOpter={markOpterRead}
-            opterView={<ChatView msgs={chatList} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} onRetry={deliver} />} />}
+            opterView={<ChatView msgs={chatList} msgText={msgText} setMsgText={setMsgText} onSend={sendMsg} onRetry={deliver} orders={chatOrders} onAddNum={addJobNum} onFlash={(t: string) => flash(t, null)} />} />}
           {(tab === 'plan' || tab === 'last') && route && (route as any).error && <Text style={s.errTxt}>Optimeringsfel: {(route as any).error}</Text>}
 
           {!kbOpen && (
@@ -1378,8 +1467,10 @@ function AppInner(): React.JSX.Element {
           </View>
           <View style={[s.toggle, demo && {backgroundColor: C.accent2}]}><View style={[s.toggleKnob, demo && {alignSelf: 'flex-end'}]} /></View>
         </Pressable>
-        <Text style={s.podLabel}>Notis vid nytt uppdrag</Text>
-        <Pressable style={s.setRow} onPress={() => { const RL: any = NativeModules.RuttLocation; if (RL && RL.notify) RL.notify(4799, 'Nytt uppdrag (test)', 'Så här ser det ut när ett uppdrag kommer in.').then((v: any) => flash(v ? 'Testnotis skickad – dra ner för att se den' : 'Notiser är avstängda för RUTT', null)).catch((e: any) => flash('Notis fel: ' + String(e?.message || e), null)); }}>
+        <Text style={s.podLabel}>Notiser</Text>
+        <Text style={s.podLabel}>Notisljud</Text>
+        <SoundSettings />
+        <Pressable style={s.setRow} onPress={() => { SND.notifyWith('order', 4799, 'Nytt uppdrag (test)', 'Så här ser det ut när ett uppdrag kommer in.').then((v: any) => flash(v ? 'Testnotis skickad – dra ner för att se den' : 'Notiser är avstängda för RUTT', null)).catch((e: any) => flash('Notis fel: ' + String(e?.message || e), null)); }}>
           <Text style={[s.sheetNote, {flex: 1, marginTop: 0}]}>Testa notisen (ljud, vibration, låsskärm)</Text>
           <Bi n="bell-fill" size={18} color={C.accentInk} />
         </Pressable>
@@ -1468,66 +1559,6 @@ function AppInner(): React.JSX.Element {
   );
 }
 
-function ChatView({msgs, msgText, setMsgText, onSend, onRetry}: any) {
-  const stamp = (m: any) => {
-    const t = m.created ? hhmm(m.created) : '';
-    const sameDay = m.created && new Date().toDateString() === m.created.toDateString();
-    const d = m.created && !sameDay ? `${String(m.created.getDate()).padStart(2, '0')}/${m.created.getMonth() + 1} ` : '';
-    return m.received ? `${m.from || ''}${m.from ? ' · ' : ''}${d}${t}` : `${d}${t}`;
-  };
-  const data = [...msgs].reverse(); // nyast sist visuellt (inverted)
-  // Lyft hela chatten över tangentbordet via RN:s egna Keyboard-event
-  // (funkar med edge-to-edge utan native-beroende).
-  const [kb, setKb] = useState(0);
-  useEffect(() => {
-    const show = Keyboard.addListener('keyboardDidShow', e => setKb(e.endCoordinates?.height || 0));
-    const hide = Keyboard.addListener('keyboardDidHide', () => setKb(0));
-    return () => { show.remove(); hide.remove(); };
-  }, []);
-  // endCoordinates.height räknar INTE in tangentbordets verktygsrad (emoji/urklipp/
-  // kugghjul) på många Android-tangentbord, så skrivrutan hamnar bakom den.
-  // Lägg på en buffert så rutan garanterat klarar hela tangentbordet.
-  const KB_BUFFER = 64;
-  const lift = kb > 0 ? kb + KB_BUFFER : 0;
-  return (
-    <View style={{flex: 1, paddingBottom: lift}}>
-      {msgs.length === 0 ? (
-        <View style={{flex: 1, padding: 18}}><Text style={s.empty}>Inga meddelanden.</Text></View>
-      ) : (
-        <FlatList
-          style={{flex: 1}}
-          contentContainerStyle={{padding: 14, paddingTop: 18}}
-          data={data}
-          inverted
-          keyboardShouldPersistTaps="handled"
-          keyExtractor={(_, i) => String(i)}
-          renderItem={({item}) => {
-            const failed = item.local && item.state === 'failed';
-            // Ärlig status: "Mottaget av Opter" först när servern sparat det med eget id.
-            const status = item.received ? '' : item.local
-              ? (item.state === 'sending' ? '  Skickar…' : failed ? '  Ej skickat – tryck för att försöka igen' : item.state === 'stored' ? '  ✓ Mottaget av Opter' : '  Skickat – väntar på kvitto')
-              : (item.confirmed ? '  ✓✓ Läst' : item.serverId ? '  ✓ Mottaget av Opter' : '  ✓ Skickat');
-            return (
-              <Pressable disabled={!failed} onPress={() => onRetry && onRetry(item)} style={[s.bubbleWrap, item.received ? s.bwL : s.bwR]}>
-                <View style={[s.bubble, item.received ? s.bubbleIn : s.bubbleOut, item.local && item.state === 'sending' && {opacity: 0.6}, failed && {borderWidth: 1, borderColor: C.bad}]}>
-                  {/* textBreakStrategy="simple": Samsung-typsnitt mäts olika mot hur de ritas → sista ordet ("07.00") klipptes bort. */}
-                  <Text style={s.bubbleTxt} textBreakStrategy="simple" android_hyphenationFrequency="none">{slack(item.text)}</Text>
-                </View>
-                <Text style={[s.bubbleStamp, item.received ? s.stampL : s.stampR, failed && {color: C.bad}]}>
-                  {stamp(item)}{status}
-                </Text>
-              </Pressable>
-            );
-          }}
-        />
-      )}
-      <View style={[s.sendRow, {paddingBottom: 12}]}>
-        <TextInput style={s.sendInput} value={msgText} onChangeText={setMsgText} placeholder="Skriv ett meddelande…" placeholderTextColor={C.dim} multiline />
-        <Pressable style={s.sendBtn} onPress={onSend}><Bi n="send-fill" size={18} color={C.onAccent} /></Pressable>
-      </View>
-    </View>
-  );
-}
 
 // Statusrad med en liten lampa: grön = funkar, orange = jobbar på det, röd = fel. Mjukt sken runt lampan.
 function Lamp({col, size = 10}: {col: string; size?: number}) {

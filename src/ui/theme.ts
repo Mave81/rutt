@@ -76,3 +76,8 @@ export function prettyPhone(n: string): string {
 // Samsung ritar typsnittet en aning bredare än React Native mäter → sista ordet i en bubbla kan hamna på en
 // rad som inte syns. Några hårda mellanslag sist ger bubblan marginal (syns inte, bryts inte bort).
 export const slack = (t: string) => (t ? t + '\u00A0'.repeat(Math.min(5, 2 + Math.ceil(String(t).length / 14))) : t);
+
+// Typsnitt (registrerade i MainApplication.kt, standard för all text via src/fontpatch.js):
+//  cond = Barlow Semi Condensed för namn och rubriker (långa firmanamn får plats), mono = IBM Plex Mono för nummer (0 ≠ O).
+export const FONT = {body: 'Barlow', cond: 'BarlowCond', mono: 'PlexMono'};
+export const R = 6; // hörnradie för kort, knappar och rader

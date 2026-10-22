@@ -357,6 +357,23 @@ export default class OpterClient {
     return {confirmed: (sent || confirmed) && ok2, sent, imageDropped, error: err ? String(err.message || err) : null, rutt: P.toRutt(this.lastDecoded)};
   }
 
+  // Kvittera en återkallad order – exakt som Opter: bara SAS_RevokedConfirmed = sant (fält 67), sen synk.
+  // Bekräftat när servern visar den som kvitterad, eller när ordern försvunnit ur din lista.
+  async confirmRevoked(live) {
+    if (!this.logon) throw new Error('inte inloggad');
+    let sent = false, err = null;
+    try {
+      const res = await this.send(P.MessageType.Synchronize, P.encodeShipmentEdit({live, revokedConfirmed: true}), {once: true});
+      if (res.type === P.MessageType.Corrupt) throw new Error('Opter kunde inte läsa kvittensen');
+      this._take(P.decodeSync(res.payload)); sent = true;
+    } catch (e) { err = e; try { await this.relogin(); } catch (e2) {} }
+    try { await this._fullSync(); } catch (e) {}
+    const r = (this.lastDecoded && this.lastDecoded.rows || []).find(x => x.table === 'Shipment' && x.key.xxxId === live.shiId);
+    const confirmed = !r || !!r.columns.revokedConfirmed;
+    this._log({kind: 'kvittera återkallad', shiId: live.shiId, sent, confirmed, err: err ? String(err.message || err) : null});
+    return {confirmed, sent, rutt: P.toRutt(this.lastDecoded)};
+  }
+
   // Skicka vidare (Opters "Ge bort"): ordern till en annan förare. Opter svarar "1" när det gått igenom;
   // sen kollas mot servern att ordern inte längre ligger hos dig.
   async giveAway(live, to) {

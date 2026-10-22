@@ -40,6 +40,6 @@ test('Order Lastad i Opter visas som LOSSA', () => {
   ReactTestRenderer.act(() => { r = ReactTestRenderer.create(W(<OrdersView route={route} cargo={{X: {pal: 1}}} ost={{}} allStops={[pk, dr]} onLoaded={() => {}} onUnload={() => {}} onEdit={() => {}} onAvised={() => {}} onRetry={() => {}} live={false} />)); });
   const {Text} = require('react-native');
   const txt = r.root.findAll((n: any) => n.type === Text).map((n: any) => [].concat(n.props.children).filter((x: any) => typeof x === 'string').join('')).join(' | ');
-  expect(txt).toContain('LOSSA');
+  expect(txt).toContain('LÄMNA'); expect(txt).toContain('Dra för Lossad');
   expect(txt).toContain('Nytorgsgatan');
 });

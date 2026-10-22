@@ -330,7 +330,7 @@ const CET = {
   SHI_Area: 37, SHI_LoadMeter: 38, SHI_Weight: 39, SHI_Packages: 40, SHI_ExternalMessage: 41, SHI_Message: 42, SHI_DriverMessage: 43,
   SHI_SenderReference: 69, SHI_ReceiverReference: 70, SHI_TimeFailureComment: 106, SHI_TFR_Id: 107,
 };
-function encodeShipmentEdit({ live, statusId, pod, addServices, damages, changes, images }) {
+function encodeShipmentEdit({ live, statusId, pod, addServices, damages, changes, images, revokedConfirmed }) {
   const w = W();
   const k = live.key;
   wB(w, DT.StartTable); wB(w, TableOrd.Shipment); wB(w, 14);
@@ -338,6 +338,7 @@ function encodeShipmentEdit({ live, statusId, pod, addServices, damages, changes
   wB(w, (live.hdr && live.hdr.extra) || 0); wB(w, (live.hdr && live.hdr.conf) || 0);
   if (statusId) wInt(w, 11, statusId);                                   // SHI_SHS_Id
   if (pod) wStrAlways(w, 56, live.externalId || '');                    // SHI_ExternalId (följer med en kvittens)
+  if (revokedConfirmed) wBool(w, 67, true);                              // SAS_RevokedConfirmed – kvittera återkallad (Opter: ServerProxy.setRevokedConfirmed)
   for (const a of addServices || []) {
     wNewRow(w, 'ShipmentAddService', 0);
     wInt(w, 2, a.satId);                                                 // SHA_SAT_Id
@@ -560,6 +561,7 @@ function messageList(decoded) {
       received,                       // true = Mottaget (från kontoret), false = Skickat (av dig)
       confirmed: c.confirmed === true,
       serverId: r.key.xxxId > 0 ? r.key.xxxId : 0, // > 0 = sparat i Opter
+      shiId: Number(c.shiId) || 0,   // FTM_SHI_Id: meddelandet hör till den här ordern (0 = ingen)
     });
   }
   out.sort((a, b) => (a.created ? a.created.getTime() : 0) - (b.created ? b.created.getTime() : 0));
@@ -856,7 +858,7 @@ function toRutt(decoded) {
     const edit = { addTypes, addDone, dmgDone, attDone, values, orderId: c.orderId || null, completed: !!(curSt && curSt.completed),
       statuses: statuses.map(s => ({id: s.id, name: String(s.name || ''), userOption: !!s.userOption, accepted: !!s.accepted, pickup: !!s.pickup, delivery: !!s.delivery, completed: !!s.completed, pod: !!s.pod, rejected: !!s.rejected})) };
     const live = { key: r.key, hdr: r.hdr, shiId, offId: r.key.offId, edit, statuses: statuses.map(s => ({id: s.id, name: s.name})), cur: curSt ? curSt.name : null, curId: c.shsId || 0,
-      isNew: isNew && !consHidden, tab: tabF, revoked: revokedOpen, consignment: !!c.isConsignment || !!c.consignmentParent, locked: !!c.locked,
+      isNew: isNew && !consHidden, tab: tabF, revoked: revokedOpen, revokedAny: revoked, revokedConfirmed: !!c.revokedConfirmed, consignment: !!c.isConsignment || !!c.consignmentParent, locked: !!c.locked,
       shipDate: (c.shipmentDate instanceof Date && c.shipmentDate.getFullYear() > 2001) ? ymd(c.shipmentDate) : (c.orderDate instanceof Date && c.orderDate.getFullYear() > 2001 ? ymd(c.orderDate) : null),
       doneAt: (() => { const logs = decoded.rows.filter(x => x.table === 'ShipmentStatusLog' && belongs(x, shiId) && x.columns.shsId === c.shsId && x.columns.logTime instanceof Date); return logs.length ? Math.max(...logs.map(x => x.columns.logTime.getTime())) : null; })(),
       serverDone, acceptSt: acceptSt ? {id: acceptSt.id, name: acceptSt.name} : null, rejectSt: rejectSt ? {id: rejectSt.id, name: rejectSt.name} : null,
