@@ -132,3 +132,10 @@ Fält: 1 RES_Id, 2 VHC_Id, **3 SHI_Id (meddelandet kan höra till en order!)**, 
 3. Skärmbild i webbharnessen (ljust + mörkt).
 4. APK byggd i CI, sha1 kontrollerad på telefonen.
 5. Svaret till Kenta: **verifierat** vs **inte verifierat** – separat.
+
+## 12. Hur Kenta jobbar (styr designen)
+
+- **Vid hämtning** frågar butiken/terminalen "vad ska du lasta och vart ska det?". Därför ska hjälpen ("Visa för butiken": fraktsedel · mottagare · adress · kolli) finnas vid HÄMTNING.
+- **Vid lämning** har kunden följesedeln. Där behövs bara: vem som ska ringas/aviseras, kolli och Lossad. Ingen "jag lämnar …"-text.
+- Markera flera ska vara lätt: håll in en rad, tryck på fler (även andra adresser), en knapp nere: "Lastad · n" / "Lossad · n".
+- Design: kompakt och proffsig. Raka hörn (≈6 px), 52 px rader, Barlow / Barlow Semi Condensed, nummer i IBM Plex Mono. Inga mörka block i ljust läge, ingen glow, inga lodräta linjer.
