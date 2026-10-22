@@ -92,7 +92,7 @@ Opters menyval (`ShipmentListFragment.OptionsItem`) och var RUTT står:
 | Sätt nästa status / (alla) | ManualStatusChange*Permission, SetMultipleStatusPermission | ✔ |
 | Välj status… | SetArbitraryStatusPermission | ✔ |
 | Leveransbevis | ProofOfDeliveryPermission | ✔ |
-| Confirm revoked (kvittera återkallad) | – | ✘ **saknas** |
+| Confirm revoked (kvittera återkallad) | – | ✔ 3.43 (`client.confirmRevoked`, fält 67) **[OVERIFIERAT mot server]** |
 | Artiklar (Bomkörning, Budtransport TIM, Express, Inbärning, Lastningstid, Lossningstid, OB1 – "Enhet 1") | ArticlesPermission (Kentas kontor: **true**) | ✘ **saknas** – ShipmentArticle + ShipmentPriceItem (SPI_SAR_Id, SPI_Unit1Quantity) |
 | Tillägg | AddServicePermission (Kentas kontor: **false**) | dolt, som Opter |
 | Ändringar (Vikt, Volym, Pallplats, Flakmeter, Kollin, Tid, Avstånd, Fraktsedel, Littera, Ref …) | ChangesPermission + SHI_*Permission | ✔ (Tid 3.40) |
@@ -120,7 +120,7 @@ Fält: 1 RES_Id, 2 VHC_Id, **3 SHI_Id (meddelandet kan höra till en order!)**, 
 
 - Läs inte adressens koordinater före adresstexten vid GPS (Morabergsvägen 7 i stället för 25).
 - Gissa aldrig: tidspassning finns ofta bara i lila raden (Products/DeliveryOptionNames) eller i fritext "tidspasning 06;50".
-- Visa aldrig en återkallad order som ny eller som att-göra. **Bugg i RUTT ≤3.42**: `classOf` lägger 'revoked' som 'new', och har du redan accepterat ligger den kvar i planen som att-göra.
+- Visa aldrig en återkallad order som ny eller som att-göra. Bugg i RUTT ≤3.42 (`classOf` lade 'revoked' som 'new'/att-göra) – rättad i 3.43: egen klass 'revoked', röd rad + Kvittera, lista under Klart → Återkallade (test: `__tests__/app-aterkallad.test.tsx`).
 - Lastplanen: en ruta = en pall, 18 platser (3 × 6), visa namn, inte siffror.
 - Egna jobb (Joels sedlar) skickas aldrig till Opter.
 - BUILD-raden ändras bara med `sed "s/^const BUILD = .*/…/"`.
@@ -139,3 +139,8 @@ Fält: 1 RES_Id, 2 VHC_Id, **3 SHI_Id (meddelandet kan höra till en order!)**, 
 - **Vid lämning** har kunden följesedeln. Där behövs bara: vem som ska ringas/aviseras, kolli och Lossad. Ingen "jag lämnar …"-text.
 - Markera flera ska vara lätt: håll in en rad, tryck på fler (även andra adresser), en knapp nere: "Lastad · n" / "Lossad · n".
 - Design: kompakt och proffsig. Raka hörn (≈6 px), 52 px rader, Barlow / Barlow Semi Condensed, nummer i IBM Plex Mono. Inga mörka block i ljust läge, ingen glow, inga lodräta linjer.
+
+## 13. Läget 3.43 (22 okt)
+
+- Jobblistan A, chatten (FTM_SHI_Id → ordernummer på meddelanden), nummer per jobb, notisljud (RuttTools.kt, en kanal per ljud), Barlow i hela appen (src/fontpatch.js + res/font).
+- **[OVERIFIERAT på telefon]**: kvittera återkallad mot servern, att Barlow syns (patchen av Text), notisljuden/kanalerna, telefonens ljudväljare, "Ny kontakt", kopiera.
