@@ -731,6 +731,25 @@ function optTime(dt, dateTTY, timeTTY) {
   return {hhmm: hasTime ? hhmm(dt) : null, date: ymd(dt), hasDate, ms: dt.getTime()};
 }
 
+/* Telefonfält → ett eller flera nummer. Delar på / , ; | "och" "eller"; sitter två nummer ihop med bara mellanslag letas de upp ett och ett. */
+function splitNums(raw) {
+  const out = [];
+  for (const part of String(raw || '').split(/[\/,;|]|\boch\b|\beller\b/i)) {
+    const d = part.replace(/[^0-9+]/g, '');
+    if (d.length < 5) continue;
+    if (d.replace(/^\+46/, '0').length <= 12) { out.push(d); continue; }
+    // Långt utan avdelare: dela där ett nytt nummer börjar (0 eller +46) när det förra har minst 8 siffror.
+    let cur = ''; const got = [];
+    for (const tok of part.trim().split(/\s+/)) {
+      const t = tok.replace(/[^0-9+]/g, ''); if (!t) continue;
+      if (cur.length >= 8 && /^(0|\+)/.test(t)) { got.push(cur); cur = ''; }
+      cur += t;
+    }
+    if (cur) got.push(cur);
+    if (got.every(x => x.length >= 8 && x.replace(/^\+46/, '0').length <= 12)) out.push(...got); else out.push(d);
+  }
+  return [...new Set(out)];
+}
 /* Opter: isTimeAfterLatestDeliveryTime. Saknas både datum och tid → aldrig sen. Bara datum → jämför dagen. */
 function isLateDelivery(latestDel, now = Date.now()) {
   if (!latestDel) return false;
@@ -793,7 +812,8 @@ function toRutt(decoded) {
   // Alla nummer som går att ringa för stoppet: adressens + orderns (kund/referens), utan dubbletter.
   const phones = (a, c, side) => {
     const out = []; const seen = new Set();
-    const add = (label, num) => { const d = String(num || '').replace(/[^0-9+]/g, ''); if (d.length >= 5 && !seen.has(d)) { seen.add(d); out.push({label, num: d}); } };
+    // Ett fält kan ha flera nummer ("072-856 06 49 / 073-597 13 31") – Opter visar dem med "/". Varje nummer blir en egen rad.
+    const add = (label, num) => { for (const d of splitNums(num)) if (!seen.has(d)) { seen.add(d); out.push({label, num: d}); } };
     if (a) add([a.line1, a.company].filter(Boolean)[0] || (side === 'from' ? 'Avsändare' : 'Mottagare'), a.phone);
     if (c.customerRef) { add(c.customerRef + ' (mobil)', c.customerRefMobile); add(c.customerRef, c.customerRefPhone); }
     else { add('Referens (mobil)', c.customerRefMobile); add('Referens', c.customerRefPhone); }
@@ -911,5 +931,5 @@ function toRutt(decoded) {
 module.exports = {
   MessageType, Table, DT, RST, F, frame, unframe, decodeSync, ticksToDate,
   logonPayload, parseLogon, resourceList, encodeStartWork, encodeWorkStatus, toRutt,
-  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, avisering, tidspass, palFromText, team, encodeShipmentStatus, encodeShipmentEdit, encodeGiveAway, editOptions, isLateDelivery, delayNeeds, CET, CHANGE_FIELDS, signatureString, encodePosition, setting,
+  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, splitNums, avisering, tidspass, palFromText, team, encodeShipmentStatus, encodeShipmentEdit, encodeGiveAway, editOptions, isLateDelivery, delayNeeds, CET, CHANGE_FIELDS, signatureString, encodePosition, setting,
 };

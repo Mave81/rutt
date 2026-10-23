@@ -30,3 +30,11 @@ test('chattmeddelande vet vilken order det hör till (FTM_SHI_Id)', () => {
   const m = P.messageList({rows: [{table: 'FreeTextMessage', key: {xxxId: 9, identityId: 0}, columns: {text: 'Hej', fromName: 'Kontoret', shiId: 226815}}]});
   expect(m[0].shiId).toBe(226815);
 });
+test('två nummer i samma fält delas (Proplatt, order 232309: "072-856 06 49 / 073-597 13 31")', () => {
+  expect(P.splitNums('072-856 06 49 / 073-597 13 31')).toEqual(['0728560649', '0735971331']);
+  expect(P.splitNums('08-556 212 80')).toEqual(['085562128' + '0']);
+  expect(P.splitNums('0728560649 0735971331')).toEqual(['0728560649', '0735971331']);
+  expect(P.splitNums('+46733372823')).toEqual(['+46733372823']);
+  expect(P.splitNums('070-1234567, 08-6236800')).toEqual(['0701234567', '086236800']);
+  expect(P.splitNums('')).toEqual([]);
+});
