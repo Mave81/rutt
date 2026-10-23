@@ -464,6 +464,22 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
             <Text style={[o.aviseT, now >= avAt.getTime() && {color: '#000000'}]}>{av!.a.who ? 'Ring' : 'Klar'}</Text>
           </Pressable>
         ) : null}
+        {picks.length ? (
+          // Vid hämtning frågar de "vad ska du hämta och vart ska det?" – svaret står här direkt.
+          <View style={o.kv}>
+            <Text style={[o.vb, {color: C.faint, marginBottom: 2}]}>SKA TILL</Text>
+            {picks.map((r, i) => { const ot = otherOf(r), q = qty(r); return (
+              <View key={k(r)} style={[o.toRow, i > 0 && o.kvLine]}>
+                <View style={{flex: 1, minWidth: 0}}>
+                  <Text style={o.toName} numberOfLines={2}>{ot ? placeName(ot) : goodsOf(r) || '—'}</Text>
+                  <Text style={o.toAdr} numberOfLines={2}>{ot ? [ot.adr, [ot.zip, ot.area].filter(Boolean).join(' ')].filter(Boolean).join(', ') || 'adressen saknas i ordern' : ''}</Text>
+                  {r.st.orderNo ? <Text style={o.mono}>order {r.st.orderNo}{r.st.freightBill && r.st.freightBill !== r.st.orderNo ? `  ·  fraktsedel ${r.st.freightBill}` : ''}</Text> : null}
+                </View>
+                {q ? <View style={o.jq}><Text style={o.jqN}>{q.n}</Text><Text style={o.jqU}>{q.u.toUpperCase()}</Text></View> : null}
+              </View>
+            ); })}
+          </View>
+        ) : null}
         {notes.length > 0 && <View style={o.info}><Bi n="info-circle" size={15} color={C.dim} style={{marginTop: 1}} /><Text style={o.infoTxt}>{notes.join('\n\n')}</Text></View>}
         {peopleRows(st)}
         <View style={o.rsBtns}>
@@ -668,6 +684,9 @@ const o = themed(() => StyleSheet.create({
   kvRow: {flexDirection: 'row', justifyContent: 'space-between', gap: 14, paddingVertical: 9},
   kvLine: {borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.edge},
   kvK: {color: C.dim, fontSize: 14, minWidth: 82},
+  toRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 9},
+  toName: {color: C.ink, fontFamily: FONT.cond, fontSize: 18, fontWeight: '700', lineHeight: 21},
+  toAdr: {color: C.dim, fontSize: 14, marginTop: 1},
   kvV: {color: C.ink, fontSize: 14.5, fontWeight: '600', flexShrink: 1, textAlign: 'right'},
   addNum: {flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingVertical: 8},
   addNumT: {color: C.accentInk, fontFamily: FONT.cond, fontSize: 14.5, fontWeight: '700'},
