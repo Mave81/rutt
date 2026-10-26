@@ -144,3 +144,14 @@ Fält: 1 RES_Id, 2 VHC_Id, **3 SHI_Id (meddelandet kan höra till en order!)**, 
 
 - Jobblistan A, chatten (FTM_SHI_Id → ordernummer på meddelanden), nummer per jobb, notisljud (RuttTools.kt, en kanal per ljud), Barlow i hela appen (src/fontpatch.js + res/font).
 - **[OVERIFIERAT på telefon]**: kvittera återkallad mot servern, att Barlow syns (patchen av Text), notisljuden/kanalerna, telefonens ljudväljare, "Ny kontakt", kopiera.
+
+## 14. Läget 3.45 (26 okt) – turlistor, hela körningen, timjobb
+- **Bevego turleveranslista** (papper, "TURLEVERANSLISTA", Leveransnummer + Tur, t.ex. 64499 / 050_01_A4): Opter-ordern (234014, Bud Zon-Zon, Bevego Älvsjö → "Distribution" utan adress, info "skriv timmar") säger INTE vart godset ska. Pappren gör det.
+  - `src/sedel.js` bevegoTur: mottagare, adress, kontakt (namn före första numret), tel/tel2, avisering, kolli (typ KLOVE/PALL/STÄLL/KARTONG + Bevego-ordernr), artiklar.
+  - `src/tur.ts` mergeTur: sidor till samma kund = ett stopp (Opejra: 2 pall + 1 kartong, ordrar 30219989 + 30198658). turToEgen → eget jobb med `parent` = Opter-ordern. turParents: Opter-order hämtas på Bevego + lämning utan adress/"Distribution".
+  - App: Opter-orderns lämning göms så länge stopp finns kvar, pallarna räknas på stoppen (parent pal 0). Lastad på ett stopp → hela familjen + Opter-ordern (Lastad till Opter). Lossad på sista stoppet → Opter-orderns lämning läggs i samma kvittens (Lossad till Opter).
+- **Skanna** (planen överst + tom plan + "Läs in turleveranslistan" i ordern när lämningen saknar adress): Kamera eller Bilder (flera). Turlista → TurScan; annan sedel → "Gör till jobb". Delad bild/PDF som är turlista går också till TurScan.
+- **Ordern (bladet)**: KÖRNINGEN med båda ändar (Hämta/Lämna: vem, adress, tid, kontakt, ring), Tjänst, Kund, Beställare, Opter-order, Fraktsedel, Order, Referens, Gods, Kolli/Pall, Vikt, Sträcka, Status i Opter.
+- **Timjobb** ("skriv timmar", "skriv tid", "per timme", "timdebit"…, `isTimjobb`): Tid öppnas själv vid Lossad i läget start–slut, start = när du lastade, slut = nu. Skickas som CET 34 (SHI_TimeMinutes) på första Opter-ordern i kvittensen – samma som Opter Driver.
+- **Registrerat i Opter?** editShipment jämför orderns kolumner efter synk mot det som skickats (`changesSeen`): "Syns i Opter" eller "Skickad – Opter visar inte Tid (min) än".
+- Ej verifierat mot riktig server: att Opter skickar tillbaka timeMinutes på förarens order efter ändring.

@@ -216,6 +216,102 @@ function opterShot(P) {
   return {kind: 'opter', title: cramo ? 'Cramo-uppdrag' : 'Uppdrag', from: cramo ? 'Cramo' : '', ref: proj, orderNo: mark ? tidy(mark) : '', date, service: tj,
     pick: pick || emptyA(), drop: drop || emptyA(), goods: [], note: msg.join('\n'), tidspass: tidspass([tj], msg)};
 }
+
+/* ---- Bevego turleveranslista (en sida per kund, "Leveransnummer 64499 Älvsjö - Måndag Norrtälje", tur 050_01_A4) ----
+ * Hämtas på Bevego Älvsjö (Opter-ordern säger bara "Distribution"). Sidan har kundens namn, kontakt, telefon, adress,
+ * kollin (18-siffrigt kollinummer, typ, märkning, ordernr, vikt) och artiklar. Läses med regler på hela texten, inte rutornas
+ * läge – telefonens OCR och kameran lägger ibland två kolumner på samma rad. */
+const BEVEGO_ALVSJO = {name: 'Bevego Älvsjö', adr: 'Konsumentvägen 17', zip: '125 30', area: 'Älvsjö', tel: '', contact: '', note: '', sure: true};
+const KTYPES = 'KLOVE|PALL|EUR-PALL|KARTONG|ST[AÄ]LL|PAKET|RULLE|BUNT|L[AÅ]DA|BOX|S[AÄ]CK|HINK|FAT';
+const STREETW = '(?:V[AÄ]GEN|GATAN|GR[AÄ]ND|ALL[EÉ]N?|PLAN|STIGEN|TORG(?:ET)?|BACKEN|LEDEN|V[AÄ]G|GATA|SV[AÄ]NGEN|BRINKEN|RINGEN|SLINGAN|LIDEN|H[OÖ]JDEN|PARKEN|STRAND(?:EN)?|KAJEN|BRON|PLATSEN|G[AÅ]NGEN|HAMNEN|V[AÄ]GEN)';
+// "ÄNGSVÄGEN 13" → "Ängsvägen 13", "TÄBY PLÅTTEKNIK AB" → "Täby Plåtteknik AB"
+const titleCase = s => String(s || '').toLowerCase().replace(/(^|[\s\-\/])([a-zåäöé])/g, (m, a, b) => a + b.toUpperCase()).replace(/\b(Ab|Hb|Kb|Ek)\b/g, x => x.toUpperCase());
+function bevegoTur(P) {
+  const lines = P.L.map(l => l.t);
+  const txt = lines.join('\n');
+  const up = txt.normalize('NFC');
+  // Leveransnummer + namn på turen ("64499 Älvsjö - Måndag Norrtälje")
+  const lev = up.match(/\b(\d{5})\s+([A-ZÅÄÖ][a-zåäöé0-9]+\s*-\s*[A-ZÅÄÖ][a-zåäöé]+(?:\s+[A-ZÅÄÖ][a-zåäöé]+)?)/);
+  const tur = (up.match(/\b\d{3}_\d{2}_[A-Z0-9]{2}\b/) || [''])[0];
+  const dates = [...up.matchAll(/\b(\d\d)-(\d\d)-(\d\d)\b/g)].map(m => `20${m[1]}-${m[2]}-${m[3]}`).filter(d => /^20\d\d-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(d)).sort();
+  const date = dates.length ? dates[dates.length - 1] : null; // Avs.datum (utskriften är tidigare)
+  // Kunden: namn som slutar på AB/HB/KB/Aktiebolag (versaler).
+  const nm = up.match(/\b([A-ZÅÄÖ](?:[A-ZÅÄÖ0-9&.\-]|\s(?=[A-ZÅÄÖ0-9&]))*?\s(?:AB|HB|KB|AKTIEBOLAG))\b/);
+  // Adress: gata med vägord + nummer, sen postnr + ort (sista förekomsten före kollilistan).
+  const head = up.split(/kol+[il]nummer|kollityp/i)[0] || up;
+  const stM = [...head.matchAll(new RegExp('([A-ZÅÄÖ][A-ZÅÄÖa-zåäöé\\-]*' + STREETW + ')\\s+(\\d{1,4}\\s?[A-Z]?)\\b', 'gi'))].pop();
+  const zipM = [...head.matchAll(/\b(1\d{2}|[2-9]\d{2})\s?(\d{2})\s+([A-ZÅÄÖ][A-ZÅÄÖ\-]{2,})\b/g)].pop();
+  // Kontakt: förnamn + telefon ("Richard 072-092 59 65 08510 140 20", "Fredrik" på raden över "070-429 07 45")
+  const PH = /(?:\+46|\b0)[\d][\d\s\-]{6,13}\d/;
+  let contact = '', tels = [];
+  const pm = head.match(/(?:\+46|\b0)\d[\d \t\-]{6,30}\d/);
+  if (pm) {
+    tels = splitTels(pm[0]);
+    // Kontakten = sista förnamnet (Versal + gemener) före numret, inom raden eller raden över.
+    const back = head.slice(Math.max(0, pm.index - 70), pm.index);
+    const ws = [...back.matchAll(/\b([A-ZÅÄÖ][a-zåäöé]{2,})\b/g)].map(m => m[1]).filter(w => !/^(Leveransnummer|Kund|Dest|Tur|Sverige|Avs|Sida|Utskr|M[aå]ndag|Tisdag|Onsdag|Torsdag|Fredag|Norrt[aä]lje|[AÄ]lvsj[oö])$/i.test(w));
+    const tourW = (lev ? lev[2] : 'Älvsjö Måndag Norrtälje').toLowerCase().split(/[^a-zåäöé0-9]+/).filter(Boolean).map(w => w.slice(0, 4));
+    const ok = ws.filter(w => !tourW.includes(w.toLowerCase().slice(0, 4)));
+    if (ok.length) contact = ok[ok.length - 1];
+  }
+  const avis = (up.match(/avisering\s*:?\s*((?:\+46|0)[\d\s\-]{7,12}\d)/i) || [])[1];
+  const note = ((head.match(/\bK[ÖO]RES\b[^\n]*/i) || [])[0] || '').trim();
+  // Kollin: "311111109005533574 KLOVE nya lagret 30212995 300,00000". Kolumnerna kan komma som egna rader –
+  // allt på samma höjd som kollinumret (bilden kan luta lite) hör till raden. Bara tabellen överst (före "Antal kollin").
+  const kolli = [];
+  const antal = P.L.find(l => /antal kol|al kollin/.test(l.n));
+  const KN = /\b(3\d{5})\s?(\d{12})\b/;
+  for (const k of P.L) {
+    const km = k.t.match(KN); if (!km) continue;
+    if (antal && k.y > antal.y) continue;
+    const band = P.L.filter(l => l !== k && Math.abs(l.y - k.y) < Math.max(k.h, P.lh) * 0.9 && l.x > k.x && !KN.test(l.t)).sort((a2, b2) => a2.x - b2.x);
+    const row = [k.t.slice(k.t.indexOf(km[0]) + km[0].length), ...band.map(l => l.t)].join(' ');
+    const t = row.toUpperCase().match(new RegExp('\\b(' + KTYPES + ')\\b'));
+    const ord = (row.match(/\b(30\d{6})\b/) || [])[1] || '';
+    const kg = (row.match(/\b(\d{1,5}),(\d{3,5})\b/) || [])[0] || '';
+    const after = t ? row.slice(row.toUpperCase().indexOf(t[1]) + t[1].length) : '';
+    const mark = after.replace(/\b30\d{6}\b.*$/, '').replace(/\b\d{1,5},\d+\b.*$/, '').replace(/[^A-Za-zÅÄÖåäö0-9\- ]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(0, 3).join(' ');
+    kolli.push({no: km[1] + km[2], type: t ? t[1].replace('STALL', 'STÄLL') : '', mark, order: ord, kg: kg ? Number(kg.replace(',', '.')) : 0});
+  }
+  const orders = [...new Set([...kolli.map(k => k.order).filter(Boolean), ...[...up.matchAll(/\b(30\d{6})\b/g)].map(m => m[1])])];
+  const counts = {}; kolli.forEach(k => { const t = k.type || 'KOLLI'; counts[t] = (counts[t] || 0) + 1; });
+  // Artiklar: beskrivningsraderna (versaler, mått), inte emballage, kollinummer, adress eller anteckning.
+  const goods = [];
+  const artH = P.L.find(l => /^artikel|ordernummer/.test(l.n));
+  for (const l of P.L) {
+    if (artH && l.y < artH.y) continue;
+    const t = l.t.trim();
+    const letters = t.replace(/[^A-Za-zÅÄÖåäö]/g, ''), uppers = t.replace(/[^A-ZÅÄÖ]/g, '');
+    if (letters.length < 8 || uppers.length / letters.length < 0.8) continue;
+    if (/\d{9,}/.test(t) || /\b\d{3}\s?\d{2}\s+[A-ZÅÄÖ]{3,}/.test(t) || /^(KVM|KG|ST|MM)\b/i.test(t) || /K[OÖ]RES/i.test(t)) continue;
+    if (/\b(TURLEVERANS|LEVERANSNUMMER|KOLLINUMMER|ANTAL KOLLIN|SVERIGE|ORDERNUMMER|ARTIKEL|KVANTITET)\b/i.test(t)) continue;
+    if (/^(PALL KLOVE|EUR-?PALL|PALL\b)/i.test(t)) continue;
+    if ((t.match(/[A-Za-zÅÄÖåäö]{3,}/g) || []).length < 2) continue;
+    goods.push(titleCase(t).replace(/(\d+)x(\d+)/gi, '$1×$2').replace(/(\d)x(\d)/gi, '$1×$2').replace(/\bMm\b/g, 'mm'));
+  }
+  const drop = {
+    name: nm ? titleCase(nm[1].replace(/\s+/g, ' ')) : '',
+    adr: stM ? titleCase(stM[1]) + ' ' + stM[2].replace(/\s/g, '') : '',
+    zip: zipM ? `${zipM[1]} ${zipM[2]}` : '',
+    area: zipM ? titleCase(zipM[3]) : '',
+    tel: tels[0] || '', tel2: tels[1] || '', contact, code: '', note: [note ? titleCase(note).replace(/^Köres/i, 'Köres') : '', avis ? `Avisering ${avis.replace(/\s/g, '')}` : ''].filter(Boolean).join(' · '), sure: false,
+  };
+  drop.sure = !!(drop.name && drop.adr && drop.zip);
+  const cnt = Object.entries(counts).map(([t, n]) => `${n} ${titleCase(t).toLowerCase()}`);
+  return {kind: 'bevego-tur', title: 'Bevego turleveranslista', from: 'Bevego', ref: lev ? lev[1] : '', tour: lev ? `${lev[1]} ${lev[2]}`.trim() : '', tur, orderNo: orders.join(', '), orders, date,
+    pick: {...BEVEGO_ALVSJO}, drop, kolli, counts, goods: [...cnt, ...goods.slice(0, 8)], pal: kolli.filter(k => /KLOVE|PALL|ST[AÄ]LL/.test(k.type)).length, avis: avis ? avis.replace(/\s/g, '') : '', note: drop.note};
+}
+// "072-092 59 65 08510 140 20" → ["0720925965", "0851014020"]
+function splitTels(s) {
+  const out = []; let cur = '';
+  for (const tok of String(s || '').trim().split(/\s+/)) {
+    const t = tok.replace(/[^0-9+]/g, ''); if (!t) continue;
+    if (cur.length >= 8 && /^(0|\+)/.test(t)) { out.push(cur); cur = ''; }
+    cur += t;
+  }
+  if (cur) out.push(cur);
+  return out.filter(x => x.length >= 8 && x.length <= 12);
+}
 const emptyA = () => ({name: '', adr: '', zip: '', area: '', tel: '', contact: '', note: '', sure: false});
 function group(list) {
   const m = new Map(); for (const g of list) if (g) m.set(g, (m.get(g) || 0) + 1);
@@ -239,12 +335,14 @@ function parseSedel(ocr, name) {
   const all = P.L.map(l => l.n).join('\n') + '\n' + norm(name);
   const isInomec = /inomec|lyftuthyrning/.test(all);
   let r;
-  if (isInomec && (/collection|hamtsedel|hyrstoppsref|flotta|signatur for/.test(all))) r = inomecHamt(P, name);
+  if (/turleverans/.test(all)) r = bevegoTur(P);
+  else if (isInomec && (/collection|hamtsedel|hyrstoppsref|flotta|signatur for/.test(all))) r = inomecHamt(P, name);
   else if (isInomec && /foljesedel|leveransvillkor|handhavande|leveransadress/.test(all.replace(/ove[rt]/g, 'ever'))) r = inomecFolj(P);
   else if (/kontakt/.test(all) && /orderinfo|fordonstyp|projektnr|hamtning|leverans/.test(all)) r = opterShot(P);
   else r = {kind: 'okand', title: 'Okänd sedel', from: '', ref: '', orderNo: '', date: null, pick: emptyA(), drop: emptyA(), goods: [], note: ''};
   const cand = candidates(P);
   if (r.kind === 'okand') { if (cand[0]) r.pick = cand[0]; if (cand[1]) r.drop = cand[1]; }
+  if (r.kind === 'bevego-tur' && !r.drop.adr && cand[0]) r.drop = {...cand[0], name: r.drop.name || cand[0].name, tel: r.drop.tel, contact: r.drop.contact, note: r.drop.note};
   for (const k of ['pick', 'drop']) if (r[k] && r[k].zip) r[k].zip = fmtZip(r[k].zip);
   if (!r.tidspass) r.tidspass = tidspass([], P.L.map(l => l.t));
   r.candidates = cand;
@@ -252,4 +350,4 @@ function parseSedel(ocr, name) {
   return r;
 }
 
-module.exports = {parseSedel, INOMEC_DEPOT, _t: {norm, lev, isLabel, addressFrom}};
+module.exports = {parseSedel, INOMEC_DEPOT, BEVEGO_ALVSJO, splitTels, _t: {norm, lev, isLabel, addressFrom}};

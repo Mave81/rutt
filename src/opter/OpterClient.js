@@ -352,9 +352,12 @@ export default class OpterClient {
       try { await this._fullSync(); } catch (e) {}
     }
     const ok2 = !edit.statusId || this._statusOf(live.shiId) === edit.statusId || this._statusOf(live.shiId) === null;
-    this._log({kind: 'ändring', shiId: live.shiId, statusId: edit.statusId || 0, pod: this._podInfo(edit.pod), adds: nSa, damages: nSd, changes: (edit.changes || []).length, images: (edit.images || []).length,
+    // Ändringar (t.ex. Tid): syns värdet på ordern efter synken? Då är det registrerat i Opter, precis som när Opter Driver gör det.
+    const row = (this.lastDecoded && this.lastDecoded.rows || []).find(x => x.table === 'Shipment' && x.key.xxxId === live.shiId);
+    const chSeen = (edit.changes || []).length ? P.changesSeen(row ? row.columns : null, edit.changes) : null;
+    this._log({kind: 'ändring', shiId: live.shiId, statusId: edit.statusId || 0, pod: this._podInfo(edit.pod), adds: nSa, damages: nSd, changes: (edit.changes || []).length, changesSeen: chSeen, images: (edit.images || []).length,
       sent, imageDropped, err: err ? String(err.message || err) : null, to: this._statusOf(live.shiId), confirmed: (sent || confirmed) && ok2});
-    return {confirmed: (sent || confirmed) && ok2, sent, imageDropped, error: err ? String(err.message || err) : null, rutt: P.toRutt(this.lastDecoded)};
+    return {confirmed: (sent || confirmed) && ok2, sent, imageDropped, changesSeen: chSeen, error: err ? String(err.message || err) : null, rutt: P.toRutt(this.lastDecoded)};
   }
 
   // Kvittera en återkallad order – exakt som Opter: bara SAS_RevokedConfirmed = sant (fält 67), sen synk.

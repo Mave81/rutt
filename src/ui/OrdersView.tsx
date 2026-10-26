@@ -17,6 +17,7 @@ import {Sheet} from './parts';
 import {Bi, BiName} from './Bi';
 import Slider from './Slider';
 import ReorderSheet from './Reorder';
+import {isTimjobb} from '../tur';
 import {loadJSON, saveJSON} from '../store';
 
 type Row = {kind: 'pickup' | 'drop'; st: any; cid: string; plan: any; dropLater?: {eta: Date | null; area: string} | null};
@@ -189,7 +190,7 @@ function SmsSheet({to, onClose}: {to: {name: string; num: string; who: string} |
 type JRow = Row & {state: 'act' | 'wait'};
 type JPlace = {key: string; st: any; rows: JRow[]; eta: any; late: number};
 
-export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell, me = '', onAddNum}: {
+export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell, me = '', onAddNum, onScan}: {
   route: any; cargo: any; ost: Record<string, any>; allStops: any[];
   onLoaded: (st: any, more?: any[]) => void; onUnload: (st: any, more?: any[]) => void;
   onEdit: (cid: string, st: any) => void;
@@ -199,6 +200,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   onTell?: (id: string, text: string) => void;
   me?: string;
   onAddNum?: (cid: string, c: {label: string; num: string}) => void;
+  onScan?: () => void;
 }) {
   const [callStop, setCallStop] = useState<any>(null);
   const [sms, setSms] = useState<any>(null);
@@ -221,6 +223,8 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     const pendingPick = new Set(order.filter((s: any) => s.pickup).map((s: any) => String(s.pickup)));
     const out: JRow[] = [];
     order.forEach((s: any, i: number) => {
+      // Opter-ordern bakom en turlista ("Distribution") syns som sina stopp – Lastad på dem lastar även den.
+      if (s.pickup && s.kids && s.kids.length) return;
       if (s.pickup) out.push({kind: 'pickup', st: s, cid: s.pickup, plan: prow[i], state: 'act'});
       else if (s.drop) out.push({kind: 'drop', st: s, cid: s.drop, plan: prow[i], state: pendingPick.has(String(s.drop)) ? 'wait' : 'act'});
     });
@@ -371,19 +375,46 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     );
   };
 
-  // ---- Bladet för en order ----
+  // ---- Bladet för en order: hela körningen, båda ändarna, som i Opter (och lite till) ----
+  const legRow = (lbl: string, x: any, here: boolean, i: number, key?: string) => {
+    const t = x.tEarliest && x.tLatest ? `${whenText(x.tEarliest)} – ${whenText(x.tLatest)}` : whenText(x.tEarliest || x.tLatest);
+    const tel = (x.tel || [])[0];
+    const adr = [x.adr, [x.zip, x.area].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+    return (
+      <View key={key || lbl} style={[o.lg, i > 0 && o.kvLine]}>
+        <Text style={[o.lgK, {color: here ? (lbl.startsWith('H') ? C.accentInk : C.accent2) : C.faint}]}>{lbl}</Text>
+        <View style={{flex: 1, minWidth: 0}}>
+          <Text style={o.lgWho} numberOfLines={2}>{x.who || placeName(x)}</Text>
+          <Text style={[o.lgAdr, !x.adr && {color: C.bad}]} numberOfLines={2}>{adr || 'Adressen saknas i ordern'}</Text>
+          {t || x.contact || x.qtyTxt ? <Text style={o.lgMeta} numberOfLines={2}>{[x.qtyTxt, t, x.contact].filter(Boolean).join('  ·  ')}</Text> : null}
+          {x.orderNo && key ? <Text style={o.mono}>order {x.orderNo}</Text> : null}
+        </View>
+        {tel ? <Pressable hitSlop={6} style={o.lgTel} onPress={() => dial(tel.num)}><Bi n="telephone-fill" size={15} color={C.people} /></Pressable> : null}
+      </View>
+    );
+  };
   const rowSheet = () => {
     const r = openRow; if (!r) return null;
     const pick = r.kind === 'pickup', other = otherOf(r), st = r.st, q = qty(r), act = r.state === 'act';
     const notes = uniqNotes([st.adrMsg, st.info], goodsOf(r));
     const kv: [string, string, boolean?][] = [];
+    if (st.service) kv.push(['Tjänst', String(st.service)]);
+    if (st.customer && st.customer !== st.who) kv.push(['Kund', String(st.customer)]);
+    if (st.orderedBy) kv.push(['Beställare', String(st.orderedBy)]);
+    if (st.parentNo) kv.push(['Opter-order', String(st.parentNo), true]);
     if (st.freightBill && st.freightBill !== st.orderNo) kv.push(['Fraktsedel', String(st.freightBill), true]);
     if (st.orderNo) kv.push(['Order', String(st.orderNo), true]);
+    if (st.ref) kv.push(['Referens', String(st.ref)]);
     if (goodsOf(r)) kv.push(['Gods', goodsOf(r)]);
     if (q) kv.push([q.u === 'kli' ? 'Kolli' : 'Pall', String(q.n)]);
-    const t = st.tEarliest || st.tLatest;
-    if (t) kv.push([pick ? 'Hämtas' : 'Lämnas', st.tEarliest && st.tLatest ? `${whenText(st.tEarliest)} – ${whenText(st.tLatest)}` : whenText(t)]);
-    if (other) kv.push([pick ? 'Ska till' : 'Från', [placeName(other), other.adr, [other.zip, other.area].filter(Boolean).join(' ')].filter(Boolean).filter((x: any, i: number, a: any[]) => a.indexOf(x) === i).join(', ')]);
+    if (st.kg) kv.push(['Vikt', `${st.kg} kg`]);
+    if (st.km) kv.push(['Sträcka', `${st.km} km`]);
+    if (st.live && st.live.cur) kv.push(['Status i Opter', String(st.live.cur)]);
+    const pk = pick ? st : other, dr = pick ? other : st;
+    const kids: any[] = (pk && pk.kids) || [];
+    const noAdr = !kids.length && (!dr || !dr.adr);
+    const tim = isTimjobb(st) || isTimjobb(other);
+    const loadedAt = (ost[r.cid] || {}).loadedAt || (pk && pk.parent && (ost[pk.parent] || {}).loadedAt) || null;
     const close = () => setOpenRow(null);
     return (
       <Sheet open onClose={close} scroll>
@@ -392,6 +423,28 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         <Text style={o.rsAdr}>{[st.adr, [st.zip, st.area].filter(Boolean).join(' ')].filter(Boolean).join(', ')}</Text>
         {st.tidspass ? <View style={o.tpBox}><Bi n="alarm-fill" size={15} color="#000000" /><Text style={o.tpBoxT}>{st.tidspass.time ? `Tidspassning kl ${st.tidspass.time}` : 'Tidspassning – tiden står inte i ordern'}</Text></View> : null}
         {st.code ? <View style={o.codeRow}><Bi n="key-fill" size={15} color={C.accentInk} /><Text style={o.codeV}>{st.code}</Text><Text style={o.codeL}>PORTKOD</Text></View> : null}
+        {tim ? (
+          <View style={o.timBox}>
+            <Bi n="stopwatch-fill" size={15} color={C.accentInk} />
+            <Text style={o.timT}>Timjobb – {loadedAt ? `start ${hhmm(new Date(loadedAt))} (när du lastade)` : 'starttiden sätts när du lastar'}, sluttiden när du lossar. Tiden fylls i vid Lossad och skickas till Opter som Tid.</Text>
+          </View>
+        ) : null}
+        <Text style={[o.vb, {color: C.faint, marginTop: 14}]}>KÖRNINGEN</Text>
+        <View style={o.lgs}>
+          {pk ? legRow('HÄMTA', pk, pick, 0) : null}
+          {kids.length
+            ? kids.map((x, i) => legRow(`LÄMNA ${i + 1}/${kids.length}`, x, false, i + 1, 'k' + i))
+            : dr ? legRow('LÄMNA', dr, !pick, 1) : null}
+        </View>
+        {noAdr && onScan ? (
+          <Pressable style={o.scanRow} onPress={() => { close(); onScan(); }}>
+            <Bi n="upc-scan" size={16} color={C.accentInk} />
+            <View style={{flex: 1}}>
+              <Text style={o.scanT}>Läs in turleveranslistan</Text>
+              <Text style={o.scanS}>Opter säger inte vart godset ska. Fota pappren så blir varje kund ett stopp.</Text>
+            </View>
+          </Pressable>
+        ) : null}
         <View style={o.kv}>
           {kv.map(([a, b, mono], i) => (
             <View key={a} style={[o.kvRow, i > 0 && o.kvLine]}><Text style={o.kvK}>{a}</Text><Text style={[o.kvV, mono && o.mono, mono && {fontSize: 14, color: C.ink}]}>{b}</Text></View>
@@ -405,7 +458,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
           {pick ? <Pressable style={[o.bigBtn, {backgroundColor: C.panel2, flex: 1.25}]} onPress={() => { const rs = rows.filter(x => x.kind === 'pickup' && x.state === 'act' && samePlace(x.st, st)); close(); setShop(rs.length ? rs : [r]); }}><Text style={o.bigBtnT} numberOfLines={1}>Visa för butiken</Text></Pressable> : null}
           {act && canAct(r) ? <Pressable style={[o.bigBtn, {backgroundColor: pick ? C.accent : C.accent2}]} onPress={() => { close(); if (pick) onLoaded(st); else onUnload(st); }}><Text style={[o.bigBtnT, {color: pick ? '#000000' : '#FFFFFF'}]}>{pick ? 'Lastad' : 'Lossad'}</Text></Pressable> : null}
         </View>
-        <Pressable style={o.moreRow} onPress={() => { close(); onEdit(r.cid, st); }}>
+        <Pressable style={o.moreRow} onPress={() => { close(); onEdit(st.parent && st.own ? String(st.parent) : r.cid, st); }}>
           <Bi n="three-dots" size={16} color={C.dim} /><Text style={o.moreRowT}>Mer: status, tid, tillägg, bild, avvikelse, ändring</Text>
         </Pressable>
       </Sheet>
@@ -512,6 +565,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
       <View style={o.stat}><Text style={o.statN}>{cidsLeft.size}</Text><Text style={o.statL}>ORDER KVAR</Text></View>
       <View style={o.stat}><Text style={o.statN}>{leftQ.kli || leftQ.pal || 0}</Text><Text style={o.statL}>{leftQ.kli ? 'KOLLI KVAR' : 'PALL KVAR'}</Text></View>
       <View style={o.stat}><Text style={o.statN}>{places.length}</Text><Text style={o.statL}>STOPP KVAR</Text></View>
+      {onScan ? <Pressable style={o.stripBtn} hitSlop={6} onPress={onScan}><Bi n="upc-scan" size={15} color={C.ink} /><Text style={o.stripBtnT}>Skanna</Text></Pressable> : null}
       {onReorder && places.length > 1 ? <Pressable style={o.stripBtn} hitSlop={6} onPress={() => setReorder(true)}><Bi n="list-ul" size={16} color={C.ink} /><Text style={o.stripBtnT}>Ordning</Text></Pressable> : null}
     </View>
   );
@@ -556,6 +610,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
             <Bi n="check2-all" size={40} color={C.accent2} />
             <Text style={o.allDoneBig}>Allt klart</Text>
             <Text style={o.allDone}>Det du gjort finns under Klart – där kan du ändra i efterhand.</Text>
+            {onScan ? <Pressable style={[o.stripBtn, {marginTop: 14, height: 44, paddingHorizontal: 16}]} onPress={onScan}><Bi n="upc-scan" size={16} color={C.ink} /><Text style={o.stripBtnT}>Skanna sedel eller turlista</Text></Pressable> : null}
           </View>
         )}
         {laterOrders.length ? (
@@ -681,6 +736,18 @@ const o = themed(() => StyleSheet.create({
   codeV: {color: C.ink, fontFamily: FONT.mono, fontSize: 22, fontWeight: '600', letterSpacing: 2},
   codeL: {color: C.faint, fontFamily: FONT.cond, fontSize: 11.5, fontWeight: '700', letterSpacing: 1},
   kv: {marginTop: 10},
+  lgs: {marginTop: 4, backgroundColor: C.panel2, borderRadius: R, paddingHorizontal: 10},
+  lg: {flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 9},
+  lgK: {fontFamily: FONT.cond, fontSize: 12.5, fontWeight: '700', letterSpacing: 0.8, width: 70, marginTop: 3},
+  lgWho: {color: C.ink, fontFamily: FONT.cond, fontSize: 17, fontWeight: '700', lineHeight: 20},
+  lgAdr: {color: C.dim, fontSize: 13.5, marginTop: 1},
+  lgMeta: {color: C.faint, fontSize: 12.5, marginTop: 2},
+  lgTel: {width: 36, height: 36, borderRadius: R, backgroundColor: C.peopleSoft, alignItems: 'center', justifyContent: 'center'},
+  timBox: {flexDirection: 'row', gap: 8, backgroundColor: C.accentSoft, borderRadius: R, paddingHorizontal: 10, paddingVertical: 9, marginTop: 10},
+  timT: {color: C.ink, fontSize: 13.5, lineHeight: 19, flex: 1},
+  scanRow: {flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: C.accent, borderRadius: R, paddingHorizontal: 12, paddingVertical: 10, marginTop: 8},
+  scanT: {color: C.accentInk, fontFamily: FONT.cond, fontSize: 16.5, fontWeight: '700'},
+  scanS: {color: C.dim, fontSize: 12.5, marginTop: 1},
   kvRow: {flexDirection: 'row', justifyContent: 'space-between', gap: 14, paddingVertical: 9},
   kvLine: {borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.edge},
   kvK: {color: C.dim, fontSize: 14, minWidth: 82},

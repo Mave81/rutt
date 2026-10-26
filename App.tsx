@@ -29,6 +29,10 @@ import * as SND from './src/sounds';
 import RevokedView, {RevokedBar, RevEntry, REVOKED_KEY} from './src/ui/RevokedView';
 import ChatView, {stripEmoji} from './src/ui/ChatView';
 import SoundSettings from './src/ui/SoundSettings';
+import TurScan, {TurParent} from './src/ui/TurScan';
+import {turToEgen, turParents, isTimjobb, countsText} from './src/tur';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const {BEVEGO_ALVSJO} = require('./src/sedel');
 const TRAVEL = require('./src/opter/travel');
 import {baseDriveMin, SERVICE_MIN, PAL_MIN} from './src/opter/optimizer';
 import {Buffer} from 'buffer';
@@ -48,7 +52,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '23 okt · 3.44 · nummer delas, Ska till vid hämtning';
+const BUILD = '26 okt · 3.45 · Skanna turlista, hela körningen, timjobb';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -178,6 +182,8 @@ function AppInner(): React.JSX.Element {
   const markEgen = (ids: string[], patch: Partial<Egen>) => { const set = new Set(ids.filter(isEgen)); if (set.size) saveEgna(l => l.map(e => (set.has(e.id) ? {...e, ...patch} : e))); };
   const saveEgna = (f: (l: Egen[]) => Egen[]) => setEgna(l => { const n = f(l); if (egnaLoaded.current) saveJSON(EGNA_KEY, n); return n; });
   const [sedelFor, setSedelFor] = useState<{media?: any; job?: Egen} | null>(null);
+  const [scan, setScan] = useState<'camera' | 'gallery' | null | false>(false); // Skanna: false = stängd, null = välj Kamera/Bilder
+  const [scanPages, setScanPages] = useState<{uri: string; name?: string}[] | null>(null); // delad turlista → rakt in
   const [smsOpter, setSmsOpter] = useState(false); // Lastat/Lossat-SMS även för Opter-order (Inställningar)
   useEffect(() => { loadJSON('rutt.smsopter.v1', false).then((v: any) => setSmsOpter(!!v)); }, []);
   const [klartView, setKlartView] = useState<'idag' | 'dagbok' | 'aterkallade'>('idag');
@@ -338,8 +344,22 @@ function AppInner(): React.JSX.Element {
       return {...src0, stops: src0.stops.map((x: any) => { const l = jobNums[String(x.pickup || x.drop)]; if (!l || !l.length) return x; const have = new Set((x.tel || []).map((t: any) => String(t.num).replace(/\D/g, ''))); const add = l.filter(t => !have.has(String(t.num).replace(/\D/g, ''))).map(t => ({label: t.label, num: t.num, src: 'lagt på jobbet'})); return add.length ? {...x, tel: [...(x.tel || []), ...add]} : x; })};
     };
     if (!vis.length) return withNums(baseSrc);
-    const st = vis.flatMap(e => toStops(e)); const cg: any = {}; for (const e of vis) cg[e.id] = cargoOf(e);
-    return withNums(baseSrc ? {...baseSrc, stops: [...baseSrc.stops, ...st], cargo: {...baseSrc.cargo, ...cg}} : {stops: st, cargo: cg, perm: null, opts: null});
+    // Turlista: stoppen hör till en Opter-order (parent). Opter-orderns egen lämning ("Distribution", ingen adress)
+    // göms så länge något stopp är kvar – den lossas ihop med sista stoppet. Pallarna räknas på stoppen, inte två gånger.
+    const kidsBy: Record<string, Egen[]> = {};
+    for (const e of vis) if (e.parent && !e.doneAt) (kidsBy[e.parent] = kidsBy[e.parent] || []).push(e);
+    let base0 = baseSrc;
+    if (baseSrc && Object.keys(kidsBy).length) {
+      const cg0 = {...baseSrc.cargo};
+      for (const p of Object.keys(kidsBy)) if (cg0[p]) cg0[p] = {...cg0[p], pal: 0, kg: 0};
+      base0 = {...baseSrc, cargo: cg0, stops: baseSrc.stops.filter((x: any) => !(x.drop && kidsBy[String(x.drop)])).map((x: any) => {
+        const k = x.pickup && kidsBy[String(x.pickup)]; if (!k) return x;
+        return {...x, kids: k.map((e: Egen) => ({who: e.drop.name, adr: e.drop.adr, zip: e.drop.zip, area: e.drop.area, contact: e.drop.contact, tel: e.drop.tel ? [{label: e.drop.contact || e.drop.name, num: e.drop.tel}] : [], orderNo: e.orderNo, qtyTxt: e.goods[0] || ''}))};
+      })};
+    }
+    const pOf = (cid: string) => (baseSrc && baseSrc.stops.find((y: any) => String(y.pickup) === cid)) || null;
+    const st = vis.flatMap(e => toStops(e).map((x: any) => { if (!e.parent) return x; const pp = pOf(e.parent); return {...x, parentNo: pp ? pp.orderNo || e.parent : e.parent, timjobb: isTimjobb(pp)}; })); const cg: any = {}; for (const e of vis) cg[e.id] = cargoOf(e);
+    return withNums(base0 ? {...base0, stops: [...base0.stops, ...st], cargo: {...base0.cargo, ...cg}} : {stops: st, cargo: cg, perm: null, opts: null});
   }, [baseSrc, egna, jobNums]);
   // ---- Var hör varje order hemma? Opters regler (live.tab) + dina tryck i RUTT ----
   const cidsAll: string[] = useMemo(() => (fullSrc ? [...new Set(fullSrc.stops.map((s: any) => String(s.pickup || s.drop)))] as string[] : []), [fullSrc]);
@@ -669,8 +689,19 @@ function AppInner(): React.JSX.Element {
     return {cid, orderNo: s.orderNo || null, freightBill: s.freightBill || null, pickWho: pick ? pick.who : '', pickAdr: pick ? [pick.adr, pick.area].filter(Boolean).join(', ') : '',
       dropWho: drop ? drop.who : '', dropAdr: drop ? [drop.adr, drop.area].filter(Boolean).join(', ') : '', pal: Number(c.pal) || 0, kg: Number(c.kg) || 0};
   }
+  // Turlista: Opter-ordern och dess stopp lastas tillsammans (de ligger i samma bil från Bevego).
+  function family(list0: any[]): any[] {
+    if (!fullSrc) return list0;
+    const ids = new Set(list0.map(x => String(x.pickup)));
+    const fams = new Set<string>();
+    for (const x of list0) { const c = String(x.pickup); if (x.parent) fams.add(String(x.parent)); else if (egna.some(e => e.parent === c && !e.doneAt)) fams.add(c); }
+    if (!fams.size) return list0;
+    const extra = fullSrc.stops.filter((x: any) => x.pickup && !ids.has(String(x.pickup)) && !(ost[String(x.pickup)] || {}).loadedAt
+      && (fams.has(String(x.pickup)) || (x.parent && fams.has(String(x.parent)))));
+    return [...list0, ...extra];
+  }
   function onLoaded(st: any, more: any[] = []) {
-    const list = [st, ...more];
+    const list = family([st, ...more]);
     const prev: Record<string, any> = {};
     for (const x of list) prev[x.pickup] = ost[x.pickup];
     const at = Date.now();
@@ -723,7 +754,8 @@ function AppInner(): React.JSX.Element {
         const r = await client.editShipment(L, payload);
         setEditState(cid, id, r.confirmed ? 'ok' : 'unconfirmed');
         if (r.rutt && r.rutt.stops && r.rutt.stops.length) setOrders(r.rutt);
-        flash(r.confirmed ? `Klart i Opter · ${label}` : `Opter bekräftade inte · ${label}`, null);
+        const cs = r.changesSeen;
+        flash(!r.confirmed ? `Opter bekräftade inte · ${label}` : cs && cs.total && cs.seen < cs.total ? `Skickad – Opter visar inte ${cs.missing.join(', ')} än · ${label}` : cs && cs.total ? `Syns i Opter · ${label}` : `Klart i Opter · ${label}`, null);
       } catch (e) { setEditState(cid, id, 'failed'); flash(`Kunde inte nå Opter · ${label}`, null); }
     });
   }
@@ -748,6 +780,21 @@ function AppInner(): React.JSX.Element {
 
   // Lossad: kvittensen sparas, ordern flyttar till Klart, namnet minns till nästa gång.
   // Lossad – samma kvittens (signatur/namn/foto) gäller alla order som lossas på stället. Kollin räknas per order.
+  // Lossad: är det sista stoppet på en turlista följer Opter-orderns lämning med, så Opter får Lossad.
+  function openSign(st: any, more: any[] = []) {
+    const list = [st, ...more];
+    const ids = new Set(list.map(x => String(x.drop)));
+    const add: any[] = [];
+    const pars = [...new Set(list.map(x => x.parent).filter(Boolean).map(String))];
+    for (const p of pars) {
+      const left = egna.filter(e => e.parent === p && !e.doneAt && !ids.has(e.id));
+      if (left.length || (ost[p] || {}).doneAt) continue;
+      const pd = baseSrc && baseSrc.stops.find((x: any) => String(x.drop) === p);
+      if (pd && !ids.has(p)) add.push(pd);
+    }
+    const all = [...list, ...add];
+    setSignStop(all.length > 1 ? {...st, group: all} : st);
+  }
   async function onSigned(st0: any, pod0: any) {
     if (st0.ownSign) { setSignStop(null); ownSigned(st0.ownSign, pod0); return; }
     // Ny kvittens på en order som redan är lossad: bara kvittensen, statusen rörs inte (som Opter).
@@ -776,13 +823,14 @@ function AppInner(): React.JSX.Element {
       return n;
     });
     const doneT = Date.now();
+    const firstLive = list.find((x: any) => x.live && !x.own) || list[0]; // Tid och tillägg på första Opter-ordern
     for (const st of list) {
       const pod = many ? {...pod0, kolli: st.kolli != null ? st.kolli : null} : pod0;
       podMem.current[st.drop] = pod;
       sendUnload(st, pod);
       if (!demo) { const cid = String(st.drop); const d = dayOrderOf(cid); DB.logEvent({t: doneT, kind: 'unload', cid, who: st.who, lat: st.lat, lng: st.lng, pal: d.pal}); DB.saveOrder(DB.ymdOf(doneT), {...d, doneAt: doneT, podName: pod.name || '', kolli: pod.kolli != null ? pod.kolli : null}); }
       // Tid (timjobb) från kvittensen: skickas som Opters "Tid" (minuter) när Ångra gått ut, på första ordern.
-      if (pod0.timeMin && st === list[0] && st.live) {
+      if (pod0.timeMin && st === firstLive) {
         const tm = pod0.timeMin, key = st.drop + ':tid';
         if (addTimers.current[key]) clearTimeout(addTimers.current[key].t);
         const fireTid = () => { if (!addTimers.current[key] || addTimers.current[key].fire !== fireTid) return; clearTimeout(addTimers.current[key].t); delete addTimers.current[key]; sendEdit(st.drop, st, {changes: [{cet: 34, kind: 'dec', value: String(tm)}]}, `Tid ${tm >= 60 ? Math.floor(tm / 60) + ' h ' : ''}${tm % 60 ? (tm % 60) + ' min' : ''}`.trim()); };
@@ -791,7 +839,7 @@ function AppInner(): React.JSX.Element {
       // Tillägg valda i kvittensen skickas när Ångra gått ut (samma väntan som Lossad).
       const adds = (pod0.adds || []).filter((a: any) => a.satId);
       // Gäller hela stoppet → läggs på första ordern (en väntetid debiteras en gång), som när man gör det i Opter.
-      if (adds.length && st === list[0]) {
+      if (adds.length && st === firstLive) {
         const mine = adds;
         {
           if (addTimers.current[st.drop]) clearTimeout(addTimers.current[st.drop].t);
@@ -1176,6 +1224,18 @@ function AppInner(): React.JSX.Element {
     if (!e.signed || !e.signed.image || !SM || !SM.shareImage) return;
     SM.shareImage(e.signed.image, chefC ? chefC.num : '', statusSms(e, 'load', {me: driverName})).catch(() => flash('Kunde inte öppna Meddelanden', null));
   }
+  // ---- Skanna: turleveranslista → stopp kopplade till Opter-ordern ----
+  const turPar: TurParent[] = useMemo(() => (fullSrc ? turParents(fullSrc.stops.filter((x: any) => cls[String(x.pickup || x.drop)] === 'todo' || cls[String(x.pickup || x.drop)] === 'new')) : []), [fullSrc, cls]);
+  function addTur(stops: any[], par: TurParent | null) {
+    const day = DB.ymdOf();
+    const pp = par ? par.pick : null;
+    const pick = pp ? {name: pp.who || '', adr: pp.adr || '', zip: pp.zip || '', area: pp.area || '', tel: '', contact: pp.contact || '', sure: true, lat: pp.lat ?? null, lng: pp.lng ?? null} : {...BEVEGO_ALVSJO};
+    const loaded = par ? ((ost[par.cid] || {}).loadedAt || (serverLoaded(par.pick) ? Date.now() : null)) : null;
+    const list = stops.map((x, i) => ({...turToEgen(x, pick, par ? par.cid : null, day, i), loadedAt: loaded}));
+    saveEgna(l => [...l, ...list]);
+    setScan(false); setScanPages(null);
+    flash(`${list.length} stopp i planen${par ? ` · hör till ${par.orderNo}` : ''}`, () => { const ids = new Set(list.map(e => e.id)); saveEgna(l => l.filter(e => !ids.has(e.id))); });
+  }
   const openOwn = (cid: string) => { const e = egna.find(x => x.id === cid); if (e) setSedelFor({job: e}); };
 
   // Arbetstid → Opter (live). RST-typ + nytt visningsläge.
@@ -1245,12 +1305,16 @@ function AppInner(): React.JSX.Element {
     <SafeAreaView style={s.safe} edges={['top']} key={'root-' + mode}>
       <MediaViewer media={shared[0] || null} title={shared.length > 1 ? `Delat till RUTT · 1 av ${shared.length}` : 'Delat till RUTT'} onClose={() => setShared(x => x.slice(1))}
         action={shared[0] ? {label: 'Gör till jobb', icon: 'plus-circle-fill', onPress: () => { const m = shared[0]; setShared(x => x.slice(1)); setSedelFor({media: m}); }} : undefined} />
+      <TurScan open={scan !== false} start={scan || null} initial={scanPages} parents={turPar} onClose={() => { setScan(false); setScanPages(null); }}
+        onOther={(m: any) => { setScan(false); setScanPages(null); setSedelFor({media: m}); }}
+        onAdd={addTur} />
       <SedelSheet media={sedelFor && sedelFor.media} job={sedelFor && sedelFor.job} chefName={chefC ? chefC.name : ''} me={driverName}
         onClose={() => setSedelFor(null)}
         onSave={(e: Egen) => { saveEgna(l => (l.some(x => x.id === e.id) ? l.map(x => (x.id === e.id ? e : x)) : [...l, e])); setSedelFor(null); flash(sedelFor && sedelFor.job ? 'Sparat' : `Lagt i planen · ${e.pick.name || e.pick.adr} → ${e.drop.name || e.drop.adr}`, null); }}
         onRemove={(id: string) => { saveEgna(l => l.filter(x => x.id !== id)); setSedelFor(null); flash('Jobbet borttaget', null); }}
         onSign={(e: Egen) => { const [p] = toStops(e); setSedelFor(null); setSignStop({...p, drop: e.id, ownSign: e, who: e.pick.name, suggest: e.pick.contact ? [e.pick.contact] : []}); }}
-        onStatus={ownStatus} onShareSigned={shareSigned} />
+        onStatus={ownStatus} onShareSigned={shareSigned}
+        onTur={(pg: any[]) => { setSedelFor(null); setScanPages(pg); setScan(null); }} />
       <StatusBar barStyle={C.mode === 'light' ? 'dark-content' : 'light-content'} backgroundColor={C.bg} />
       <View style={s.head}>
         <View style={s.headTop}>
@@ -1405,7 +1469,7 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && (planDay === 'idag' || !later.length) && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={(st: any, more: any[] = []) => setSignStop(more.length ? {...st, group: [st, ...more]} : st)} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} me={driverName} onAddNum={addJobNum} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={openSign} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} me={driverName} onAddNum={addJobNum} onScan={() => { setScanPages(null); setScan(null); }} />
           )}
           {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} laterRoute={laterRoute} />}
           {tab === 'chat' && <JobbetView j={jobbet} onMakeJob={(m: any) => setSedelFor({media: m})} live={live} opterUnread={unread} opterLast={chatList[chatList.length - 1]} onOpenOpter={markOpterRead}
@@ -1530,8 +1594,9 @@ function AppInner(): React.JSX.Element {
           savedNames={names[companyKey(signStop.who)] || []}
           saved={ost[signStop.drop]}
           addOk={demo || !(orders.opts && orders.opts.perm && orders.opts.perm.addService === false)}
-          timeOk={!signStop.own && !signStop.ownSign && (demo || !!(orders.opts && orders.opts.perm && orders.opts.perm.changes !== false && (orders.opts.fields || []).some((f: any) => f.cetName === 'SHI_TimeMinutes')))}
-          start={(ost[signStop.drop] || {}).loadedAt || null}
+          timeOk={!signStop.ownSign && (signStop.group || [signStop]).some((x: any) => !x.own) && (demo || !!(orders.opts && orders.opts.perm && orders.opts.perm.changes !== false && (orders.opts.fields || []).some((f: any) => f.cetName === 'SHI_TimeMinutes')))}
+          start={(() => { const t = Math.min(...(signStop.group || [signStop]).map((x: any) => (ost[String(x.drop)] || {}).loadedAt || (x.parent && (ost[String(x.parent)] || {}).loadedAt) || Infinity)); return Number.isFinite(t) ? t : null; })()}
+          timjobb={(signStop.group || [signStop]).some((x: any) => isTimjobb(x))}
           delay={delayFor(signStop)}
           onCancel={() => setSignStop(null)}
           onDone={(pod: any) => onSigned(signStop, pod)}

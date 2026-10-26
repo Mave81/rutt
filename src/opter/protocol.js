@@ -414,6 +414,21 @@ function encodeShipmentEdit({ live, statusId, pod, addServices, damages, changes
 }
 
 /* Vad kontoret låter dig göra i efterhand + valen (läst ur synken, som Opter Driver). */
+// Syns ändringen i Opter? Jämför orderns kolumner efter synk med det vi skickade (ändring = [{cet, kind, value}]).
+// Ger {total, seen, missing:[etikett]}. Kolumn saknas i svaret (ordern borta/klar) → räknas inte som sedd.
+function changesSeen(cols, changes) {
+  const out = {total: 0, seen: 0, missing: []};
+  for (const ch of changes || []) {
+    const f = CHANGE_FIELDS.find(x => CET[x[0]] === ch.cet);
+    if (!f) continue;
+    out.total++;
+    const v = cols ? cols[f[3]] : undefined;
+    const same = f[1] === 'str' ? String(v == null ? '' : v).trim() === String(ch.value == null ? '' : ch.value).trim()
+      : v != null && Math.abs(Number(String(v).replace(',', '.')) - Number(String(ch.value).replace(',', '.'))) < 0.01;
+    if (same) out.seen++; else out.missing.push(f[4]);
+  }
+  return out;
+}
 const CHANGE_FIELDS = [
   // [CET-namn, typ, standard när kontoret inte satt några SHI-behörigheter, fältnamn i ordern, svensk etikett]
   ['SHI_Packages', 'int', 'z', 'packages', 'Kolli'],
@@ -931,5 +946,5 @@ function toRutt(decoded) {
 module.exports = {
   MessageType, Table, DT, RST, F, frame, unframe, decodeSync, ticksToDate,
   logonPayload, parseLogon, resourceList, encodeStartWork, encodeWorkStatus, toRutt,
-  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, splitNums, avisering, tidspass, palFromText, team, encodeShipmentStatus, encodeShipmentEdit, encodeGiveAway, editOptions, isLateDelivery, delayNeeds, CET, CHANGE_FIELDS, signatureString, encodePosition, setting,
+  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, splitNums, avisering, tidspass, palFromText, team, encodeShipmentStatus, encodeShipmentEdit, encodeGiveAway, editOptions, isLateDelivery, delayNeeds, CET, CHANGE_FIELDS, changesSeen, signatureString, encodePosition, setting,
 };

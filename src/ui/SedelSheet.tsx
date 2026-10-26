@@ -59,7 +59,8 @@ function PlaceEdit({label, icon, tint, p, onChange, cands}: {label: string; icon
   );
 }
 
-export default function SedelSheet({media, job, chefName, me, onSave, onRemove, onClose, onSign, onStatus, onShareSigned}: {
+export default function SedelSheet({media, job, chefName, me, onSave, onRemove, onClose, onSign, onStatus, onShareSigned, onTur}: {
+  onTur?: (pages: {uri: string; name?: string}[]) => void;
   media?: Media | null; job?: Egen | null; chefName?: string; me?: string;
   onSave: (e: Egen) => void; onRemove?: (id: string) => void; onClose: () => void;
   onSign?: (e: Egen) => void; onStatus?: (e: Egen, what: 'way' | 'here' | 'late') => void; onShareSigned?: (e: Egen) => void;
@@ -88,6 +89,8 @@ export default function SedelSheet({media, job, chefName, me, onSave, onRemove, 
       catch (x: any) { if (alive) setErr('Kunde inte läsa sedeln (' + String((x && x.message) || x) + '). Fyll i själv.'); }
       if (!alive) return;
       const r = parseSedel(ocr || {lines: []}, media.name || '');
+      // Turleveranslista (Bevego) → flera stopp, inte ett jobb: vidare till Skanna med alla sidor.
+      if (r.kind === 'bevego-tur' && onTur) { const pg = media.kind === 'pdf' ? (media.pageUris || []) : [media.uri]; onTur(pg.map((u: string, i: number) => ({uri: u, name: `${media.name || 'sida'} ${i + 1}`}))); return; }
       const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
       // Datumet på sedeln om det är idag eller senare, annars idag.
       const d0 = r.date && r.date >= ymdOf(new Date()) && r.kind !== 'inomec-hamt' ? r.date : ymdOf(new Date());
