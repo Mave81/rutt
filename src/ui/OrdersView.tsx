@@ -384,7 +384,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     // Turlista: tiden går på Opter-ordern, vid sista stoppet (då följer den med i kvittensen).
     const fam = sts.every(x => x.own && x.parent) ? rows.filter(x => x.kind === 'drop' && x.st.parent && sts.some(y => y.parent === x.st.parent)).length : 0;
     const notLast = fam > sts.length;
-    const sub = on ? (t.start ? `start ${hhmm(new Date(t.start))} · ${notLast ? 'tiden fylls i vid sista stoppet' : 'slut när du lossar'}` : 'start sätts när du lastar') : t.auto ? 'ordern säger timjobb – du har valt Nej' : 'tiden skickas inte';
+    const sub = on ? (t.start ? `start ${hhmm(new Date(t.start))} · ${notLast ? 'tiden fylls i vid sista stoppet' : 'slut när du lossar'}` : 'start sätts när du lastar') : t.auto ? 'ordern nämner timmar – tryck Ja om jobbet är på timme' : 'nej – ingen tid skickas';
     return (
       <View style={[o.tim, big && o.timBig]}>
         <Bi n="stopwatch-fill" size={big ? 17 : 15} color={on ? C.accentInk : C.faint} />

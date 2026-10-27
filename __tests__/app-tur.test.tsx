@@ -103,8 +103,9 @@ test('turlista via Bilder → stopp kopplade till 234014, Lastad når Opter, sis
   const ov2 = r.root.findByType(OrdersView);
   const drops = ov2.props.route.order.filter((s: any) => s.drop && s.own);
   expect(drops.length).toBe(3);
-  // På timme: ordern säger "skriv timmar" → Ja från början. Du kan välja Nej innan Lossad – och Ja igen.
-  expect(ov2.props.timOf(drops[0]).on).toBe(true);
+  // På timme: aldrig av sig själv – "skriv timmar" i ordern ger bara en påminnelse. Du väljer Ja/Nej innan Lossad.
+  expect(ov2.props.timOf(drops[0])).toMatchObject({on: false, auto: true});
+  expect(texts(r)).toContain('ordern nämner timmar – tryck Ja om jobbet är på timme');
   expect(texts(r)).toContain('På timme');
   await ReactTestRenderer.act(async () => { ov2.props.onSetTim(drops, false); });
   await ReactTestRenderer.act(async () => { r.root.findByType(OrdersView).props.onUnload(drops[0], drops.slice(1)); });

@@ -172,3 +172,7 @@ Fält: 1 RES_Id, 2 VHC_Id, **3 SHI_Id (meddelandet kan höra till en order!)**, 
 - **Redan i Opter?** `matchOpter`: samma sändningsnr/fraktsedel/ordernr eller samma gata+nr (+postnr) → inget nytt stopp; sedeln sparas på ordern (rutt.sedelinfo.v1) och syns i ordern som FRAKTSEDEL (INLÄST) med alla kollin, och varning om sedelns adress skiljer sig från Opters.
 - Annars: eget stopp, godset räknas som redan lastat (du fotar när du lastar). Opter-order utan adress ("Distribution") kan väljas som tillhörande, som för Bevego.
 - Testat med två riktiga foton (Moby, NCC) lästa med tesseract + en ML Kit-lik version av Moby. Ej verifierat: ML Kit i telefonen på dessa sedlar och vridningen på riktig telefon.
+
+## 17. 3.48 (27 okt) – Kentas besked
+- **På timme är aldrig förvalt.** "skriv timmar" i ordern betyder inte att dagens jobb är på timme. RUTT visar bara "ordern nämner timmar – tryck Ja om jobbet är på timme". Tid skickas bara när Kenta valt Ja (eller lägger till tid själv i kvittensen).
+- **BDX behöver inte skannas**: när ordern säger Hämta på BDX har Opter-ordern det som behövs, BDX ger papperen. Skanna finns kvar för Bevego-turlistor och Inomec/Cramo; BDX-läsningen ligger kvar men behövs inte i vardagen.

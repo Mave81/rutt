@@ -52,7 +52,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '27 okt · 3.47 · BDX-fraktsedlar, bekräfta adressen';
+const BUILD = '27 okt · 3.48 · På timme bara när du väljer Ja';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -780,12 +780,13 @@ function AppInner(): React.JSX.Element {
 
   // Lossad: kvittensen sparas, ordern flyttar till Klart, namnet minns till nästa gång.
   // Lossad – samma kvittens (signatur/namn/foto) gäller alla order som lossas på stället. Kollin räknas per order.
-  // På timme? Ditt val (ost[cid].tim) går före det RUTT läser ur ordern ("skriv timmar"). Turlistans stopp följer Opter-ordern.
+  // På timme? Bara när du valt Ja (ost[cid].tim). Står det "skriv timmar" i ordern visas det som en påminnelse. Turlistans stopp följer Opter-ordern.
   const timCid = (st: any) => String(st && st.own && st.parent ? st.parent : (st && (st.drop || st.pickup)) || '');
   const timOf = (st: any) => {
     const cid = timCid(st), o = ost[cid] || {};
     const auto = isTimjobb(st) || !!(st && st.timjobb);
-    return {on: o.tim != null ? !!o.tim : auto, auto, start: o.loadedAt || null};
+    // Aldrig på timme av sig själv (27 okt: "skriv timmar" i ordern betyder inte att dagens jobb är på timme). Du väljer Ja.
+    return {on: !!o.tim, auto, start: o.loadedAt || null};
   };
   function setTim(sts: any[], on: boolean) {
     const cids = [...new Set(sts.map(timCid).filter(Boolean))];
