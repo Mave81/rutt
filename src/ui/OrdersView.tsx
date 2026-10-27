@@ -189,7 +189,7 @@ function SmsSheet({to, onClose}: {to: {name: string; num: string; who: string} |
 type JRow = Row & {state: 'act' | 'wait'};
 type JPlace = {key: string; st: any; rows: JRow[]; eta: any; late: number};
 
-export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell, me = '', onAddNum, onScan, timOf, onSetTim}: {
+export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell, me = '', onAddNum, onScan, timOf, onSetTim, sedelOf}: {
   route: any; cargo: any; ost: Record<string, any>; allStops: any[];
   onLoaded: (st: any, more?: any[]) => void; onUnload: (st: any, more?: any[]) => void;
   onEdit: (cid: string, st: any) => void;
@@ -202,6 +202,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   onScan?: () => void;
   timOf?: (st: any) => {on: boolean; start: number | null; auto: boolean};
   onSetTim?: (sts: any[], on: boolean) => void;
+  sedelOf?: (cid: string) => any;
 }) {
   const [callStop, setCallStop] = useState<any>(null);
   const [sms, setSms] = useState<any>(null);
@@ -419,6 +420,35 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
       </View>
     );
   };
+  // Inläst fraktsedel (BDX) som hör till Opter-ordern – allt som stod på den, och varning om adressen skiljer sig.
+  const sedelBox = (r: JRow, st: any) => {
+    const f = sedelOf ? sedelOf(String(r.cid)) : null;
+    const own = st.own && (st.own.kind === 'bdx-frakt') ? st.own : null;
+    if (!f && !own) return null;
+    const d = f || {sendNo: own.ref, counts: null, kolli: own.kolli || [], total: null, kg: 0, orders: [], ref: '', sender: null, note: ''};
+    const counts = d.counts || (d.kolli || []).reduce((m: any, k: any) => { m[k.type] = (m[k.type] || 0) + 1; return m; }, {});
+    const ct = Object.entries(counts).map(([t, n]) => `${n} ${String(t).toLowerCase()}`).join(' + ');
+    const nk2 = (x: string) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+    const diff = f && f.adr && st.adr && !r.kind.startsWith('p') && nk2(f.adr) !== nk2(st.adr);
+    const rowsF: [string, string, boolean?][] = [];
+    if (d.sendNo) rowsF.push(['Sändningsnr', String(d.sendNo).replace(/^(\d{3})(\d{3})(\d{3})(\d)$/, '$1 $2 $3 $4'), true]);
+    if (ct) rowsF.push(['Kolli', ct + (d.total ? `  (${(d.kolli || []).length} av ${d.total})` : '')]);
+    if (d.kg) rowsF.push(['Vikt', `${d.kg} kg`]);
+    if (d.orders && d.orders.length) rowsF.push(['Ingående order', d.orders.join(', '), true]);
+    if (d.ref) rowsF.push(['Mott. ref', d.ref, true]);
+    if (d.sender && d.sender.name) rowsF.push(['Avsändare', [d.sender.name, d.sender.area].filter(Boolean).join(', ')]);
+    if (f && f.note) rowsF.push(['Info', f.note]);
+    return (
+      <View style={o.fullTxt}>
+        <Text style={o.fullK}>FRAKTSEDEL (INLÄST)</Text>
+        {diff ? <Text style={[o.fullV, {color: C.bad, fontWeight: '700'}]}>Sedeln säger {f.adr}{f.zip ? `, ${f.zip} ${f.area || ''}` : ''} – Opter säger {st.adr}. Kolla innan du kör.</Text> : null}
+        {rowsF.map(([a, b, mono]) => (
+          <View key={a} style={{flexDirection: 'row', gap: 10, marginTop: 3}}><Text style={[o.kvK, {fontSize: 13, minWidth: 104}]}>{a}</Text><Text style={[o.fullV, {flex: 1, fontSize: 14}, mono && o.mono, mono && {color: C.noteInk, fontSize: 13.5}]}>{b}</Text></View>
+        ))}
+        {(d.kolli || []).length ? <Text style={[o.mono, {marginTop: 6, lineHeight: 18}]} selectable>{(d.kolli || []).map((k: any) => `${k.no}  ${k.type}${k.kg ? '  ' + k.kg + ' kg' : ''}`).join('\n')}</Text> : null}
+      </View>
+    );
+  };
   const rowSheet = () => {
     const r = openRow; if (!r) return null;
     const pick = r.kind === 'pickup', other = otherOf(r), st = r.st, q = qty(r), act = r.state === 'act';
@@ -463,6 +493,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
             </View>
           </Pressable>
         ) : null}
+        {sedelBox(r, st)}
         {notes.length > 0 && (
           <View style={o.fullTxt}>
             <Text style={o.fullK}>TEXT I ORDERN</Text>

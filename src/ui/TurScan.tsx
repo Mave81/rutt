@@ -12,7 +12,8 @@ import {launchCamera, launchImageLibrary} from 'react-native-image-picker';
 import {C, themed, FONT, R, prettyPhone} from './theme';
 import {Bi} from './Bi';
 import {useKeyboardLift} from './parts';
-import {TurStop, mergeTur, countsText} from '../tur';
+import {TurStop, mergeTur, countsText, SCAN_KINDS, matchOpter, stopKey} from '../tur';
+import {readPage} from '../ocr';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const {parseSedel} = require('../sedel');
 
@@ -28,8 +29,9 @@ async function shoot(camera: boolean): Promise<{uri: string; name?: string}[]> {
   return (res.assets || []).filter((a: any) => a.uri).map((a: any) => ({uri: a.uri, name: a.fileName}));
 }
 
-export default function TurScan({open, start, initial, parents, onAdd, onOther, onClose}: {
+export default function TurScan({open, start, initial, parents, opterDrops = [], onAdd, onOther, onClose}: {
   open: boolean; start: 'camera' | 'gallery' | null; initial?: {uri: string; name?: string}[] | null; parents: TurParent[];
+  opterDrops?: any[];
   onAdd: (stops: TurStop[], parent: TurParent | null) => void;
   onOther: (media: {kind: 'image'; uri: string; name?: string}) => void;
   onClose: () => void;
@@ -40,7 +42,8 @@ export default function TurScan({open, start, initial, parents, onAdd, onOther, 
   const [stops, setStops] = useState<TurStop[]>([]);
   const [gone, setGone] = useState<Record<string, boolean>>({});
   const [edit, setEdit] = useState<Record<string, boolean>>({});
-  const [par, setPar] = useState<string | null>(null);
+  const [conf, setConf] = useState<Record<string, boolean>>({});
+  const [par, setPar] = useState<string | null | undefined>(undefined);
 
   const read = async (shots: {uri: string; name?: string}[], first: boolean) => {
     if (!shots.length) return; // avbröt kameran/galleriet: valen ligger kvar
@@ -48,21 +51,27 @@ export default function TurScan({open, start, initial, parents, onAdd, onOther, 
     const kinds: string[] = [];
     for (const s of shots) {
       let r: any = null, msg = '';
-      try { if (!SMS || !SMS.ocr) throw new Error('läsaren saknas i den här versionen'); r = parseSedel(await SMS.ocr(s.uri), s.name || ''); }
+      try { const o = await readPage(s.uri); r = parseSedel(o, s.name || ''); r.pageUri = o.uri || s.uri; }
       catch (x: any) { msg = String((x && x.message) || x); }
-      // Första sidan är ingen turlista → det är en vanlig sedel: "Gör till jobb".
-      if (first && shots.length === 1 && r && r.kind !== 'bevego-tur') { setPages([]); onOther({kind: 'image', uri: s.uri, name: s.name}); return; }
+      // Första sidan är varken turlista eller fraktsedel → vanlig sedel: "Gör till jobb".
+      if (first && shots.length === 1 && r && !SCAN_KINDS.includes(r.kind)) { setPages([]); onOther({kind: 'image', uri: s.uri, name: s.name}); return; }
       kinds.push(r ? r.kind : 'err');
-      setPages(p => p.map(x => (x.uri === s.uri ? {...x, state: !r ? 'err' : r.kind === 'bevego-tur' ? 'ok' : 'other', r, msg} : x)));
+      setPages(p => p.map(x => (x.uri === s.uri ? {...x, state: !r ? 'err' : SCAN_KINDS.includes(r.kind) ? 'ok' : 'other', r, msg} : x)));
     }
-    // Flera bilder men ingen turlista bland dem → första sedeln blir ett vanligt jobb.
-    if (first && !kinds.includes('bevego-tur')) { const i = kinds.findIndex(k => k !== 'err'); if (i >= 0) { setPages([]); onOther({kind: 'image', uri: shots[i].uri, name: shots[i].name}); } }
+    // Flera bilder men ingen lista/fraktsedel bland dem → första sedeln blir ett vanligt jobb.
+    if (first && !kinds.some(k => SCAN_KINDS.includes(k))) { const i = kinds.findIndex(k => k !== 'err'); if (i >= 0) { setPages([]); onOther({kind: 'image', uri: shots[i].uri, name: shots[i].name}); } }
   };
   const more = async (camera: boolean, first = false) => read(await shoot(camera), first);
+  // Ta om bilden för ett stopp: dess sidor bort, ny bild läses in.
+  const retake = async (st: TurStop) => {
+    const sh = await shoot(true); if (!sh.length) return;
+    setPages(p => p.filter(x => !(x.r && pageKey(x.r) === st.key)));
+    setConf(c => ({...c, [st.key]: false})); setEdit(e => ({...e, [st.key]: false}));
+    read(sh, false);
+  };
 
   useEffect(() => {
-    if (!open) { setPages([]); setStops([]); setGone({}); setEdit({}); setPar(null); return; }
-    setPar(parents[0] ? parents[0].cid : null);
+    if (!open) { setPages([]); setStops([]); setGone({}); setEdit({}); setConf({}); setPar(undefined); return; }
     if (initial && initial.length) read(initial, true);
     else if (start) more(start === 'camera', true);
   }, [open]);
@@ -75,17 +84,27 @@ export default function TurScan({open, start, initial, parents, onAdd, onOther, 
   if (!open) return null;
   const busy = pages.some(p => p.state === 'busy');
   const keep = stops.filter(s => !gone[s.key]);
-  const parent = parents.find(p => p.cid === par) || null;
+  const kind = (keep[0] && keep[0].kind) || 'bevego-tur';
+  const bdx = kind === 'bdx-frakt';
+  // Opter-ordrar utan adress ("Distribution") som papperen kan höra till – bäst träff först för den här sortens papper.
+  const word = bdx ? /\bbdx\b/i : /bevego/i;
+  const pars = [...parents].filter(p => !p.drop || !p.drop.adr || /distribution/i.test(String(p.drop.who)) || word.test([p.pick.who, p.pick.customer, p.pick.service].join(' ')))
+    .sort((a, b) => Number(word.test([b.pick.who, b.pick.customer, b.pick.service].join(' '))) - Number(word.test([a.pick.who, a.pick.customer, a.pick.service].join(' '))));
+  const parSel = par === undefined ? (pars[0] && (word.test([pars[0].pick.who, pars[0].pick.customer, pars[0].pick.service].join(' '))) ? pars[0].cid : null) : par;
+  const parent = pars.find(p => p.cid === parSel) || null;
+  const matchOf = (s: TurStop) => (parent ? null : matchOpter(s, opterDrops));
   const upd = (key: string, k: keyof TurStop, v: string) => setStops(l => l.map(s => (s.key === key ? {...s, [k]: v, edited: true, sure: !!((k === 'adr' ? v : s.adr) && (k === 'zip' ? v : s.zip))} as any : s)));
   const tour = (stops[0] && stops[0].tour) || '';
   const nKolli = keep.reduce((n, s) => n + s.kolli.length, 0);
+  const nConf = keep.filter(s => conf[s.key]).length;
+  const allConf = keep.length > 0 && nConf === keep.length;
 
   return (
     <Modal visible animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <View style={[z.root, {paddingTop: ins.top + 4, paddingBottom: lift}]}>
         <View style={z.top}>
           <Pressable hitSlop={12} onPress={onClose}><Text style={z.cancel}>Avbryt</Text></Pressable>
-          <Text style={z.topT} numberOfLines={1}>{pages.some(p => p.state === 'ok') ? 'Turleveranslista' : 'Skanna'}</Text>
+          <Text style={z.topT} numberOfLines={1}>{!keep.length ? 'Skanna' : bdx ? (keep.length > 1 ? 'Fraktsedlar' : 'Fraktsedel') : 'Turleveranslista'}</Text>
           <View style={{width: 60}} />
         </View>
         <ScrollView style={{flex: 1}} contentContainerStyle={{padding: 12, paddingBottom: 24}} keyboardShouldPersistTaps="handled">
@@ -94,14 +113,14 @@ export default function TurScan({open, start, initial, parents, onAdd, onOther, 
               <Text style={z.lead}>Fota sedeln eller turlistan – eller välj bilder du redan tagit. Flera sidor går bra.</Text>
               <Pressable style={z.choice} onPress={() => more(true, true)}><Bi n="camera-fill" size={24} color="#000000" /><View style={{flex: 1}}><Text style={z.choiceT}>Kamera</Text><Text style={z.choiceS}>Fota en sida i taget</Text></View></Pressable>
               <Pressable style={[z.choice, {backgroundColor: C.panel}]} onPress={() => more(false, true)}><Bi n="images" size={24} color={C.ink} /><View style={{flex: 1}}><Text style={[z.choiceT, {color: C.ink}]}>Bilder</Text><Text style={[z.choiceS, {color: C.dim}]}>Välj en eller flera ur galleriet</Text></View></Pressable>
-              <Text style={z.hint}>Turleveranslista (Bevego) → varje kund blir ett stopp. Annan sedel (Inomec, Cramo, följesedel) → ett jobb. Allt läses i telefonen.</Text>
+              <Text style={z.hint}>Turleveranslista (Bevego) och BDX-fraktsedel → stopp, adressen bekräftar du. Annan sedel (Inomec, Cramo, följesedel) → ett jobb. Allt läses i telefonen.</Text>
             </View>
           ) : null}
           {/* Sidorna */}
           {pages.length ? <View style={z.pages}>
             {pages.map((p, i) => (
               <View key={p.uri} style={z.page}>
-                <Image source={{uri: p.uri}} style={z.thumb} resizeMode="cover" />
+                <Image source={{uri: (p.r && p.r.pageUri) || p.uri}} style={z.thumb} resizeMode="cover" />
                 <View style={[z.pState, p.state === 'ok' ? {backgroundColor: C.accent2} : p.state === 'busy' ? {backgroundColor: C.panel2} : {backgroundColor: C.bad}]}>
                   {p.state === 'busy' ? <ActivityIndicator size="small" color={C.ink} /> : <Bi n={p.state === 'ok' ? 'check2' : 'x-lg'} size={11} color="#FFFFFF" />}
                 </View>
@@ -112,17 +131,17 @@ export default function TurScan({open, start, initial, parents, onAdd, onOther, 
             <Pressable style={[z.page, z.addPage]} onPress={() => more(false)}><Bi n="images" size={20} color={C.ink} /><Text style={z.addPageT}>Bilder</Text></Pressable>
           </View> : null}
           {pages.some(p => p.state === 'other' || p.state === 'err') ? (
-            <Text style={z.warn}>{pages.filter(p => p.state === 'other' || p.state === 'err').length} sida gick inte att läsa som turlista – fota den rakt ovanifrån i bra ljus, eller hoppa över den.</Text>
+            <Text style={z.warn}>{pages.filter(p => p.state === 'other' || p.state === 'err').length} sida gick inte att läsa – fota den rakt ovanifrån i bra ljus, eller hoppa över den.</Text>
           ) : null}
           {busy ? <Text style={z.hint}>Läser… allt sker i telefonen.</Text> : null}
 
           {/* Kopplingen till Opter */}
-          {keep.length ? (
+          {keep.length && (pars.length || !bdx) ? (
             <View style={z.card}>
-              <Text style={z.k}>HÄMTAS PÅ OPTER-ORDERN</Text>
-              {parents.map(p => (
+              <Text style={z.k}>HÖR TILL OPTER-ORDERN</Text>
+              {pars.map(p => (
                 <Pressable key={p.cid} style={z.opt} onPress={() => setPar(p.cid)}>
-                  <View style={[z.radio, par === p.cid && z.radioOn]}>{par === p.cid ? <Bi n="check2" size={12} color="#000000" /> : null}</View>
+                  <View style={[z.radio, parSel === p.cid && z.radioOn]}>{parSel === p.cid ? <Bi n="check2" size={12} color="#000000" /> : null}</View>
                   <View style={{flex: 1, minWidth: 0}}>
                     <Text style={z.optT} numberOfLines={1}>{p.orderNo} · {p.pick.who}</Text>
                     <Text style={z.optS} numberOfLines={1}>{[p.pick.service, p.drop ? `lämna: ${p.drop.who || 'adress saknas'}` : ''].filter(Boolean).join(' · ')}</Text>
@@ -130,10 +149,10 @@ export default function TurScan({open, start, initial, parents, onAdd, onOther, 
                 </Pressable>
               ))}
               <Pressable style={z.opt} onPress={() => setPar(null)}>
-                <View style={[z.radio, par === null && z.radioOn]}>{par === null ? <Bi n="check2" size={12} color="#000000" /> : null}</View>
+                <View style={[z.radio, parSel === null && z.radioOn]}>{parSel === null ? <Bi n="check2" size={12} color="#000000" /> : null}</View>
                 <View style={{flex: 1, minWidth: 0}}>
                   <Text style={z.optT}>Ingen Opter-order</Text>
-                  <Text style={z.optS}>Stoppen blir egna jobb, hämtas på Bevego Älvsjö</Text>
+                  <Text style={z.optS}>{bdx ? 'Egna stopp – godset är redan i bilen' : 'Stoppen blir egna jobb, hämtas på Bevego Älvsjö'}</Text>
                 </View>
               </Pressable>
               {parent ? <Text style={z.hint}>Lastad på stoppen = Lastad på {parent.orderNo} i Opter. Lossad på sista stoppet = Lossad på {parent.orderNo}.</Text> : null}
@@ -143,18 +162,34 @@ export default function TurScan({open, start, initial, parents, onAdd, onOther, 
           {/* Stoppen */}
           {keep.length ? <Text style={z.sec}>{keep.length} STOPP{tour ? `  ·  TUR ${tour}` : ''}{nKolli ? `  ·  ${nKolli} KOLLI` : ''}</Text> : null}
           {keep.map((s, i) => {
-            const ed = edit[s.key] || !s.sure;
+            const ed = edit[s.key];
+            const ok = conf[s.key];
+            const m = matchOf(s);
+            const short = s.total && s.kolli.length < s.total;
+            const adrTxt = [s.adr, [s.zip, s.area].filter(Boolean).join(' ')].filter(Boolean).join(', ');
             return (
-              <View key={s.key} style={[z.card, !s.sure && z.cardWarn]}>
+              <View key={s.key} style={[z.card, !ok && !s.sure && z.cardWarn]}>
                 <View style={z.head}>
                   <Text style={z.ix}>{i + 1}</Text>
                   <View style={{flex: 1, minWidth: 0}}>
-                    <Text style={z.name} numberOfLines={2}>{s.name || 'Mottagare saknas'}</Text>
-                    {!ed ? <Text style={z.adr}>{[s.adr, [s.zip, s.area].filter(Boolean).join(' ')].filter(Boolean).join(', ')}</Text> : null}
+                    <Text style={z.name}>{s.name || 'Mottagare saknas'}</Text>
+                    {ok && !ed ? <View style={z.okRow}><Bi n="check-circle-fill" size={13} color={C.accent2} /><Text style={z.okT}>{adrTxt}</Text></View> : null}
                   </View>
-                  {!s.sure ? <View style={z.tag}><Text style={z.tagT}>KOLLA</Text></View> : null}
                   <Pressable hitSlop={10} onPress={() => setGone(g => ({...g, [s.key]: true}))}><Bi n="x-lg" size={15} color={C.faint} /></Pressable>
                 </View>
+                {/* Stämmer adressen? Ja / Ändra / Ta om bild */}
+                {!ok && !ed ? (
+                  <View style={[z.ask, !s.sure && {borderColor: C.bad}]}>
+                    <Text style={z.askK}>{s.sure ? 'STÄMMER ADRESSEN?' : 'ADRESSEN GICK INTE ATT LÄSA SÄKERT – KOLLA'}</Text>
+                    <Text style={[z.askAdr, !s.adr && {color: C.bad}]}>{s.adr || 'Gatuadress saknas'}</Text>
+                    <Text style={z.askZip}>{[s.zip, s.area].filter(Boolean).join(' ') || 'Postnr/ort saknas'}</Text>
+                    <View style={z.askBtns}>
+                      <Pressable disabled={!s.adr || !s.zip} style={[z.askB, {backgroundColor: C.accent2, flex: 1.2}, (!s.adr || !s.zip) && {opacity: 0.35}]} onPress={() => setConf(c => ({...c, [s.key]: true}))}><Text style={[z.askBT, {color: '#FFFFFF'}]}>Ja, stämmer</Text></Pressable>
+                      <Pressable style={z.askB} onPress={() => setEdit(x => ({...x, [s.key]: true}))}><Text style={z.askBT}>Ändra</Text></Pressable>
+                      <Pressable style={z.askB} onPress={() => retake(s)}><Text style={z.askBT}>Ta om bild</Text></Pressable>
+                    </View>
+                  </View>
+                ) : null}
                 {ed ? (
                   <View style={{gap: 6, marginTop: 8}}>
                     <TextInput style={z.in} value={s.name} onChangeText={v => upd(s.key, 'name', v)} placeholder="Företag" placeholderTextColor={C.faint} />
@@ -167,30 +202,42 @@ export default function TurScan({open, start, initial, parents, onAdd, onOther, 
                       <TextInput style={[z.in, {flex: 1}]} value={s.contact} onChangeText={v => upd(s.key, 'contact', v)} placeholder="Kontakt" placeholderTextColor={C.faint} />
                       <TextInput style={[z.in, {flex: 1}]} value={s.tel} onChangeText={v => upd(s.key, 'tel', v)} placeholder="Telefon" placeholderTextColor={C.faint} keyboardType="phone-pad" />
                     </View>
+                    <View style={z.askBtns}>
+                      <Pressable disabled={!s.adr || !s.zip} style={[z.askB, {backgroundColor: C.accent2, flex: 1.4}, (!s.adr || !s.zip) && {opacity: 0.35}]} onPress={() => { setEdit(x => ({...x, [s.key]: false})); setConf(c => ({...c, [s.key]: true})); }}><Text style={[z.askBT, {color: '#FFFFFF'}]}>Spara adressen</Text></Pressable>
+                      <Pressable style={z.askB} onPress={() => retake(s)}><Text style={z.askBT}>Ta om bild</Text></Pressable>
+                    </View>
                   </View>
                 ) : null}
+                {m ? <View style={z.match}><Bi n="link-45deg" size={15} color={C.accentInk} /><Text style={z.matchT}>Finns i Opter: order {m.orderNo} ({m.how}). Sedeln läggs på den ordern – inget nytt stopp.</Text></View> : null}
+                {s.sendNo ? <View style={z.kv}><Text style={z.kvK}>Sändning</Text><Text style={[z.kvV, z.mono]}>{fmtSend(s.sendNo)}</Text></View> : null}
                 <View style={z.kv}>
-                  <Text style={z.kvK}>Gods</Text><Text style={z.kvV}>{countsText(s.counts) || '—'}{s.pages > 1 ? `  ·  ${s.pages} sidor` : ''}</Text>
+                  <Text style={z.kvK}>Gods</Text><Text style={z.kvV}>{countsText(s.counts) || '—'}{s.total ? `  ·  ${s.kolli.length} av ${s.total} kolli` : ''}{s.kg ? `  ·  ${s.kg} kg` : ''}</Text>
                 </View>
+                {short ? <Text style={[z.warn, {paddingLeft: 28}]}>Bara {s.kolli.length} av {s.total} kolli gick att läsa – ta om bilden om du vill ha alla.</Text> : null}
                 {s.orders.length ? <View style={z.kv}><Text style={z.kvK}>Order</Text><Text style={[z.kvV, z.mono]}>{s.orders.join(', ')}</Text></View> : null}
+                {s.ref ? <View style={z.kv}><Text style={z.kvK}>Mott. ref</Text><Text style={[z.kvV, z.mono]}>{s.ref}</Text></View> : null}
                 {s.contact || s.tel ? <View style={z.kv}><Text style={z.kvK}>Kontakt</Text><Text style={z.kvV}>{[s.contact, [s.tel, s.tel2].filter(Boolean).map(prettyPhone).join(' / ')].filter(Boolean).join(' · ')}</Text></View> : null}
+                {s.sender && s.sender.name ? <View style={z.kv}><Text style={z.kvK}>Avsändare</Text><Text style={z.kvV}>{[s.sender.name, [s.sender.zip, s.sender.area].filter(Boolean).join(' '), s.sender.ref ? `ref ${s.sender.ref}` : ''].filter(Boolean).join(', ')}</Text></View> : null}
                 {s.note ? <View style={z.kv}><Text style={z.kvK}>Info</Text><Text style={z.kvV}>{s.note}</Text></View> : null}
-                {s.goods.length ? <View style={z.kv}><Text style={z.kvK}>Artiklar</Text><Text style={z.kvV} numberOfLines={3}>{s.goods.join(', ')}</Text></View> : null}
-                {!ed ? <Pressable hitSlop={6} onPress={() => setEdit(x => ({...x, [s.key]: true}))}><Text style={z.link}>Ändra</Text></Pressable> : null}
+                {s.goods.filter(g => !/^\d+ /.test(g)).length ? <View style={z.kv}><Text style={z.kvK}>Artiklar</Text><Text style={z.kvV} numberOfLines={3}>{s.goods.filter(g => !/^\d+ /.test(g)).join(', ')}</Text></View> : null}
+                {s.pageOf && s.pages < s.pageOf ? <Text style={[z.hint, {paddingLeft: 28}]}>{s.pages} av {s.pageOf} sidor lästa. Övriga sidor har mer information (Övrig information) – fota dem också så kommer allt med.</Text> : null}
+                {ok && !ed ? <Pressable hitSlop={6} onPress={() => { setConf(c => ({...c, [s.key]: false})); setEdit(x => ({...x, [s.key]: true})); }}><Text style={z.link}>Ändra</Text></Pressable> : null}
               </View>
             );
           })}
           {!busy && pages.length && !keep.length ? <Text style={z.hint}>Inga stopp lästa än.</Text> : null}
         </ScrollView>
         <View style={[z.foot, {paddingBottom: ins.bottom + 10}]}>
-          <Pressable disabled={busy || !keep.length} style={[z.go, (busy || !keep.length) && {opacity: 0.4}]} onPress={() => onAdd(keep, parent)}>
-            <Text style={z.goT}>{keep.length ? `Lägg i planen · ${keep.length} stopp` : 'Lägg i planen'}</Text>
+          <Pressable disabled={busy || !allConf} style={[z.go, (busy || !allConf) && {opacity: 0.4}]} onPress={() => onAdd(keep.map(s => ({...s, match: matchOf(s)})), parent)}>
+            <Text style={z.goT}>{!keep.length ? 'Lägg i planen' : allConf ? `Lägg i planen · ${keep.length} stopp` : `Bekräfta adresserna · ${nConf} av ${keep.length}`}</Text>
           </Pressable>
         </View>
       </View>
     </Modal>
   );
 }
+const fmtSend = (n: string) => String(n).replace(/^(\d{3})(\d{3})(\d{3})(\d)$/, '$1 $2 $3 $4');
+const pageKey = (r: any) => (r.sendNo ? 'S' + r.sendNo : stopKey(r.drop || {}));
 const pick = (o: any) => ({name: o.name, adr: o.adr, zip: o.zip, area: o.area, contact: o.contact, tel: o.tel, sure: o.sure, edited: true});
 
 const z = themed(() => StyleSheet.create({
@@ -231,6 +278,17 @@ const z = themed(() => StyleSheet.create({
   kvK: {color: C.faint, fontSize: 13, width: 64},
   kvV: {color: C.ink, fontSize: 13.5, flex: 1},
   mono: {fontFamily: FONT.mono, fontSize: 13},
+  okRow: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2},
+  okT: {color: C.dim, fontSize: 14, flex: 1},
+  ask: {marginTop: 10, borderWidth: 1, borderColor: C.edge, borderRadius: R, padding: 10},
+  askK: {color: C.faint, fontFamily: FONT.cond, fontSize: 12.5, fontWeight: '700', letterSpacing: 1},
+  askAdr: {color: C.ink, fontFamily: FONT.cond, fontSize: 21, fontWeight: '700', marginTop: 4},
+  askZip: {color: C.ink, fontSize: 15.5, marginTop: 1},
+  askBtns: {flexDirection: 'row', gap: 6, marginTop: 10},
+  askB: {flex: 1, height: 44, borderRadius: R, backgroundColor: C.panel2, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6},
+  askBT: {color: C.ink, fontFamily: FONT.cond, fontSize: 16, fontWeight: '700'},
+  match: {flexDirection: 'row', gap: 8, backgroundColor: C.accentSoft, borderRadius: R, padding: 9, marginTop: 8},
+  matchT: {color: C.ink, fontSize: 13, lineHeight: 18, flex: 1},
   link: {color: C.accentInk, fontFamily: FONT.cond, fontSize: 15, fontWeight: '700', marginTop: 8, paddingLeft: 28},
   foot: {paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.edge, backgroundColor: C.bg},
   go: {backgroundColor: C.accent, borderRadius: R, height: 52, alignItems: 'center', justifyContent: 'center'},

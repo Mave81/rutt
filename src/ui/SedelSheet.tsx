@@ -12,6 +12,7 @@ import {Bi} from './Bi';
 import {useKeyboardLift} from './parts';
 import MediaViewer, {Media} from './MediaViewer';
 import {Egen, Place, fromParsed, statusSms} from '../egna';
+import {readPage} from '../ocr';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const {parseSedel} = require('../sedel');
 
@@ -85,12 +86,12 @@ export default function SedelSheet({media, job, chefName, me, onSave, onRemove, 
     (async () => {
       const page = media.kind === 'pdf' ? (media.pageUris || [])[0] : media.uri;
       let ocr: any = null;
-      try { if (!page) throw new Error('ingen sida'); if (!SMS || !SMS.ocr) throw new Error('saknas i den här versionen'); ocr = await SMS.ocr(page); }
+      try { if (!page) throw new Error('ingen sida'); ocr = await readPage(page); }
       catch (x: any) { if (alive) setErr('Kunde inte läsa sedeln (' + String((x && x.message) || x) + '). Fyll i själv.'); }
       if (!alive) return;
       const r = parseSedel(ocr || {lines: []}, media.name || '');
       // Turleveranslista (Bevego) → flera stopp, inte ett jobb: vidare till Skanna med alla sidor.
-      if (r.kind === 'bevego-tur' && onTur) { const pg = media.kind === 'pdf' ? (media.pageUris || []) : [media.uri]; onTur(pg.map((u: string, i: number) => ({uri: u, name: `${media.name || 'sida'} ${i + 1}`}))); return; }
+      if ((r.kind === 'bevego-tur' || r.kind === 'bdx-frakt') && onTur) { const pg = media.kind === 'pdf' ? (media.pageUris || []) : [media.uri]; onTur(pg.map((u: string, i: number) => ({uri: u, name: `${media.name || 'sida'} ${i + 1}`}))); return; }
       const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
       // Datumet på sedeln om det är idag eller senare, annars idag.
       const d0 = r.date && r.date >= ymdOf(new Date()) && r.kind !== 'inomec-hamt' ? r.date : ymdOf(new Date());

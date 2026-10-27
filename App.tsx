@@ -52,7 +52,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '27 okt · 3.46 · tryck = hela ordern, På timme Ja/Nej före Lossad';
+const BUILD = '27 okt · 3.47 · BDX-fraktsedlar, bekräfta adressen';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -1237,16 +1237,33 @@ function AppInner(): React.JSX.Element {
     SM.shareImage(e.signed.image, chefC ? chefC.num : '', statusSms(e, 'load', {me: driverName})).catch(() => flash('Kunde inte öppna Meddelanden', null));
   }
   // ---- Skanna: turleveranslista → stopp kopplade till Opter-ordern ----
-  const turPar: TurParent[] = useMemo(() => (fullSrc ? turParents(fullSrc.stops.filter((x: any) => cls[String(x.pickup || x.drop)] === 'todo' || cls[String(x.pickup || x.drop)] === 'new')) : []), [fullSrc, cls]);
+  const openStops = useMemo(() => (fullSrc ? fullSrc.stops.filter((x: any) => cls[String(x.pickup || x.drop)] === 'todo' || cls[String(x.pickup || x.drop)] === 'new') : []), [fullSrc, cls]);
+  const turPar: TurParent[] = useMemo(() => {
+    const m = new Map<string, any>(); for (const k of ['bevego-tur', 'bdx-frakt']) for (const p of turParents(openStops, k)) if (!m.has(p.cid)) m.set(p.cid, p);
+    return [...m.values()];
+  }, [openStops]);
+  const opterDrops = useMemo(() => openStops.filter((x: any) => x.drop && !x.own), [openStops]);
+  // Inlästa fraktsedlar som hör till en Opter-order (samma sändningsnr/adress): kollin, vikt, avsändare … visas i ordern.
+  const [sedelInfo, setSedelInfo] = useState<Record<string, any>>({});
+  useEffect(() => { loadJSON('rutt.sedelinfo.v1', {}).then((v: any) => { const lim = Date.now() - 14 * 86400000; const n: any = {}; for (const k of Object.keys(v || {})) if (v[k] && v[k].at > lim) n[k] = v[k]; setSedelInfo(n); }); }, []);
   function addTur(stops: any[], par: TurParent | null) {
     const day = DB.ymdOf();
     const pp = par ? par.pick : null;
-    const pick = pp ? {name: pp.who || '', adr: pp.adr || '', zip: pp.zip || '', area: pp.area || '', tel: '', contact: pp.contact || '', sure: true, lat: pp.lat ?? null, lng: pp.lng ?? null} : {...BEVEGO_ALVSJO};
-    const loaded = par ? ((ost[par.cid] || {}).loadedAt || (serverLoaded(par.pick) ? Date.now() : null)) : null;
-    const list = stops.map((x, i) => ({...turToEgen(x, pick, par ? par.cid : null, day, i), loadedAt: loaded}));
-    saveEgna(l => [...l, ...list]);
+    const bdx = stops.some(x => x.kind === 'bdx-frakt');
+    const pick = pp ? {name: pp.who || '', adr: pp.adr || '', zip: pp.zip || '', area: pp.area || '', tel: '', contact: pp.contact || '', sure: true, lat: pp.lat ?? null, lng: pp.lng ?? null}
+      : bdx ? {name: 'BDX (lastat)', adr: '', zip: '', area: '', tel: '', contact: '', sure: true} : {...BEVEGO_ALVSJO};
+    // Utan Opter-order är BDX-godset redan i bilen (du fotar sedlarna när du lastar).
+    const loaded = par ? ((ost[par.cid] || {}).loadedAt || (serverLoaded(par.pick) ? Date.now() : null)) : bdx ? Date.now() : null;
+    const onOpter = stops.filter(x => x.match && !par), own = stops.filter(x => !(x.match && !par));
+    if (onOpter.length) {
+      setSedelInfo(m => { const n = {...m}; for (const x of onOpter) n[x.match.cid] = {at: Date.now(), sendNo: x.sendNo || '', name: x.name, adr: x.adr, zip: x.zip, area: x.area, contact: x.contact, tel: x.tel, ref: x.ref || '', orders: x.orders, counts: x.counts, kolli: x.kolli, total: x.total, kg: x.kg, sender: x.sender, note: x.note, how: x.match.how}; saveJSON('rutt.sedelinfo.v1', n); return n; });
+      for (const x of onOpter) if (x.tel) addJobNum(x.match.cid, {label: x.contact || x.name || 'Mottagare', num: String(x.tel)});
+    }
+    const list = own.map((x, i) => ({...turToEgen(x, pick, par ? par.cid : null, day, i), loadedAt: loaded}));
+    if (list.length) saveEgna(l => [...l, ...list]);
     setScan(false); setScanPages(null);
-    flash(`${list.length} stopp i planen${par ? ` · hör till ${par.orderNo}` : ''}`, () => { const ids = new Set(list.map(e => e.id)); saveEgna(l => l.filter(e => !ids.has(e.id))); });
+    flash([list.length ? `${list.length} stopp i planen${par ? ` · hör till ${par.orderNo}` : ''}` : '', onOpter.length ? `${onOpter.length} sedel lagd på Opter-order ${onOpter.map(x => x.match.orderNo).join(', ')}` : ''].filter(Boolean).join(' · '),
+      () => { const ids = new Set(list.map(e => e.id)); saveEgna(l => l.filter(e => !ids.has(e.id))); if (onOpter.length) setSedelInfo(m => { const n = {...m}; for (const x of onOpter) delete n[x.match.cid]; saveJSON('rutt.sedelinfo.v1', n); return n; }); });
   }
   const openOwn = (cid: string) => { const e = egna.find(x => x.id === cid); if (e) setSedelFor({job: e}); };
 
@@ -1317,7 +1334,7 @@ function AppInner(): React.JSX.Element {
     <SafeAreaView style={s.safe} edges={['top']} key={'root-' + mode}>
       <MediaViewer media={shared[0] || null} title={shared.length > 1 ? `Delat till RUTT · 1 av ${shared.length}` : 'Delat till RUTT'} onClose={() => setShared(x => x.slice(1))}
         action={shared[0] ? {label: 'Gör till jobb', icon: 'plus-circle-fill', onPress: () => { const m = shared[0]; setShared(x => x.slice(1)); setSedelFor({media: m}); }} : undefined} />
-      <TurScan open={scan !== false} start={scan || null} initial={scanPages} parents={turPar} onClose={() => { setScan(false); setScanPages(null); }}
+      <TurScan open={scan !== false} start={scan || null} initial={scanPages} parents={turPar} opterDrops={opterDrops} onClose={() => { setScan(false); setScanPages(null); }}
         onOther={(m: any) => { setScan(false); setScanPages(null); setSedelFor({media: m}); }}
         onAdd={addTur} />
       <SedelSheet media={sedelFor && sedelFor.media} job={sedelFor && sedelFor.job} chefName={chefC ? chefC.name : ''} me={driverName}
@@ -1481,7 +1498,7 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && (planDay === 'idag' || !later.length) && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={openSign} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} me={driverName} onAddNum={addJobNum} onScan={() => { setScanPages(null); setScan(null); }} timOf={timOf} onSetTim={setTim} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={openSign} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} me={driverName} onAddNum={addJobNum} onScan={() => { setScanPages(null); setScan(null); }} timOf={timOf} onSetTim={setTim} sedelOf={(cid: string) => sedelInfo[cid] || null} />
           )}
           {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} laterRoute={laterRoute} />}
           {tab === 'chat' && <JobbetView j={jobbet} onMakeJob={(m: any) => setSedelFor({media: m})} live={live} opterUnread={unread} opterLast={chatList[chatList.length - 1]} onOpenOpter={markOpterRead}

@@ -41,6 +41,11 @@ const press = async (r: any, label: RegExp) => {
   let n = tn; while (n && !(n.props && n.props.onPress)) n = n.parent;
   await ReactTestRenderer.act(async () => { await n.props.onPress(); });
 };
+const pressLast = async (r: any, label: RegExp) => {
+  const all = r.root.findAll((c: any) => c.type === Text && label.test([].concat(c.props.children).map((x: any) => (typeof x === 'string' || typeof x === 'number' ? x : '')).join('')));
+  let n = all[all.length - 1]; while (n && !(n.props && n.props.onPress)) n = n.parent;
+  await ReactTestRenderer.act(async () => { await n.props.onPress(); });
+};
 const tick = async (ms = 50) => { for (let i = 0; i < 6; i++) await ReactTestRenderer.act(async () => { await Promise.resolve(); jest.advanceTimersByTime(ms); }); };
 
 test('turlista via Bilder → stopp kopplade till 234014, Lastad når Opter, sista Lossad tar med Opter-ordern (timjobb)', async () => {
@@ -64,6 +69,15 @@ test('turlista via Bilder → stopp kopplade till 234014, Lastad når Opter, sis
   expect(t).toContain('3 STOPP');
   expect(t).toContain('2 pall + 1 kartong');
   expect(t).toMatch(/234014 · Bevego Älvsjö/);
+  // Stämmer adressen? Två lästes säkert → Ja. H Norr saknar gata (fotot) → Ändra, skriv in, spara.
+  expect(t).toContain('STÄMMER ADRESSEN?');
+  expect(t).toContain('Bekräfta adresserna · 0 av 3');
+  await press(r, /^Ja, stämmer$/);
+  await press(r, /^Ja, stämmer$/);
+  await pressLast(r, /^Ändra$/);
+  const adrIn = r.root.findAll((n: any) => n.props && n.props.placeholder === 'Gatuadress' && n.props.onChangeText)[0];
+  await ReactTestRenderer.act(async () => { adrIn.props.onChangeText('Sågvägen 24D'); });
+  await press(r, /^Spara adressen$/);
   await press(r, /^Lägg i planen · 3 stopp$/);
   await tick();
 

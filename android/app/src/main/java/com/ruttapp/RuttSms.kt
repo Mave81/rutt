@@ -208,9 +208,41 @@ class RuttSmsModule(private val rc: ReactApplicationContext) : ReactContextBaseJ
   fun ocr(uri: String, p: Promise) {
     try {
       val img = com.google.mlkit.vision.common.InputImage.fromFilePath(rc, Uri.parse(uri))
+      runOcr(img, null, p)
+    } catch (e: Throwable) { p.reject("ocr", e) }
+  }
+
+  /**
+   * Som ocr, men bilden vrids först (deg = 90/180/270, utöver kamerans EXIF) – för en sedel fotad på tvären.
+   * Den vridna bilden sparas och skickas med som "uri", så rutorna stämmer mot bilden som visas.
+   */
+  @ReactMethod
+  fun ocrRot(uri: String, deg: Int, p: Promise) {
+    Thread {
+      try {
+        val u = Uri.parse(uri); val cr = rc.contentResolver
+        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        cr.openInputStream(u).use { android.graphics.BitmapFactory.decodeStream(it, null, o) }
+        var sample = 1; while (maxOf(o.outWidth, o.outHeight) / sample > 3000) sample *= 2
+        val bmp = cr.openInputStream(u).use { android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) }
+          ?: throw Exception("kunde inte läsa bilden")
+        val ex = try { cr.openInputStream(u).use { android.media.ExifInterface(it!!).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1) } } catch (e: Throwable) { 1 }
+        val exDeg = when (ex) { 6 -> 90; 3 -> 180; 8 -> 270; else -> 0 }
+        val m = android.graphics.Matrix(); m.postRotate(((exDeg + deg) % 360).toFloat())
+        val rot = android.graphics.Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+        val f = File(rc.cacheDir, "ocr_" + System.currentTimeMillis() + "_" + deg + ".jpg")
+        java.io.FileOutputStream(f).use { rot.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
+        runOcr(com.google.mlkit.vision.common.InputImage.fromBitmap(rot, 0), Uri.fromFile(f).toString(), p)
+      } catch (e: Throwable) { p.reject("ocr", e) }
+    }.start()
+  }
+
+  private fun runOcr(img: com.google.mlkit.vision.common.InputImage, newUri: String?, p: Promise) {
+    try {
       val rec = com.google.mlkit.vision.text.TextRecognition.getClient(com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS)
       rec.process(img).addOnSuccessListener { t ->
         val out = Arguments.createMap(); out.putInt("w", img.width); out.putInt("h", img.height)
+        if (newUri != null) out.putString("uri", newUri)
         val lines = Arguments.createArray()
         t.textBlocks.forEachIndexed { bi, b ->
           for (l in b.lines) {

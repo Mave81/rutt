@@ -160,3 +160,15 @@ Fält: 1 RES_Id, 2 VHC_Id, **3 SHI_Id (meddelandet kan höra till en order!)**, 
 - Tryck på ett stopp (rubriken eller NÄSTA "visa ›") med EN order → hela ordern direkt. Flera order → stoppet, där varje order (Ska till / Lämna här) är tryckbar → hela ordern.
 - Ordern: KÖRNINGEN (hämta + lämna, oavkortat) → TEXT I ORDERN (hela Opter-texten, markerbar) → På timme → detaljer.
 - **På timme Ja/Nej** i ordern och ovanför Lossad-reglaget. Förval = RUTT:s läsning ("skriv timmar"), ditt val sparas i ost[cid].tim och går före. Ja → Tid öppen vid Lossad (start = Lastad, slut = nu). Turlista: valet ligger på Opter-ordern, tiden fylls i vid sista stoppet.
+
+## 16. Läget 3.47 (27 okt) – BDX-fraktsedlar
+- **BDX Företagen fraktsedel** ("Distribution BDX Företagen AB – Mottagarens exemplar", Sändningsnr 026 559 874 8, Sida 1 (1 av 5)). `bdxFrakt` i src/sedel.js läser BARA övre delen (Kvittensunderlag nedanför är en kopia):
+  - Mottagare (vänster kolumn): företag, gata + nr, extrarad = referens ("AO20127") + kontakt ("David Erixell") eller telefon ("+46722052120" → 0722052120) + kontakt; POSTNR/ORT; MOTT/REF, TELEFON, FRAKTBET.
+  - Avsändare (höger): namn, adress, postnr/ort, AVS.REF.
+  - Kollirader: SSCC (18 siffror, 3732…), kollislag CT=Kartong, EP=Europapall, OP=Engångspall, PK=Ospecificerat kolli, varuslag, vikt. Totalt antal kolli (kontroll "10 av 10"), total vikt, Ingående ordrar, Tillval/Anvisningar/Övrig information, EUR-pallar.
+  - Sidor med samma sändningsnr slås ihop. Sida 2–5 har Övrig information (format ej sett än).
+- **Bild på tvären**: `src/ocr.ts` readPage – läser, och om texten inte blir vanliga rader vrids bilden 90/270/180 (native `RuttSms.ocrRot`, sparar den vridna bilden).
+- **Bekräfta adressen** (alla skannade stopp): "Stämmer adressen?" Ja, stämmer / Ändra / Ta om bild. "Lägg i planen" först när alla är bekräftade.
+- **Redan i Opter?** `matchOpter`: samma sändningsnr/fraktsedel/ordernr eller samma gata+nr (+postnr) → inget nytt stopp; sedeln sparas på ordern (rutt.sedelinfo.v1) och syns i ordern som FRAKTSEDEL (INLÄST) med alla kollin, och varning om sedelns adress skiljer sig från Opters.
+- Annars: eget stopp, godset räknas som redan lastat (du fotar när du lastar). Opter-order utan adress ("Distribution") kan väljas som tillhörande, som för Bevego.
+- Testat med två riktiga foton (Moby, NCC) lästa med tesseract + en ML Kit-lik version av Moby. Ej verifierat: ML Kit i telefonen på dessa sedlar och vridningen på riktig telefon.

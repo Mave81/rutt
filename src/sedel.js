@@ -330,18 +330,144 @@ function candidates(P) {
   const seen = new Set(); return out.filter(a => { const k = norm(a.adr); if (seen.has(k)) return false; seen.add(k); return true; });
 }
 
+
+// ---- BDX Företagen fraktsedel ("Distribution BDX Företagen AB – Mottagarens exemplar") ----
+// Två kolumner: MOTTAGARE (vänster) och AVSÄNDARE (höger). Under: kollirader (SSCC 18 siffror, kollislag, varuslag, vikt),
+// Totalt antal kolli, total vikt, Övrig information och Ingående ordrar. Nedre halvan (Kvittensunderlag) är en kopia – den läses inte.
+const VARUSLAG = /(ospecificerat kolli|ospecificerat|europapall|eng\.?\s?pall|engångspall|halvpall|kvartspall|lådpall|burpall|pall|kartong|rulle|bunt|säck|fat|ställ|paket|kolli)/i;
+const KCODE = {CT: 'Kartong', EP: 'Europapall', OP: 'Engångspall', PK: 'Ospecificerat kolli', HP: 'Halvpall', QP: 'Kvartspall', PL: 'Pall', RL: 'Rulle', BD: 'Bunt'};
+const vName = v => { const t = String(v || '').toLowerCase(); return /ospec/.test(t) ? 'Ospecificerat kolli' : /europa/.test(t) ? 'Europapall' : /eng/.test(t) ? 'Engångspall' : titleCase(t); };
+const LABELS = /\b(MOTTAGARE|MOTTAGARE-|ADRESS|POSTNR\s*\/?\s*ORT|NR\/ORT|MOTT\s*\/?\s*REF|MOTT|TELEFON|FRAKTBET|AVS[AÄ]NDARE|AVS\.?\s*REF|KUNDNR)\b\s*[:;\-.]?/gi;
+function bdxFrakt(P) {
+  const W = P.W, L0 = P.L;
+  // Bara mottagarens exemplar: allt ovanför "Kvittensunderlag".
+  const sns = L0.filter(l => /s[aä]ndningsnr/i.test(l.t)).sort((a, b) => a.y - b.y);
+  const kv = L0.find(l => /kvittensunderlag/.test(l.n)) || (sns.length > 1 && sns[1].y - sns[0].y > (P.lh || 24) * 12 ? sns[1] : null);
+  const L = kv ? L0.filter(l => l.y < kv.y - kv.h * 0.3) : L0;
+  const has = re => L.find(l => re.test(l.t));
+  const mott = L.find(l => /MOTTAGARE/.test(l.t)) || L.find(l => /^ADRESS/.test(l.t));
+  // Kolumngränsen: där AVSÄNDARE börjar (uppskattat ur teckenpositionen när raden är ihopslagen).
+  const xOf = (l, i) => l.x + (l.w * i) / Math.max(1, l.t.length);
+  const av = L.find(l => /avs[aä]ndare/i.test(l.t));
+  const colX = av ? Math.min(W * 0.62, Math.max(W * 0.38, xOf(av, av.t.search(/avs[aä]ndare/i)) - 8)) : W * 0.5;
+  // Varje rad delas i vänster/höger del ord för ord.
+  const segs = [];
+  for (const l of L) {
+    const words = l.t.split(/(\s+)/); let i = 0; let left = '', right = '';
+    for (const w of words) { (xOf(l, i) < colX ? (left += w) : (right += w)); i += w.length; }
+    if (left.trim()) segs.push({...l, t: left.trim(), side: 'L'});
+    if (right.trim()) segs.push({...l, t: right.trim(), side: 'R', x: Math.max(l.x, colX)});
+  }
+  const lh = P.lh || 24;
+  const clean = t => String(t || '').replace(LABELS, ' ').replace(/^[\s:;,.\-|=“”"']+/, '').replace(/\s+/g, ' ').trim();
+  const letters = t => (String(t).match(/[A-Za-zÅÄÖåäöé]/g) || []).length;
+  // Postnr/ort-raden i vänster kolumn
+  const zipSegs = segs.filter(g => g.side === 'L' && (!mott || g.y > mott.y - lh) && /\b\d{3}\s?\d{2}\s+[A-ZÅÄÖa-zåäö]{3,}/.test(clean(g.t)));
+  const zg = zipSegs[0] || null;
+  const yP = zg ? zg.y : (segs.find(g => g.side === 'L' && /postnr|nr\/ort/i.test(g.t)) || {y: (mott ? mott.y : 0) + lh * 6}).y;
+  // Mottagarens rader: mellan MOTTAGARE och postnr/ort, vänster kolumn, utan etiketter. Rader på samma höjd slås ihop.
+  const top = mott ? mott.y - lh * 0.8 : 0;
+  let rl = segs.filter(g => g.side === 'L' && g.y >= top && g.y < yP - lh * 0.35).map(g => ({...g, t: clean(g.t)})).filter(g => letters(g.t) >= 3 || /\d{6,}/.test(g.t));
+  rl.sort((a, b) => a.y - b.y || a.x - b.x);
+  const rows = [];
+  for (const g of rl) { const r = rows.find(r => Math.abs(r.y - g.y) < Math.max(r.h, g.h) * 0.55); if (r) { r.parts.push(g); } else rows.push({y: g.y, h: g.h, parts: [g]}); }
+  let vals = rows.map(r => r.parts.sort((a, b) => a.x - b.x).map(p => p.t).join(' ').trim()).filter(Boolean);
+  const isStreet = v => new RegExp('^[A-Za-zÅÄÖåäöéÉ .\\-]{3,}\\s\\d{1,4}[A-Za-z]?\\b').test(v) && !/\bAB\b/.test(v);
+  // Raderna: företag (först), gata med nummer, och en extrarad med referens/telefon/kontakt.
+  let name = '', adr = '', extra = [];
+  const si = vals.findIndex((v, i) => i > 0 && isStreet(v));
+  if (si > 0) { name = vals.slice(0, si).join(' '); adr = vals[si].match(/^[A-Za-zÅÄÖåäöéÉ .\-]+\s\d{1,4}[A-Za-z]?/)[0]; extra = vals.slice(si + 1); }
+  else {
+    const isExtra = v => /(\+46|\b0)\s*\d[\d \-]{6,}/.test(v) || /\b[A-Z]{1,3}[0-9OQ]{4,8}\d\b/.test(v);
+    extra = vals.filter(isExtra); name = vals.filter(v => !isExtra(v)).join(' ');
+  }
+  // Extrarad: "AO20127, David Erixell" (referens + kontakt) eller "+46722052120 Kristoffer Jendré" (telefon + kontakt)
+  let tel = '', contact = '', ref = '';
+  for (const e of extra) {
+    let t = e;
+    const pm = t.match(/(\+46|0046|\b0)\s*\d[\d \-]{6,12}\d/); if (pm && !tel) { tel = prettyTel(pm[0]).replace(/^(\+46|0046)/, '0'); t = t.replace(pm[0], ' '); }
+    const rm = t.match(/\b([A-Z]{1,3}[0-9OQ]{4,8}\d)\b/); if (rm && !ref) { ref = rm[1]; t = t.replace(rm[0], ' '); }
+    const cm = t.replace(/[,;]/g, ' ').trim().match(/([A-ZÅÄÖ][a-zåäöéü]+(?:\s+[A-ZÅÄÖ][a-zåäöéü\-]+){1,2})/); if (cm && !contact) contact = cm[1];
+  }
+  let zip = '', area = '';
+  if (zg) { const m = clean(zg.t).match(/(\d{3})\s?(\d{2})\s+([A-ZÅÄÖa-zåäö][A-ZÅÄÖa-zåäö\- ]{2,})/); if (m) { zip = `${m[1]} ${m[2]}`; area = titleCase(m[3].replace(/\s+(POSTNR|AVS).*$/i, '').trim()); } }
+  // Fält i vänster kolumn: MOTT/REF, TELEFON, FRAKTBET (värdet efter etiketten på samma rad)
+  const after = (re, side) => { const g = segs.find(x => x.side === side && re.test(x.t)); if (!g) return ''; const v = g.t.replace(re, '').replace(/^[\s:;.\-]+/, '').trim(); return letters(v) + (v.match(/\d/g) || []).length >= 3 ? v : ''; };
+  const mottRef = after(/MOTT\s*\/?\s*REF\s*:?/i, 'L');
+  const telL = after(/TELEFON\s*:?/i, 'L'); if (!tel && /\d{7,}/.test(telL.replace(/\D/g, ''))) tel = prettyTel(telL);
+  const fraktbet = after(/FRAKTBET\s*:?/i, 'L');
+  // Avsändaren (höger kolumn)
+  const rseg = segs.filter(g => g.side === 'R' && (!mott || (g.y > mott.y - lh * 2 && g.y < yP + lh * 6)));
+  // Värdet till en etikett: resten av samma rad, annars det som står till höger på samma höjd.
+  const rowVal = (re, side) => {
+    const g = segs.find(x => x.side === side && re.test(x.t) && (!mott || x.y > mott.y - lh * 2)); if (!g) return '';
+    const own = clean(g.t.replace(re, ' ')); if (letters(own) >= 2 || /\d{3}/.test(own)) return own;
+    const nb = segs.filter(x => x !== g && x.side === side && x.x > g.x && Math.abs(x.y + x.h / 2 - (g.y + g.h / 2)) < Math.max(x.h, g.h) * 0.6).sort((a, b) => a.x - b.x);
+    return clean(nb.map(x => x.t).join(' '));
+  };
+  const fromName = rowVal(/AVS[AÄ]NDARE\s*[:;\-]?/i, 'R');
+  const fromAdr = rowVal(/^ADRESS\s*[:;\-]?/i, 'R');
+  const fz = rseg.map(g => clean(g.t).match(/(\d{3})\s?(\d{2})\s+([A-ZÅÄÖ][A-ZÅÄÖa-zåäö\- ]{2,})/)).find(Boolean);
+  const avsRef = (rowVal(/AVS\.?\s*REF\s*[:;\-]?/i, 'R').match(/(\d{5,})/) || [])[1] || '';
+  // Sändningsnr (10 siffror, ofta "026 559 874 8") – på raden eller strax intill
+  const digits10 = t => { const m = String(t).match(/\b(\d[\d ]{9,15}\d)\b/g) || []; const d = m.map(x => x.replace(/\s/g, '')).find(x => x.length === 10 || x.length === 11); return d || ''; };
+  const sl = L.find(l => /s[aä]ndningsnr/i.test(l.t));
+  let sendNo = sl ? digits10(sl.t.split(/s[aä]ndningsnr/i)[1] || '') : '';
+  if (!sendNo) { const near = L.filter(l => !mott || l.y < mott.y).map(l => digits10(l.t)).find(Boolean); sendNo = near || ''; }
+  const dm = L.concat(L0).map(l => l.t.match(/\b(20\d\d)-(\d\d)-(\d\d)\b/)).find(Boolean);
+  const pg = (L.map(l => l.t.match(/\(\s*(\d+)\s*av\s*(\d+)/i)).find(Boolean)) || null;
+  // Kollirader: SSCC + allt på samma höjd
+  const kolli = [];
+  for (const l of L) {
+    const m = l.t.match(/\b(3\d{15,19})\b/); if (!m) continue;
+    const cy = l.y + l.h / 2;
+    const same = L.filter(o => o !== l && Math.abs(o.y + o.h / 2 - cy) < Math.max(o.h, l.h) * 0.6 && !/\b3\d{15,19}\b/.test(o.t)).sort((a, b) => a.x - b.x);
+    const rest = [l.t.slice(m.index + m[0].length), ...same.map(o => o.t)].join(' ');
+    const vm = rest.match(VARUSLAG);
+    const cm2 = rest.replace(/É/g, 'E').match(/^\s*([A-Z])\s?([A-Z])\b/);
+    const code = cm2 ? cm2[1] + cm2[2] : '';
+    const type = KCODE[code] || (vm ? vName(vm[1]) : 'Kolli'); // koden (CT/EP/OP/PK) är säkrast
+    const nums = (vm ? rest.slice(rest.search(VARUSLAG) + vm[0].length) : rest).match(/\b\d{1,4}(?:[.,]\d+)?\b/g) || [];
+    kolli.push({no: m[1], code: KCODE[code] ? code : '', type, kg: nums.length ? Number(nums[0].replace(',', '.')) : 0});
+  }
+  const counts = {}; kolli.forEach(k => { counts[k.type] = (counts[k.type] || 0) + 1; });
+  const tl = L.find(l => /totalt antal kolli/i.test(l.t.replace(/;/g, ':')));
+  const total = tl ? Number((tl.t.match(/kolli\s*[:;]?\s*(\d+)/i) || [])[1]) || null : null;
+  const kgl = L.map(l => l.t.match(/vikt\s*\/?\s*volym\s*:?\s*([\d ]+)\s*kg/i) || l.t.match(/^\s*(\d[\d ]*)\s*kg\b/i)).find(Boolean);
+  const kg = kgl ? Number(kgl[1].replace(/\s/g, '')) : kolli.reduce((n, k) => n + (k.kg || 0), 0);
+  // Ingående ordrar (kan stå på egen rad när etiketten inte går att läsa)
+  const ol = L.find(l => /ing[aå]ende ordrar/i.test(l.t));
+  let orders = ol ? ((ol.t.split(/ordrar/i)[1] || '').match(/\d[\d ]{5,}\d/g) || []).map(x => x.replace(/\s/g, '')) : [];
+  if (!orders.length) { const oi = L.find(l => /ovrig informa/.test(l.n)); const cand = L.filter(l => (!oi || l.y > oi.y) && /^\s*\d{2}\s?\d{6}[.,]?\s*$/.test(l.t)); orders = cand.map(l => l.t.replace(/\D/g, '')); }
+  // Anvisningar / Tillval / Övrig information / EUR-pallar
+  const txtAfter = re => { const l = L.find(x => re.test(x.t)); if (!l) return ''; const v = l.t.split(re)[1] || ''; const t = v.replace(/^[\s:;.\-|)(i]+/, '').trim(); return letters(t) >= 3 ? t : ''; };
+  const anv = txtAfter(/anvisningar/i), till = txtAfter(/tillval/i);
+  const oi = L.find(l => /ovrig informa/.test(l.n) && !/visas/.test(l.n));
+  const ovr = oi ? L.filter(l => l.y > oi.y + oi.h * 0.5 && !/visas p|ing[aå]ende ordrar|kvittens|s[aä]ndningsnr|^\s*sid(a|or)\b|f[oö]ljande|pallregnr|eur-?pall/i.test(l.t) && !/^\s*\d[\d .,]*$/.test(l.t) && letters(l.t) >= 4).map(l => l.t) : [];
+  const eur = (txtAfter(/antal eur-?pallar/i).match(/\d+/) || [])[0] || '';
+  const note = [anv && `Anvisningar: ${anv}`, till && `Tillval: ${till}`, mottRef && `Mott/ref: ${mottRef}`, fraktbet && `Fraktbet: ${fraktbet}`, eur && `EUR-pallar: ${eur}`, ...ovr].filter(Boolean).join(' · ');
+  const sure = !!(name && adr && isStreet(adr) && zip && area);
+  return {kind: 'bdx-frakt', title: 'BDX fraktsedel', from: 'BDX', ref: sendNo, sendNo, orderNo: orders.join(', '), orders, date: dm ? `${dm[1]}-${dm[2]}-${dm[3]}` : null,
+    page: pg ? Number(pg[1]) : null, pages: pg ? Number(pg[2]) : null, cont: !mott,
+    pick: emptyA(), drop: {name, adr, zip, area, tel, tel2: '', contact, ref, code: '', note, sure},
+    sender: {name: fromName, adr: fromAdr, zip: fz ? `${fz[1]} ${fz[2]}` : '', area: fz ? titleCase(fz[3].trim()) : '', ref: avsRef},
+    kolli, counts, total, kg, pal: kolli.filter(k => /pall/i.test(k.type)).length,
+    goods: Object.entries(counts).map(([t, n]) => `${n} ${t.toLowerCase()}`), note};
+}
 function parseSedel(ocr, name) {
   const P = prep(ocr);
   const all = P.L.map(l => l.n).join('\n') + '\n' + norm(name);
   const isInomec = /inomec|lyftuthyrning/.test(all);
   let r;
   if (/turleverans/.test(all)) r = bevegoTur(P);
+  else if (((/\bbdx\b/.test(all) && /foretagen/.test(all)) || /ottagarens exemplar|kvittensunderlag/.test(all)) && /mottagare|sandningsnr|kolli-id/.test(all)) r = bdxFrakt(P);
   else if (isInomec && (/collection|hamtsedel|hyrstoppsref|flotta|signatur for/.test(all))) r = inomecHamt(P, name);
   else if (isInomec && /foljesedel|leveransvillkor|handhavande|leveransadress/.test(all.replace(/ove[rt]/g, 'ever'))) r = inomecFolj(P);
   else if (/kontakt/.test(all) && /orderinfo|fordonstyp|projektnr|hamtning|leverans/.test(all)) r = opterShot(P);
   else r = {kind: 'okand', title: 'Okänd sedel', from: '', ref: '', orderNo: '', date: null, pick: emptyA(), drop: emptyA(), goods: [], note: ''};
   const cand = candidates(P);
   if (r.kind === 'okand') { if (cand[0]) r.pick = cand[0]; if (cand[1]) r.drop = cand[1]; }
+  if (r.kind === 'bdx-frakt' && !r.drop.adr && !r.cont) { const c = cand.find(x => x.zip && (!r.drop.zip || x.zip.replace(/\D/g, '') === r.drop.zip.replace(/\D/g, ''))); if (c) r.drop = {...r.drop, adr: c.adr, zip: r.drop.zip || c.zip, area: r.drop.area || c.area, sure: false}; }
   if (r.kind === 'bevego-tur' && !r.drop.adr && cand[0]) r.drop = {...cand[0], name: r.drop.name || cand[0].name, tel: r.drop.tel, contact: r.drop.contact, note: r.drop.note};
   for (const k of ['pick', 'drop']) if (r[k] && r[k].zip) r[k].zip = fmtZip(r[k].zip);
   if (!r.tidspass) r.tidspass = tidspass([], P.L.map(l => l.t));
