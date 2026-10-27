@@ -17,7 +17,6 @@ import {Sheet} from './parts';
 import {Bi, BiName} from './Bi';
 import Slider from './Slider';
 import ReorderSheet from './Reorder';
-import {isTimjobb} from '../tur';
 import {loadJSON, saveJSON} from '../store';
 
 type Row = {kind: 'pickup' | 'drop'; st: any; cid: string; plan: any; dropLater?: {eta: Date | null; area: string} | null};
@@ -190,7 +189,7 @@ function SmsSheet({to, onClose}: {to: {name: string; num: string; who: string} |
 type JRow = Row & {state: 'act' | 'wait'};
 type JPlace = {key: string; st: any; rows: JRow[]; eta: any; late: number};
 
-export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell, me = '', onAddNum, onScan}: {
+export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell, me = '', onAddNum, onScan, timOf, onSetTim}: {
   route: any; cargo: any; ost: Record<string, any>; allStops: any[];
   onLoaded: (st: any, more?: any[]) => void; onUnload: (st: any, more?: any[]) => void;
   onEdit: (cid: string, st: any) => void;
@@ -201,6 +200,8 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   me?: string;
   onAddNum?: (cid: string, c: {label: string; num: string}) => void;
   onScan?: () => void;
+  timOf?: (st: any) => {on: boolean; start: number | null; auto: boolean};
+  onSetTim?: (sts: any[], on: boolean) => void;
 }) {
   const [callStop, setCallStop] = useState<any>(null);
   const [sms, setSms] = useState<any>(null);
@@ -356,7 +357,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     const selAble = selMode && pl.rows.some(canAct);
     return (
       <View key={pl.key} style={{marginTop: i === 0 ? 4 : 14}}>
-        <Pressable style={o.sh} onPress={() => (selMode ? togglePlace(pl) : setPlaceSheet({st, role: hasP && !hasD ? 'HÄMTA HÄR' : 'LÄMNA HÄR', rows: pl.rows, pl}))} onLongPress={() => { if (!selMode && multi && pl.rows.some(canAct)) { setSelMode(true); const n: Record<string, boolean> = {}; pl.rows.filter(canAct).forEach(r => { n[k(r)] = true; }); setSel(n); } }} delayLongPress={350} android_ripple={{color: C.edge}}>
+        <Pressable style={o.sh} onPress={() => (selMode ? togglePlace(pl) : openPlace(pl))} onLongPress={() => { if (!selMode && multi && pl.rows.some(canAct)) { setSelMode(true); const n: Record<string, boolean> = {}; pl.rows.filter(canAct).forEach(r => { n[k(r)] = true; }); setSel(n); } }} delayLongPress={350} android_ripple={{color: C.edge}}>
           <View style={[o.ix, isNext && o.ixNext]}><Text style={[o.ixT, isNext && {color: '#000000'}]}>{i + 1}</Text></View>
           <View style={{flex: 1, minWidth: 0}}>
             <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
@@ -375,6 +376,31 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     );
   };
 
+  // ---- På timme? Väljs innan Lossad. Ja → Tid öppnas vid Lossad med start (när du lastade) och slut (nu). ----
+  const timSeg = (sts: any[], big = false) => {
+    if (!timOf || !onSetTim || !sts.length) return null;
+    const t = timOf(sts[0]); const on = sts.some(x => timOf(x).on);
+    // Turlista: tiden går på Opter-ordern, vid sista stoppet (då följer den med i kvittensen).
+    const fam = sts.every(x => x.own && x.parent) ? rows.filter(x => x.kind === 'drop' && x.st.parent && sts.some(y => y.parent === x.st.parent)).length : 0;
+    const notLast = fam > sts.length;
+    const sub = on ? (t.start ? `start ${hhmm(new Date(t.start))} · ${notLast ? 'tiden fylls i vid sista stoppet' : 'slut när du lossar'}` : 'start sätts när du lastar') : t.auto ? 'ordern säger timjobb – du har valt Nej' : 'tiden skickas inte';
+    return (
+      <View style={[o.tim, big && o.timBig]}>
+        <Bi n="stopwatch-fill" size={big ? 17 : 15} color={on ? C.accentInk : C.faint} />
+        <View style={{flex: 1, minWidth: 0}}>
+          <Text style={o.timL}>På timme</Text>
+          <Text style={o.timS} numberOfLines={1}>{sub}</Text>
+        </View>
+        <View style={o.seg}>
+          {[false, true].map(v => (
+            <Pressable key={String(v)} hitSlop={4} style={[o.segB, on === v && (v ? o.segOnY : o.segOnN)]} onPress={() => onSetTim(sts, v)}>
+              <Text style={[o.segT, on === v && (v ? {color: '#000000'} : {color: C.ink})]}>{v ? 'Ja' : 'Nej'}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+    );
+  };
   // ---- Bladet för en order: hela körningen, båda ändarna, som i Opter (och lite till) ----
   const legRow = (lbl: string, x: any, here: boolean, i: number, key?: string) => {
     const t = x.tEarliest && x.tLatest ? `${whenText(x.tEarliest)} – ${whenText(x.tLatest)}` : whenText(x.tEarliest || x.tLatest);
@@ -384,9 +410,9 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
       <View key={key || lbl} style={[o.lg, i > 0 && o.kvLine]}>
         <Text style={[o.lgK, {color: here ? (lbl.startsWith('H') ? C.accentInk : C.accent2) : C.faint}]}>{lbl}</Text>
         <View style={{flex: 1, minWidth: 0}}>
-          <Text style={o.lgWho} numberOfLines={2}>{x.who || placeName(x)}</Text>
-          <Text style={[o.lgAdr, !x.adr && {color: C.bad}]} numberOfLines={2}>{adr || 'Adressen saknas i ordern'}</Text>
-          {t || x.contact || x.qtyTxt ? <Text style={o.lgMeta} numberOfLines={2}>{[x.qtyTxt, t, x.contact].filter(Boolean).join('  ·  ')}</Text> : null}
+          <Text style={o.lgWho}>{x.who || placeName(x)}</Text>
+          <Text style={[o.lgAdr, !x.adr && {color: C.bad}]}>{adr || 'Adressen saknas i ordern'}</Text>
+          {t || x.contact || x.qtyTxt ? <Text style={o.lgMeta}>{[x.qtyTxt, t, x.contact].filter(Boolean).join('  ·  ')}</Text> : null}
           {x.orderNo && key ? <Text style={o.mono}>order {x.orderNo}</Text> : null}
         </View>
         {tel ? <Pressable hitSlop={6} style={o.lgTel} onPress={() => dial(tel.num)}><Bi n="telephone-fill" size={15} color={C.people} /></Pressable> : null}
@@ -413,8 +439,6 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     const pk = pick ? st : other, dr = pick ? other : st;
     const kids: any[] = (pk && pk.kids) || [];
     const noAdr = !kids.length && (!dr || !dr.adr);
-    const tim = isTimjobb(st) || isTimjobb(other);
-    const loadedAt = (ost[r.cid] || {}).loadedAt || (pk && pk.parent && (ost[pk.parent] || {}).loadedAt) || null;
     const close = () => setOpenRow(null);
     return (
       <Sheet open onClose={close} scroll>
@@ -423,13 +447,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         <Text style={o.rsAdr}>{[st.adr, [st.zip, st.area].filter(Boolean).join(' ')].filter(Boolean).join(', ')}</Text>
         {st.tidspass ? <View style={o.tpBox}><Bi n="alarm-fill" size={15} color="#000000" /><Text style={o.tpBoxT}>{st.tidspass.time ? `Tidspassning kl ${st.tidspass.time}` : 'Tidspassning – tiden står inte i ordern'}</Text></View> : null}
         {st.code ? <View style={o.codeRow}><Bi n="key-fill" size={15} color={C.accentInk} /><Text style={o.codeV}>{st.code}</Text><Text style={o.codeL}>PORTKOD</Text></View> : null}
-        {tim ? (
-          <View style={o.timBox}>
-            <Bi n="stopwatch-fill" size={15} color={C.accentInk} />
-            <Text style={o.timT}>Timjobb – {loadedAt ? `start ${hhmm(new Date(loadedAt))} (när du lastade)` : 'starttiden sätts när du lastar'}, sluttiden när du lossar. Tiden fylls i vid Lossad och skickas till Opter som Tid.</Text>
-          </View>
-        ) : null}
-        <Text style={[o.vb, {color: C.faint, marginTop: 14}]}>KÖRNINGEN</Text>
+        <Text style={[o.vb, {color: C.faint, marginTop: 12}]}>KÖRNINGEN</Text>
         <View style={o.lgs}>
           {pk ? legRow('HÄMTA', pk, pick, 0) : null}
           {kids.length
@@ -445,12 +463,18 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
             </View>
           </Pressable>
         ) : null}
+        {notes.length > 0 && (
+          <View style={o.fullTxt}>
+            <Text style={o.fullK}>TEXT I ORDERN</Text>
+            <Text style={o.fullV} selectable>{notes.join('\n\n')}</Text>
+          </View>
+        )}
+        {!pick && act && (!st.own || st.parent) ? timSeg([st], true) : null}
         <View style={o.kv}>
           {kv.map(([a, b, mono], i) => (
             <View key={a} style={[o.kvRow, i > 0 && o.kvLine]}><Text style={o.kvK}>{a}</Text><Text style={[o.kvV, mono && o.mono, mono && {fontSize: 14, color: C.ink}]}>{b}</Text></View>
           ))}
         </View>
-        {notes.length > 0 && <View style={o.info}><Bi n="info-circle" size={15} color={C.dim} style={{marginTop: 1}} /><Text style={o.infoTxt}>{notes.join('\n\n')}</Text></View>}
         {peopleRows(st)}
         {onAddNum ? <Pressable hitSlop={6} style={o.addNum} onPress={() => setAddNum({cid: String(r.cid), label: '', num: ''})}><Bi n="plus-lg" size={13} color={C.accentInk} /><Text style={o.addNumT}>Lägg till nummer på jobbet</Text></Pressable> : null}
         <View style={o.rsBtns}>
@@ -500,6 +524,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     const notes = uniqNotes(ps.rows ? ps.rows.flatMap((r: Row) => [r.st.adrMsg, r.st.info]) : [st.adrMsg, st.info], '');
     const tel = st.tel || [], mob = tel.find((t: any) => isMobile(t.num));
     const picks = pl ? pl.rows.filter(r => r.kind === 'pickup' && r.state === 'act') : [];
+    const drops = pl ? pl.rows.filter(r => r.kind === 'drop' && r.state === 'act') : [];
     const close = () => setPlaceSheet(null);
     // Avisering: närmaste som inte är gjord.
     const av = pl ? pl.rows.filter(r => r.kind === 'drop').map(r => ({r, a: r.st.avise})).find(x => x.a && !(ost[x.r.cid] || {}).avisedAt) : null;
@@ -522,14 +547,32 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
           <View style={o.kv}>
             <Text style={[o.vb, {color: C.faint, marginBottom: 2}]}>SKA TILL</Text>
             {picks.map((r, i) => { const ot = otherOf(r), q = qty(r); return (
-              <View key={k(r)} style={[o.toRow, i > 0 && o.kvLine]}>
+              <Pressable key={k(r)} style={[o.toRow, i > 0 && o.kvLine]} onPress={() => { close(); setOpenRow(r); }} android_ripple={{color: C.edge}}>
                 <View style={{flex: 1, minWidth: 0}}>
                   <Text style={o.toName} numberOfLines={2}>{ot ? placeName(ot) : goodsOf(r) || '—'}</Text>
                   <Text style={o.toAdr} numberOfLines={2}>{ot ? [ot.adr, [ot.zip, ot.area].filter(Boolean).join(' ')].filter(Boolean).join(', ') || 'adressen saknas i ordern' : ''}</Text>
                   {r.st.orderNo ? <Text style={o.mono}>order {r.st.orderNo}{r.st.freightBill && r.st.freightBill !== r.st.orderNo ? `  ·  fraktsedel ${r.st.freightBill}` : ''}</Text> : null}
                 </View>
                 {q ? <View style={o.jq}><Text style={o.jqN}>{q.n}</Text><Text style={o.jqU}>{q.u.toUpperCase()}</Text></View> : null}
-              </View>
+                <Bi n="chevron-right" size={13} color={C.faint} />
+              </Pressable>
+            ); })}
+          </View>
+        ) : null}
+        {drops.length ? (
+          // Lämna här: varje order går att trycka på → hela ordern.
+          <View style={o.kv}>
+            <Text style={[o.vb, {color: C.faint, marginBottom: 2}]}>LÄMNA HÄR</Text>
+            {drops.map((r, i) => { const ot = otherOf(r), q = qty(r); return (
+              <Pressable key={k(r)} style={[o.toRow, i > 0 && o.kvLine]} onPress={() => { close(); setOpenRow(r); }} android_ripple={{color: C.edge}}>
+                <View style={{flex: 1, minWidth: 0}}>
+                  <Text style={o.toName} numberOfLines={2}>{r.st.who || goodsOf(r) || '—'}</Text>
+                  <Text style={o.toAdr} numberOfLines={2}>{[goodsOf(r), ot ? `från ${placeName(ot)}` : ''].filter(Boolean).join(' · ')}</Text>
+                  {r.st.orderNo ? <Text style={o.mono}>order {r.st.orderNo}</Text> : null}
+                </View>
+                {q ? <View style={o.jq}><Text style={o.jqN}>{q.n}</Text><Text style={o.jqU}>{q.u.toUpperCase()}</Text></View> : null}
+                <Bi n="chevron-right" size={13} color={C.faint} />
+              </Pressable>
             ); })}
           </View>
         ) : null}
@@ -577,6 +620,14 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     </View>
   );
   // ---- Nere: nästa stopp, eller knapparna när du markerat ----
+  // Tryck på ett stopp: en order → hela ordern direkt. Flera → stoppet, där varje order går att trycka på.
+  const openPlace = (pl: JPlace) => {
+    const act = pl.rows.filter(r => r.state === 'act');
+    const rs = act.length ? act : pl.rows;
+    if (rs.length === 1) { setOpenRow(rs[0]); return; }
+    const hasP = act.some(r => r.kind === 'pickup'), hasD = act.some(r => r.kind === 'drop');
+    setPlaceSheet({st: pl.st, role: hasP && !hasD ? 'HÄMTA HÄR' : 'LÄMNA HÄR', rows: pl.rows, pl});
+  };
   const nextDock = () => {
     const pl = nextPl; if (!pl) return null;
     const st = pl.st, tel = st.tel || [];
@@ -584,10 +635,13 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     return (
       <View style={[o.dock2, {paddingBottom: 10}]}>
         <View style={o.dockHead}>
-          <Text style={o.dockL} numberOfLines={1}>NÄSTA  <Text style={o.dockN}>{titleOf(pl)}</Text></Text>
+          <Pressable style={{flex: 1, minWidth: 0}} hitSlop={8} onPress={() => openPlace(pl)}>
+            <Text style={o.dockL} numberOfLines={1}>NÄSTA  <Text style={o.dockN}>{titleOf(pl)}</Text>  <Text style={o.dockMore}>visa ›</Text></Text>
+          </Pressable>
           <Pressable style={o.sqSm} onPress={() => navigate(st)} onLongPress={() => setNavFor(st)}><Bi n="cursor-fill" size={16} color="#000000" /></Pressable>
           <Pressable disabled={!tel.length} style={[o.sqSm, {backgroundColor: C.peopleSoft}, !tel.length && {opacity: 0.35}]} onPress={() => (tel.length === 1 ? dial(tel[0].num) : setCallStop(st))}><Bi n="telephone-fill" size={16} color={C.people} /></Pressable>
         </View>
+        {dr.length ? timSeg(dr.filter(r => !r.st.own || r.st.parent).map(r => r.st)) : null}
         {dr.length ? <Slider key={'d' + pl.key + dr.length} label={`Dra för Lossad${dr.length > 1 ? ` · ${dr.length}` : ''}`} tone="ok" onDone={() => doPlace(pl, 'drop')} /> : null}
         {pk.length ? <Slider style={dr.length ? {marginTop: 8} : undefined} key={'p' + pl.key + pk.length} label={`Dra för Lastad${pk.length > 1 ? ` · ${pk.length}` : ''}`} tone="go" onDone={() => doPlace(pl, 'pickup')} /> : null}
       </View>
@@ -743,6 +797,19 @@ const o = themed(() => StyleSheet.create({
   lgAdr: {color: C.dim, fontSize: 13.5, marginTop: 1},
   lgMeta: {color: C.faint, fontSize: 12.5, marginTop: 2},
   lgTel: {width: 36, height: 36, borderRadius: R, backgroundColor: C.peopleSoft, alignItems: 'center', justifyContent: 'center'},
+  tim: {flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8},
+  timBig: {backgroundColor: C.panel2, borderRadius: R, paddingHorizontal: 10, paddingVertical: 8, marginTop: 10, marginBottom: 0},
+  timL: {color: C.ink, fontFamily: FONT.cond, fontSize: 15.5, fontWeight: '700'},
+  timS: {color: C.dim, fontSize: 12.5},
+  seg: {flexDirection: 'row', backgroundColor: C.panel2, borderRadius: R, padding: 3, gap: 2, borderWidth: StyleSheet.hairlineWidth, borderColor: C.edge},
+  segB: {minWidth: 52, height: 34, borderRadius: 4, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10},
+  segOnY: {backgroundColor: C.accent},
+  segOnN: {backgroundColor: C.panel},
+  segT: {color: C.dim, fontFamily: FONT.cond, fontSize: 15.5, fontWeight: '700'},
+  fullTxt: {backgroundColor: C.noteBg, borderRadius: R, paddingHorizontal: 11, paddingVertical: 10, marginTop: 10},
+  fullK: {color: C.faint, fontFamily: FONT.cond, fontSize: 12, fontWeight: '700', letterSpacing: 1, marginBottom: 3},
+  fullV: {color: C.noteInk, fontSize: 15, lineHeight: 21},
+  dockMore: {color: C.accentInk, fontFamily: FONT.cond, fontSize: 13.5, fontWeight: '700', letterSpacing: 0},
   timBox: {flexDirection: 'row', gap: 8, backgroundColor: C.accentSoft, borderRadius: R, paddingHorizontal: 10, paddingVertical: 9, marginTop: 10},
   timT: {color: C.ink, fontSize: 13.5, lineHeight: 19, flex: 1},
   scanRow: {flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: C.accent, borderRadius: R, paddingHorizontal: 12, paddingVertical: 10, marginTop: 8},

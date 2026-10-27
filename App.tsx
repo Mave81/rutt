@@ -52,7 +52,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '26 okt · 3.45 · Skanna turlista, hela körningen, timjobb';
+const BUILD = '27 okt · 3.46 · tryck = hela ordern, På timme Ja/Nej före Lossad';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -780,6 +780,18 @@ function AppInner(): React.JSX.Element {
 
   // Lossad: kvittensen sparas, ordern flyttar till Klart, namnet minns till nästa gång.
   // Lossad – samma kvittens (signatur/namn/foto) gäller alla order som lossas på stället. Kollin räknas per order.
+  // På timme? Ditt val (ost[cid].tim) går före det RUTT läser ur ordern ("skriv timmar"). Turlistans stopp följer Opter-ordern.
+  const timCid = (st: any) => String(st && st.own && st.parent ? st.parent : (st && (st.drop || st.pickup)) || '');
+  const timOf = (st: any) => {
+    const cid = timCid(st), o = ost[cid] || {};
+    const auto = isTimjobb(st) || !!(st && st.timjobb);
+    return {on: o.tim != null ? !!o.tim : auto, auto, start: o.loadedAt || null};
+  };
+  function setTim(sts: any[], on: boolean) {
+    const cids = [...new Set(sts.map(timCid).filter(Boolean))];
+    setOst(o => { const n = {...o}; for (const c of cids) n[c] = {...(o[c] || {}), tim: on}; return n; });
+    flash(on ? 'På timme – tiden fylls i när du lossar' : 'Inte på timme', null);
+  }
   // Lossad: är det sista stoppet på en turlista följer Opter-orderns lämning med, så Opter får Lossad.
   function openSign(st: any, more: any[] = []) {
     const list = [st, ...more];
@@ -1469,7 +1481,7 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && (planDay === 'idag' || !later.length) && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={openSign} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} me={driverName} onAddNum={addJobNum} onScan={() => { setScanPages(null); setScan(null); }} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={openSign} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} me={driverName} onAddNum={addJobNum} onScan={() => { setScanPages(null); setScan(null); }} timOf={timOf} onSetTim={setTim} />
           )}
           {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} laterRoute={laterRoute} />}
           {tab === 'chat' && <JobbetView j={jobbet} onMakeJob={(m: any) => setSedelFor({media: m})} live={live} opterUnread={unread} opterLast={chatList[chatList.length - 1]} onOpenOpter={markOpterRead}
@@ -1596,7 +1608,7 @@ function AppInner(): React.JSX.Element {
           addOk={demo || !(orders.opts && orders.opts.perm && orders.opts.perm.addService === false)}
           timeOk={!signStop.ownSign && (signStop.group || [signStop]).some((x: any) => !x.own) && (demo || !!(orders.opts && orders.opts.perm && orders.opts.perm.changes !== false && (orders.opts.fields || []).some((f: any) => f.cetName === 'SHI_TimeMinutes')))}
           start={(() => { const t = Math.min(...(signStop.group || [signStop]).map((x: any) => (ost[String(x.drop)] || {}).loadedAt || (x.parent && (ost[String(x.parent)] || {}).loadedAt) || Infinity)); return Number.isFinite(t) ? t : null; })()}
-          timjobb={(signStop.group || [signStop]).some((x: any) => isTimjobb(x))}
+          timjobb={(signStop.group || [signStop]).some((x: any) => timOf(x).on)}
           delay={delayFor(signStop)}
           onCancel={() => setSignStop(null)}
           onDone={(pod: any) => onSigned(signStop, pod)}

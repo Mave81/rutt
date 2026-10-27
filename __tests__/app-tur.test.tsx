@@ -79,7 +79,6 @@ test('turlista via Bilder → stopp kopplade till 234014, Lastad når Opter, sis
   const sh = texts(r);
   expect(sh).toContain('KÖRNINGEN');
   expect(sh).toContain('Opter-order');
-  expect(sh).toMatch(/Timjobb/);
   expect(sh).toContain('Fogdevagen 7, 183 64');
   await press(r, /^Lastad$/);
   await tick(3000);
@@ -90,7 +89,15 @@ test('turlista via Bilder → stopp kopplade till 234014, Lastad når Opter, sis
   const ov2 = r.root.findByType(OrdersView);
   const drops = ov2.props.route.order.filter((s: any) => s.drop && s.own);
   expect(drops.length).toBe(3);
-  await ReactTestRenderer.act(async () => { ov2.props.onUnload(drops[0], drops.slice(1)); });
+  // På timme: ordern säger "skriv timmar" → Ja från början. Du kan välja Nej innan Lossad – och Ja igen.
+  expect(ov2.props.timOf(drops[0]).on).toBe(true);
+  expect(texts(r)).toContain('På timme');
+  await ReactTestRenderer.act(async () => { ov2.props.onSetTim(drops, false); });
+  await ReactTestRenderer.act(async () => { r.root.findByType(OrdersView).props.onUnload(drops[0], drops.slice(1)); });
+  expect(r.root.findByType(SignScreen).props.timjobb).toBe(false);
+  await ReactTestRenderer.act(async () => { r.root.findByType(SignScreen).props.onCancel(); });
+  await ReactTestRenderer.act(async () => { r.root.findByType(OrdersView).props.onSetTim(drops, true); });
+  await ReactTestRenderer.act(async () => { r.root.findByType(OrdersView).props.onUnload(drops[0], drops.slice(1)); });
   const sg = r.root.findByType(SignScreen);
   expect(sg.props.stop.group.map((x: any) => String(x.drop))).toContain('234014');
   expect(sg.props.timjobb).toBe(true);
@@ -108,12 +115,21 @@ test('Kamera: turlista blir stopp, en Inomec-sedel går vidare till "Gör till j
   await ReactTestRenderer.act(async () => { ti[0].props.onChangeText('3111'); ti[1].props.onChangeText('hemligt'); });
   await press(r, /^Logga in$/);
   await tick();
-  await press(r, /^Skanna$/);
+  // Tryck på NÄSTA (en order på stoppet) → hela ordern direkt: texten och vart det ska
+  await press(r, /^visa ›$/);
+  const o1 = texts(r);
+  expect(o1).toContain('KÖRNINGEN');
+  expect(o1).toContain('TEXT I ORDERN');
+  expect(o1).toContain('skriv timmar');
+  expect(o1).toContain('Adressen saknas i ordern');
+  expect(o1).toContain('Läs in turleveranslistan');
+  await press(r, /^Läs in turleveranslistan$/);
   await press(r, /^Kamera$/);
   await tick();
   expect(texts(r)).toContain('1 STOPP');
   expect(texts(r)).toContain('Taby Platteknik AB');
   await press(r, /^Avbryt$/);
+  await tick();
   IP.launchCamera.mockImplementationOnce(async () => ({assets: [{uri: 'file:///inomec-hamt.jpg'}]}));
   await press(r, /^Skanna$/);
   await press(r, /^Kamera$/);

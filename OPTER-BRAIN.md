@@ -155,3 +155,8 @@ Fält: 1 RES_Id, 2 VHC_Id, **3 SHI_Id (meddelandet kan höra till en order!)**, 
 - **Timjobb** ("skriv timmar", "skriv tid", "per timme", "timdebit"…, `isTimjobb`): Tid öppnas själv vid Lossad i läget start–slut, start = när du lastade, slut = nu. Skickas som CET 34 (SHI_TimeMinutes) på första Opter-ordern i kvittensen – samma som Opter Driver.
 - **Registrerat i Opter?** editShipment jämför orderns kolumner efter synk mot det som skickats (`changesSeen`): "Syns i Opter" eller "Skickad – Opter visar inte Tid (min) än".
 - Ej verifierat mot riktig server: att Opter skickar tillbaka timeMinutes på förarens order efter ändring.
+
+## 15. Läget 3.46 (27 okt)
+- Tryck på ett stopp (rubriken eller NÄSTA "visa ›") med EN order → hela ordern direkt. Flera order → stoppet, där varje order (Ska till / Lämna här) är tryckbar → hela ordern.
+- Ordern: KÖRNINGEN (hämta + lämna, oavkortat) → TEXT I ORDERN (hela Opter-texten, markerbar) → På timme → detaljer.
+- **På timme Ja/Nej** i ordern och ovanför Lossad-reglaget. Förval = RUTT:s läsning ("skriv timmar"), ditt val sparas i ost[cid].tim och går före. Ja → Tid öppen vid Lossad (start = Lastad, slut = nu). Turlista: valet ligger på Opter-ordern, tiden fylls i vid sista stoppet.
