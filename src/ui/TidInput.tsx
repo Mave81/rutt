@@ -36,12 +36,12 @@ function Step({v, set, step, max, unit}: {v: number; set: (n: number) => void; s
   );
 }
 
-export default function TidInput({minutes, onChange, start, initial = 'hm'}: {minutes: number | null; onChange: (m: number | null) => void; start?: number | null; initial?: 'hm' | 'span'}) {
+export default function TidInput({minutes, onChange, start, end, initial = 'hm'}: {minutes: number | null; onChange: (m: number | null) => void; start?: number | null; end?: number | null; initial?: 'hm' | 'span'}) {
   const [mode, setMode] = useState<'hm' | 'span'>(initial);
   const [h, setH] = useState(minutes != null ? Math.floor(minutes / 60) : 0);
   const [m, setM] = useState(minutes != null ? minutes % 60 : 0);
   const [from, setFrom] = useState(start ? hmOf(start) : '');
-  const [to, setTo] = useState(hmOf(Date.now()));
+  const [to, setTo] = useState(hmOf(end || Date.now()));
   const [rest, setRest] = useState(0);
 
   const a = parseClock(from), b = parseClock(to);

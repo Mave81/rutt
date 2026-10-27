@@ -17,6 +17,7 @@ import {Sheet} from './parts';
 import {Bi, BiName} from './Bi';
 import Slider from './Slider';
 import ReorderSheet from './Reorder';
+import {parseClock} from './TidInput';
 import {loadJSON, saveJSON} from '../store';
 
 type Row = {kind: 'pickup' | 'drop'; st: any; cid: string; plan: any; dropLater?: {eta: Date | null; area: string} | null};
@@ -189,7 +190,30 @@ function SmsSheet({to, onClose}: {to: {name: string; num: string; who: string} |
 type JRow = Row & {state: 'act' | 'wait'};
 type JPlace = {key: string; st: any; rows: JRow[]; eta: any; late: number};
 
-export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell, me = '', onAddNum, onScan, timOf, onSetTim, sedelOf}: {
+// Klockslag: tryck och skriv (7.30 / 0730 / 07:30) eller "Nu". Dagens datum.
+function ClockField({label, value, onSet, placeholder = '--:--'}: {label: string; value: number | null; onSet: (v: number | null) => void; placeholder?: string}) {
+  const fmt = (v: number | null) => (v ? hhmm(new Date(v)) : '');
+  const [txt, setTxt] = useState(fmt(value));
+  const [bad, setBad] = useState(false);
+  React.useEffect(() => { setTxt(fmt(value)); setBad(false); }, [value]);
+  const commit = () => {
+    if (!txt.trim()) { onSet(null); return; }
+    const m = parseClock(txt); if (m == null) { setBad(true); return; }
+    const d = new Date(); d.setHours(Math.floor(m / 60), m % 60, 0, 0); onSet(d.getTime());
+  };
+  return (
+    <View style={{flex: 1, minWidth: 0}}>
+      <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end'}}>
+        <Text style={o.clkL}>{label}</Text>
+        <Pressable hitSlop={8} onPress={() => onSet(Date.now())}><Text style={o.clkNow}>Nu</Text></Pressable>
+      </View>
+      <TextInput style={[o.clk, bad && {borderColor: C.bad}]} value={txt} onChangeText={x => { setTxt(x); setBad(false); }} onEndEditing={commit} onSubmitEditing={commit}
+        placeholder={placeholder} placeholderTextColor={C.faint} keyboardType="numbers-and-punctuation" selectTextOnFocus />
+    </View>
+  );
+}
+
+export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell, me = '', onAddNum, onScan, timOf, onSetTim, onSetTimes, sedelOf}: {
   route: any; cargo: any; ost: Record<string, any>; allStops: any[];
   onLoaded: (st: any, more?: any[]) => void; onUnload: (st: any, more?: any[]) => void;
   onEdit: (cid: string, st: any) => void;
@@ -200,8 +224,9 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   me?: string;
   onAddNum?: (cid: string, c: {label: string; num: string}) => void;
   onScan?: () => void;
-  timOf?: (st: any) => {on: boolean; start: number | null; auto: boolean};
+  timOf?: (st: any) => {on: boolean; start: number | null; end?: number | null; auto: boolean};
   onSetTim?: (sts: any[], on: boolean) => void;
+  onSetTimes?: (sts: any[], t: {start?: number | null; end?: number | null}) => void;
   sedelOf?: (cid: string) => any;
 }) {
   const [callStop, setCallStop] = useState<any>(null);
@@ -384,9 +409,11 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     // Turlista: tiden går på Opter-ordern, vid sista stoppet (då följer den med i kvittensen).
     const fam = sts.every(x => x.own && x.parent) ? rows.filter(x => x.kind === 'drop' && x.st.parent && sts.some(y => y.parent === x.st.parent)).length : 0;
     const notLast = fam > sts.length;
-    const sub = on ? (t.start ? `start ${hhmm(new Date(t.start))} · ${notLast ? 'tiden fylls i vid sista stoppet' : 'slut när du lossar'}` : 'start sätts när du lastar') : t.auto ? 'ordern nämner timmar – tryck Ja om jobbet är på timme' : 'nej – ingen tid skickas';
+    const sub = on ? (t.start ? `start ${hhmm(new Date(t.start))} · ${t.end ? `slut ${hhmm(new Date(t.end))}` : notLast ? 'tiden fylls i vid sista stoppet' : 'slut när du lossar'}` : 'start sätts när du lastar') : t.auto ? 'ordern nämner timmar – tryck Ja om jobbet är på timme' : 'nej – ingen tid skickas';
+    const span = t.start && t.end ? Math.max(0, Math.round((t.end - t.start) / 60000)) : null;
     return (
-      <View style={[o.tim, big && o.timBig]}>
+      <View style={big ? o.timBig : null}>
+      <View style={o.tim}>
         <Bi n="stopwatch-fill" size={big ? 17 : 15} color={on ? C.accentInk : C.faint} />
         <View style={{flex: 1, minWidth: 0}}>
           <Text style={o.timL}>På timme</Text>
@@ -399,6 +426,15 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
             </Pressable>
           ))}
         </View>
+      </View>
+      {big && on && onSetTimes ? (
+        // Start och slut går att sätta själv – "Nu" eller skriv klockslag (7.30, 0730, 07:30).
+        <View style={o.timRow}>
+          <ClockField label="Start" value={t.start} onSet={v => onSetTimes(sts, {start: v})} />
+          <ClockField label="Slut" value={t.end || null} onSet={v => onSetTimes(sts, {end: v})} placeholder="vid Lossad" />
+          <View style={{justifyContent: 'flex-end', paddingBottom: 9, minWidth: 64}}><Text style={o.timSum}>{span != null ? (span >= 60 ? `${Math.floor(span / 60)} h ${span % 60} min` : `${span} min`) : ''}</Text></View>
+        </View>
+      ) : null}
       </View>
     );
   };
@@ -484,7 +520,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
             ? kids.map((x, i) => legRow(`LÄMNA ${i + 1}/${kids.length}`, x, false, i + 1, 'k' + i))
             : dr ? legRow('LÄMNA', dr, !pick, 1) : null}
         </View>
-        {noAdr && onScan ? (
+        {noAdr && onScan && !/\bbdx\b/i.test([pk && pk.who, pk && pk.customer].join(' ')) ? (
           <Pressable style={o.scanRow} onPress={() => { close(); onScan(); }}>
             <Bi n="upc-scan" size={16} color={C.accentInk} />
             <View style={{flex: 1}}>
@@ -500,7 +536,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
             <Text style={o.fullV} selectable>{notes.join('\n\n')}</Text>
           </View>
         )}
-        {!pick && act && (!st.own || st.parent) ? timSeg([st], true) : null}
+        {!st.own || st.parent ? timSeg([st], true) : null}
         <View style={o.kv}>
           {kv.map(([a, b, mono], i) => (
             <View key={a} style={[o.kvRow, i > 0 && o.kvLine]}><Text style={o.kvK}>{a}</Text><Text style={[o.kvV, mono && o.mono, mono && {fontSize: 14, color: C.ink}]}>{b}</Text></View>
@@ -672,7 +708,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
           <Pressable style={o.sqSm} onPress={() => navigate(st)} onLongPress={() => setNavFor(st)}><Bi n="cursor-fill" size={16} color="#000000" /></Pressable>
           <Pressable disabled={!tel.length} style={[o.sqSm, {backgroundColor: C.peopleSoft}, !tel.length && {opacity: 0.35}]} onPress={() => (tel.length === 1 ? dial(tel[0].num) : setCallStop(st))}><Bi n="telephone-fill" size={16} color={C.people} /></Pressable>
         </View>
-        {dr.length ? timSeg(dr.filter(r => !r.st.own || r.st.parent).map(r => r.st)) : null}
+        {timSeg((dr.length ? dr : pk).filter(r => !r.st.own || r.st.parent).map(r => r.st))}
         {dr.length ? <Slider key={'d' + pl.key + dr.length} label={`Dra för Lossad${dr.length > 1 ? ` · ${dr.length}` : ''}`} tone="ok" onDone={() => doPlace(pl, 'drop')} /> : null}
         {pk.length ? <Slider style={dr.length ? {marginTop: 8} : undefined} key={'p' + pl.key + pk.length} label={`Dra för Lastad${pk.length > 1 ? ` · ${pk.length}` : ''}`} tone="go" onDone={() => doPlace(pl, 'pickup')} /> : null}
       </View>
@@ -829,7 +865,12 @@ const o = themed(() => StyleSheet.create({
   lgMeta: {color: C.faint, fontSize: 12.5, marginTop: 2},
   lgTel: {width: 36, height: 36, borderRadius: R, backgroundColor: C.peopleSoft, alignItems: 'center', justifyContent: 'center'},
   tim: {flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8},
-  timBig: {backgroundColor: C.panel2, borderRadius: R, paddingHorizontal: 10, paddingVertical: 8, marginTop: 10, marginBottom: 0},
+  timRow: {flexDirection: 'row', gap: 8, marginTop: 2},
+  clkL: {color: C.dim, fontSize: 12.5, fontWeight: '700'},
+  clkNow: {color: C.accentInk, fontFamily: FONT.cond, fontSize: 14, fontWeight: '700'},
+  clk: {backgroundColor: C.panel, borderRadius: R, borderWidth: 1, borderColor: C.edge, height: 42, marginTop: 3, color: C.ink, fontFamily: FONT.cond, fontSize: 20, fontWeight: '700', textAlign: 'center', padding: 0},
+  timSum: {color: C.ink, fontFamily: FONT.cond, fontSize: 15.5, fontWeight: '700', textAlign: 'right'},
+  timBig: {backgroundColor: C.panel2, borderRadius: R, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 8, marginTop: 10},
   timL: {color: C.ink, fontFamily: FONT.cond, fontSize: 15.5, fontWeight: '700'},
   timS: {color: C.dim, fontSize: 12.5},
   seg: {flexDirection: 'row', backgroundColor: C.panel2, borderRadius: R, padding: 3, gap: 2, borderWidth: StyleSheet.hairlineWidth, borderColor: C.edge},

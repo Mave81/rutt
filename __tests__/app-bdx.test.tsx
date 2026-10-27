@@ -97,3 +97,47 @@ test('två BDX-sedlar: adressen bekräftas, Moby läggs på Opter-order 234100, 
   expect(sh).toMatch(/7 kartong/);
   jest.useRealTimers();
 });
+
+test('BDX-hämtning: På timme Ja direkt i ordern (även vid Hämta), start sätts, slut skrivs in → kvittensen får start och slut', async () => {
+  jest.useFakeTimers();
+  await require('@react-native-async-storage/async-storage').clear();
+  let r: any;
+  await ReactTestRenderer.act(async () => { r = ReactTestRenderer.create(<App />); });
+  const ti = r.root.findAllByType(require('react-native').TextInput);
+  await ReactTestRenderer.act(async () => { ti[0].props.onChangeText('3111'); ti[1].props.onChangeText('hemligt'); });
+  await press(r, /^Logga in$/);
+  await tick();
+  await press(r, /^visa ›$/);
+  let t = texts(r);
+  expect(t).toContain('HÄMTA  ·  ORDER 234100');
+  expect(t).toContain('På timme');
+  expect(t).not.toContain('Läs in turleveranslistan');
+  await pressLast(r, /^Ja$/);
+  t = texts(r);
+  expect(t).toContain('Start');
+  expect(t).toContain('Slut');
+  const ov = r.root.findByType(OrdersView);
+  const pick = ov.props.route.order.find((s: any) => String(s.pickup) === '234100');
+  const st0 = ov.props.timOf(pick);
+  expect(st0.on).toBe(true);
+  expect(typeof st0.start).toBe('number');
+  // Starttid 07:15 och sluttid 15:30 skrivs in
+  const startIn = r.root.findAll((n: any) => n.props && n.props.placeholder === '--:--' && n.props.onEndEditing)[0];
+  await ReactTestRenderer.act(async () => { startIn.props.onChangeText('7.15'); });
+  await ReactTestRenderer.act(async () => { startIn.props.onEndEditing(); });
+  const endIn = r.root.findAll((n: any) => n.props && n.props.placeholder === 'vid Lossad' && n.props.onEndEditing)[0];
+  await ReactTestRenderer.act(async () => { endIn.props.onChangeText('1530'); });
+  await ReactTestRenderer.act(async () => { endIn.props.onEndEditing(); });
+  expect(texts(r)).toContain('8 h 15 min');
+  const tt = r.root.findByType(OrdersView).props.timOf(pick);
+  expect(new Date(tt.start).toTimeString().slice(0, 5)).toBe('07:15');
+  expect(new Date(tt.end).toTimeString().slice(0, 5)).toBe('15:30');
+  // Lossad → kvittensen öppnar Tid med start och slut ifyllda
+  const drop = r.root.findByType(OrdersView).props.route.order.find((s: any) => String(s.drop) === '234100');
+  await ReactTestRenderer.act(async () => { r.root.findByType(OrdersView).props.onUnload(drop); });
+  const sg = r.root.findByType(SignScreen);
+  expect(sg.props.timjobb).toBe(true);
+  expect(new Date(sg.props.start).toTimeString().slice(0, 5)).toBe('07:15');
+  expect(new Date(sg.props.end).toTimeString().slice(0, 5)).toBe('15:30');
+  jest.useRealTimers();
+});

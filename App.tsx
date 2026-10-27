@@ -52,7 +52,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '27 okt · 3.48 · På timme bara när du väljer Ja';
+const BUILD = '27 okt · 3.49 · På timme + start/slut i ordern, även vid Hämta';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -786,12 +786,17 @@ function AppInner(): React.JSX.Element {
     const cid = timCid(st), o = ost[cid] || {};
     const auto = isTimjobb(st) || !!(st && st.timjobb);
     // Aldrig på timme av sig själv (27 okt: "skriv timmar" i ordern betyder inte att dagens jobb är på timme). Du väljer Ja.
-    return {on: !!o.tim, auto, start: o.loadedAt || null};
+    return {on: !!o.tim, auto, start: o.timStart || o.loadedAt || null, end: o.timEnd || null};
   };
   function setTim(sts: any[], on: boolean) {
     const cids = [...new Set(sts.map(timCid).filter(Boolean))];
-    setOst(o => { const n = {...o}; for (const c of cids) n[c] = {...(o[c] || {}), tim: on}; return n; });
-    flash(on ? 'På timme – tiden fylls i när du lossar' : 'Inte på timme', null);
+    // Ja → starttiden sätts direkt (när du lastade, annars nu). Går att ändra i ordern.
+    setOst(o => { const n = {...o}; for (const c of cids) { const cur = o[c] || {}; n[c] = {...cur, tim: on, timStart: on ? cur.timStart || cur.loadedAt || Date.now() : cur.timStart}; } return n; });
+    flash(on ? 'På timme – start satt, slut när du lossar' : 'Inte på timme', null);
+  }
+  function setTimes(sts: any[], t: {start?: number | null; end?: number | null}) {
+    const cids = [...new Set(sts.map(timCid).filter(Boolean))];
+    setOst(o => { const n = {...o}; for (const c of cids) { const cur = o[c] || {}; n[c] = {...cur, tim: true, ...(t.start !== undefined ? {timStart: t.start} : {}), ...(t.end !== undefined ? {timEnd: t.end} : {})}; } return n; });
   }
   // Lossad: är det sista stoppet på en turlista följer Opter-orderns lämning med, så Opter får Lossad.
   function openSign(st: any, more: any[] = []) {
@@ -1499,7 +1504,7 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && (planDay === 'idag' || !later.length) && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={openSign} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} me={driverName} onAddNum={addJobNum} onScan={() => { setScanPages(null); setScan(null); }} timOf={timOf} onSetTim={setTim} sedelOf={(cid: string) => sedelInfo[cid] || null} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={openSign} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} me={driverName} onAddNum={addJobNum} onScan={() => { setScanPages(null); setScan(null); }} timOf={timOf} onSetTim={setTim} onSetTimes={setTimes} sedelOf={(cid: string) => sedelInfo[cid] || null} />
           )}
           {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} laterRoute={laterRoute} />}
           {tab === 'chat' && <JobbetView j={jobbet} onMakeJob={(m: any) => setSedelFor({media: m})} live={live} opterUnread={unread} opterLast={chatList[chatList.length - 1]} onOpenOpter={markOpterRead}
@@ -1625,7 +1630,8 @@ function AppInner(): React.JSX.Element {
           saved={ost[signStop.drop]}
           addOk={demo || !(orders.opts && orders.opts.perm && orders.opts.perm.addService === false)}
           timeOk={!signStop.ownSign && (signStop.group || [signStop]).some((x: any) => !x.own) && (demo || !!(orders.opts && orders.opts.perm && orders.opts.perm.changes !== false && (orders.opts.fields || []).some((f: any) => f.cetName === 'SHI_TimeMinutes')))}
-          start={(() => { const t = Math.min(...(signStop.group || [signStop]).map((x: any) => (ost[String(x.drop)] || {}).loadedAt || (x.parent && (ost[String(x.parent)] || {}).loadedAt) || Infinity)); return Number.isFinite(t) ? t : null; })()}
+          start={(() => { const g = signStop.group || [signStop]; const t = Math.min(...g.map((x: any) => timOf(x).start || (ost[String(x.drop)] || {}).loadedAt || (x.parent && (ost[String(x.parent)] || {}).loadedAt) || Infinity)); return Number.isFinite(t) ? t : null; })()}
+          end={(() => { const g = signStop.group || [signStop]; const e = g.map((x: any) => timOf(x).end).filter(Boolean); return e.length ? Math.max(...e) : null; })()}
           timjobb={(signStop.group || [signStop]).some((x: any) => timOf(x).on)}
           delay={delayFor(signStop)}
           onCancel={() => setSignStop(null)}

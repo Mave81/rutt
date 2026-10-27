@@ -13,7 +13,7 @@ import {Bi} from './Bi';
 import TidInput, {fmtMin} from './TidInput';
 
 
-export default function SignScreen({stop, savedNames, saved, onCancel, onDone, addOk = true, timeOk = false, start = null, delay = null, timjobb = false}: {timjobb?: boolean; delay?: {needs: {cid: string; who: string; orderNo?: string; reason: boolean; damage: boolean; late?: string}[]; reasons: {id: number; name: string; descr?: string}[]; damageTypes: any[]} | null; stop: any; savedNames: string[]; saved?: any; onCancel: () => void; onDone: (pod: any) => void; addOk?: boolean; timeOk?: boolean; start?: number | null}) {
+export default function SignScreen({stop, savedNames, saved, onCancel, onDone, addOk = true, timeOk = false, start = null, end = null, delay = null, timjobb = false}: {timjobb?: boolean; end?: number | null; delay?: {needs: {cid: string; who: string; orderNo?: string; reason: boolean; damage: boolean; late?: string}[]; reasons: {id: number; name: string; descr?: string}[]; damageTypes: any[]} | null; stop: any; savedNames: string[]; saved?: any; onCancel: () => void; onDone: (pod: any) => void; addOk?: boolean; timeOk?: boolean; start?: number | null}) {
   const insets = useSafeAreaInsets();
   const {kb, lift} = useKeyboardLift();
   const [sig, setSig] = useState<SigData | null>(null);
@@ -352,7 +352,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
           ) : (
             <>
               <View style={st.secHead}><Text style={st.sec}>Tid</Text><Text style={st.hint}>{timjobb ? 'Timjobb · ' : ''}{tid ? fmtMin(tid) + ' · ' : ''}skickas till Opter</Text></View>
-              <TidInput minutes={null} onChange={setTid} start={start} initial={timjobb ? 'span' : 'hm'} />
+              <TidInput minutes={null} onChange={setTid} start={start} end={end} initial={timjobb ? 'span' : 'hm'} />
             </>
           ))}
 

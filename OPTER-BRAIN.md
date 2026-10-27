@@ -176,3 +176,8 @@ Fält: 1 RES_Id, 2 VHC_Id, **3 SHI_Id (meddelandet kan höra till en order!)**, 
 ## 17. 3.48 (27 okt) – Kentas besked
 - **På timme är aldrig förvalt.** "skriv timmar" i ordern betyder inte att dagens jobb är på timme. RUTT visar bara "ordern nämner timmar – tryck Ja om jobbet är på timme". Tid skickas bara när Kenta valt Ja (eller lägger till tid själv i kvittensen).
 - **BDX behöver inte skannas**: när ordern säger Hämta på BDX har Opter-ordern det som behövs, BDX ger papperen. Skanna finns kvar för Bevego-turlistor och Inomec/Cramo; BDX-läsningen ligger kvar men behövs inte i vardagen.
+
+## 18. 3.49 (27 okt)
+- **På timme Ja/Nej finns i varje Opter-order**, även vid Hämta (BDX 234661 "3 stopp" visade det inte – bara lämningar hade det). Ja → Start sätts direkt (när du lastade, annars nu). Start och Slut går att ändra: "Nu" eller skriv 7.15 / 0715 / 07:15. Summan visas (8 h 15 min). Sparas i ost[cid].timStart/timEnd.
+- Vid Lossad: Tid öppen med samma start och slut (slut = nu om inget satts) → skickas som Opters Tid (CET 34).
+- "Läs in turleveranslistan" visas inte för BDX-hämtningar (Kenta: BDX ger papperen, behöver inte skannas).
