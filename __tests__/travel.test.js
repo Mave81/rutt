@@ -57,3 +57,12 @@ test('gatan finns inte på kartan (Lyckås måleri, "klockelundsvägen", 12363 F
   expect(calls.length).toBe(4); // gata+postnr+ort, fritext, gata+ort, postnr
   expect(T.withGeo(stops)[0]).toMatchObject({lat: 59.2425, lng: 18.0989, geo: true, geoApprox: 'postnr'});
 }, 15000);
+
+test('husnumret saknas på kartan (Höganäshuset, Harpsundsvägen 211) → gatan utan nummer, inte bara postnumret', async () => {
+  const calls = [];
+  const fake = async (u) => { calls.push(u); return {json: async () => (/street=Harpsundsv%C3%A4gen&city=/.test(u) ? [{lat: '59.2697', lon: '18.0498'}] : [])}; };
+  const stops = [{pickup: 'H', who: 'Höganäshuset AB', adr: 'Harpsundsvägen 211', zip: '12459', area: 'BANDHAGEN'}];
+  expect(await T.geocode(stops, fake)).toBe(1);
+  expect(calls.length).toBe(4);
+  expect(T.withGeo(stops)[0]).toMatchObject({lat: 59.2697, geoApprox: 'gata'});
+}, 15000);

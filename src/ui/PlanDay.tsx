@@ -62,7 +62,7 @@ export default function PlanDay({route, cargo, onReorder, starts = [], startId, 
               <Text style={p.tpT}>Tidspassning {x.s.who || ''}{x.s.tidspass.time ? ` kl ${x.s.tidspass.time}` : ' – tiden står inte i ordern, kolla med kontoret'}{x.s.tidspass.time && x.r && x.r.eta ? ` · du är där ca ${hhmm(new Date(x.r.eta))}` : ''}</Text>
             </View>
           ))}
-          {info.approxL.length ? <Text style={p.sumS}>Ungefärlig plats (gatan finns inte på kartan, postnumret används): {info.approxL.map((x: any) => `${x.who || x.adr} – ${[x.adr, x.area].filter(Boolean).join(', ')}`).join('; ')}</Text> : null}
+          {info.approxL.length ? <Text style={p.sumS}>Ungefärlig plats på kartan (körtiden blir ungefärlig, navigeringen går till adressen): {info.approxL.map((x: any) => `${x.who || x.adr} – ${x.geoApprox === 'gata' ? 'husnumret saknas, gatan används' : x.geoApprox === 'postnr' ? 'gatan saknas, postnumret används' : 'bara orten hittades'}`).join('; ')}</Text> : null}
           {info.nogeo ? <Text style={[p.sumS, {color: C.bad}]}>Hittas inte på kartan: {info.nogeoL.map((x: any) => `${x.who || '—'} (${[x.adr, x.zip, x.area].filter(Boolean).join(' ') || 'adress saknas'})`).join(', ')} – körtiden dit är okänd, ordningen kan bli fel</Text>
             : info.est ? <Text style={p.sumS}>Körtider uppskattade (inget svar från kartan än)</Text>
             : <Text style={p.sumS}>Körtider längs vägarna (OpenStreetMap)</Text>}

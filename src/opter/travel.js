@@ -130,9 +130,11 @@ async function geocode(stops, fetchImpl) {
       [`street=${encodeURIComponent(s.adr || '')}&postalcode=${encodeURIComponent(zip)}&city=${encodeURIComponent(s.area || '')}`, null],
       [`q=${encodeURIComponent([s.adr, [String(s.zip || '').trim(), s.area].filter(Boolean).join(' ')].filter(Boolean).join(', '))}`, null],
       [`q=${encodeURIComponent([s.adr, s.area].filter(Boolean).join(', '))}`, null],
+      // Husnumret saknas på kartan (vanligt) → gatan utan nummer: hamnar på rätt gata, nära nog
+      ...(/\d/.test(String(s.adr || '')) ? [[`street=${encodeURIComponent(String(s.adr).replace(/\s*\d+\s*[A-Za-z]?(\s*-\s*\d+)?\s*$/, ''))}&city=${encodeURIComponent(s.area || '')}`, 'gata']] : []),
       ...(zip ? [[`postalcode=${encodeURIComponent(zip)}`, 'postnr']] : []),
       ...(s.area ? [[`city=${encodeURIComponent(s.area)}`, 'ort']] : []),
-    ].filter((t, i) => s.adr || i >= 3); // utan gata: bara postnummer/ort
+    ].filter((t) => s.adr || t[1] === 'postnr' || t[1] === 'ort'); // utan gata: bara postnummer/ort
     let hit = null;
     for (const [qs, approx] of tries) {
       const wait = lastGeo + 1100 - Date.now();
@@ -141,7 +143,7 @@ async function geocode(stops, fetchImpl) {
       try {
         const r = await f(`${NOMI}?format=jsonv2&limit=1&countrycodes=se&${qs}`, {headers: {'User-Agent': 'RUTT/1 (forre.nu)', 'Accept-Language': 'sv'}});
         const j = await r.json();
-        if (Array.isArray(j) && j[0] && j[0].lat) { hit = {lat: Number(j[0].lat), lng: Number(j[0].lon), ...(approx ? {approx} : {})}; break; }
+        if (Array.isArray(j) && j[0] && j[0].lat) { hit = {lat: Number(j[0].lat), lng: Number(j[0].lon), ...(approx ? {approx, v: 3} : {})}; break; }
       } catch (e) { return found; } // inget nät → försök nästa gång
     }
     geo.set(geoKey(s), hit || {miss: true, at: Date.now(), v2: true});
@@ -151,7 +153,7 @@ async function geocode(stops, fetchImpl) {
   return found;
 }
 // "Hittades inte" från före 3.53 provas igen direkt (nu finns reserv på postnummer/ort).
-async function initGeo() { if (!store) return; try { const v = await store.load('rutt.geo.v1', null); if (Array.isArray(v)) for (const [k, x] of v) if (x && (!x.miss || x.v2)) geo.set(k, x); } catch (e) {} }
+async function initGeo() { if (!store) return; try { const v = await store.load('rutt.geo.v1', null); if (Array.isArray(v)) for (const [k, x] of v) if (x && (x.miss ? x.v2 : (!x.approx || x.v === 3))) geo.set(k, x); } catch (e) {} }
 // Stoppen med koordinater ifyllda där Opter saknade dem. geo:true = uppslagen adress.
 const withGeo = stops => (stops || []).map(s => { if (!s || (s.lat != null && s.lng != null)) return s; const g = geoOf(s); return g ? {...s, lat: g.lat, lng: g.lng, geo: true, ...(g.approx ? {geoApprox: g.approx} : {})} : s; });
 

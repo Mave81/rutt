@@ -732,7 +732,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   );
 
   return (
-    <View style={{flex: 1}}>
+    <View style={sheetOnly ? {height: 0, overflow: 'hidden'} : {flex: 1}}>
       {!sheetOnly ? <>
       {selMode ? selBar : (places.length ? strip : null)}
       <ScrollView style={{flex: 1}} contentContainerStyle={{paddingHorizontal: 12, paddingBottom: 18}} keyboardShouldPersistTaps="handled">
