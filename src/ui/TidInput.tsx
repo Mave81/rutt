@@ -5,7 +5,8 @@
  */
 import React, {useEffect, useState} from 'react';
 import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
-import {C, themed} from './theme';
+import {C, themed, FONT, R} from './theme';
+import {DurationWheel, TimeSheet} from './Wheel';
 
 const two = (n: number) => String(n).padStart(2, '0');
 const hmOf = (t: number) => { const d = new Date(t); return `${two(d.getHours())}:${two(d.getMinutes())}`; };
@@ -22,21 +23,7 @@ export function parseClock(s: string): number | null {
 }
 export const fmtMin = (min: number) => (min >= 60 ? `${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ''}` : `${min} min`);
 
-function Step({v, set, step, max, unit}: {v: number; set: (n: number) => void; step: number; max: number; unit: string}) {
-  return (
-    <View style={t.stepBox}>
-      <Pressable hitSlop={6} style={t.btn} onPress={() => set(Math.max(0, v - step))}><Text style={t.btnT}>−</Text></Pressable>
-      <View style={{alignItems: 'center', minWidth: 54}}>
-        <TextInput style={t.num} value={String(v)} keyboardType="number-pad" selectTextOnFocus
-          onChangeText={x => { const n = parseInt(x.replace(/\D/g, ''), 10); set(Number.isFinite(n) ? Math.min(max, n) : 0); }} />
-        <Text style={t.unit}>{unit}</Text>
-      </View>
-      <Pressable hitSlop={6} style={t.btn} onPress={() => set(Math.min(max, v + step))}><Text style={t.btnT}>+</Text></Pressable>
-    </View>
-  );
-}
-
-export default function TidInput({minutes, onChange, start, end, initial = 'hm'}: {minutes: number | null; onChange: (m: number | null) => void; start?: number | null; end?: number | null; initial?: 'hm' | 'span'}) {
+export default function TidInput({minutes, onChange, start, end, initial = 'hm', bg}: {minutes: number | null; onChange: (m: number | null) => void; start?: number | null; end?: number | null; initial?: 'hm' | 'span'; bg?: string}) {
   const [mode, setMode] = useState<'hm' | 'span'>(initial);
   const [h, setH] = useState(minutes != null ? Math.floor(minutes / 60) : 0);
   const [m, setM] = useState(minutes != null ? minutes % 60 : 0);
@@ -52,6 +39,8 @@ export default function TidInput({minutes, onChange, start, end, initial = 'hm'}
   }, [mode, h, m, spanMin]);
 
 
+  const [sheet, setSheet] = useState<null | 'from' | 'to'>(null);
+  const msOf = (hm: string) => { const x = parseClock(hm); if (x == null) return null; const d = new Date(); d.setHours(Math.floor(x / 60), x % 60, 0, 0); return d.getTime(); };
   return (
     <View>
       <View style={t.seg}>
@@ -61,10 +50,8 @@ export default function TidInput({minutes, onChange, start, end, initial = 'hm'}
       </View>
       {mode === 'hm' ? (
         <>
-          <View style={t.row}>
-            <Step v={h} set={setH} step={1} max={99} unit="timmar" />
-            <Step v={m} set={x => setM(Math.min(59, x))} step={5} max={59} unit="minuter" />
-          </View>
+          {/* Hjul som väckarklockan: scrolla timmar och minuter, eller tryck på siffran och skriv */}
+          <View style={{marginTop: 10}}><DurationWheel value={h * 60 + m} onChange={x => { setH(Math.floor(x / 60)); setM(x % 60); }} bg={bg} /></View>
           <View style={t.chips}>
             {[15, 30, 45, 60, 90, 120].map(q => (
               <Pressable key={q} style={[t.chip, h * 60 + m === q && t.chipOn]} onPress={() => { setH(Math.floor(q / 60)); setM(q % 60); }}><Text style={[t.chipT, h * 60 + m === q && t.chipTOn]}>{fmtMin(q)}</Text></Pressable>
@@ -75,50 +62,51 @@ export default function TidInput({minutes, onChange, start, end, initial = 'hm'}
         <>
           <View style={t.row}>
             <View style={{flex: 1}}>
-              <Text style={t.lbl}>Start</Text>
-              <TextInput style={[t.clock, a == null && from ? t.bad : null]} value={from} onChangeText={setFrom} placeholder="07:00" placeholderTextColor={C.faint} keyboardType="numbers-and-punctuation" />
+              <View style={t.lblRow}>
+                <Text style={t.lbl}>Start</Text>
+                <Pressable hitSlop={8} onPress={() => setFrom(hmOf(Date.now()))}><Text style={t.now}>Nu</Text></Pressable>
+              </View>
+              <Pressable style={t.clock} onPress={() => setSheet('from')} accessibilityLabel="Starttid, tryck för att ändra"><Text style={[t.clockT, !from && {color: C.faint}]}>{from || '--:--'}</Text></Pressable>
             </View>
             <View style={{flex: 1}}>
-              <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'}}>
+              <View style={t.lblRow}>
                 <Text style={t.lbl}>Slut</Text>
                 <Pressable hitSlop={8} onPress={() => setTo(hmOf(Date.now()))}><Text style={t.now}>Nu</Text></Pressable>
               </View>
-              <TextInput style={[t.clock, b == null && to ? t.bad : null]} value={to} onChangeText={setTo} placeholder="15:30" placeholderTextColor={C.faint} keyboardType="numbers-and-punctuation" />
+              <Pressable style={t.clock} onPress={() => setSheet('to')} accessibilityLabel="Sluttid, tryck för att ändra"><Text style={[t.clockT, !to && {color: C.faint}]}>{to || '--:--'}</Text></Pressable>
             </View>
           </View>
-          <Text style={[t.lbl, {marginTop: 10}]}>Rast som inte räknas</Text>
+          <Text style={[t.lbl, {marginTop: 12}]}>Rast som inte räknas</Text>
           <View style={t.chips}>
             {[0, 15, 30, 45, 60].map(q => (
               <Pressable key={q} style={[t.chip, rest === q && t.chipOn]} onPress={() => setRest(q)}><Text style={[t.chipT, rest === q && t.chipTOn]}>{q ? fmtMin(q) : 'Ingen'}</Text></Pressable>
             ))}
           </View>
+          <TimeSheet open={!!sheet} title={sheet === 'from' ? 'Starttid' : 'Sluttid'} value={sheet === 'from' ? msOf(from) : msOf(to)} onClose={() => setSheet(null)}
+            onDone={x => { const v = hmOf(x); if (sheet === 'from') setFrom(v); else setTo(v); setSheet(null); }} />
         </>
       )}
-      <Text style={t.sum}>{(mode === 'hm' ? h * 60 + m : spanMin || 0) > 0 ? `= ${fmtMin(mode === 'hm' ? h * 60 + m : spanMin || 0)}` : mode === 'span' ? 'Skriv start och slut, t.ex. 7:00 och 15:30' : 'Välj tid'}</Text>
+      <Text style={t.sum}>{(mode === 'hm' ? h * 60 + m : spanMin || 0) > 0 ? `= ${fmtMin(mode === 'hm' ? h * 60 + m : spanMin || 0)}` : mode === 'span' ? 'Tryck på Start och Slut och välj tiden' : 'Välj tid'}</Text>
     </View>
   );
 }
 
 const t = themed(() => StyleSheet.create({
-  seg: {flexDirection: 'row', gap: 4, backgroundColor: C.panel2, borderRadius: 12, padding: 4},
-  segB: {flex: 1, paddingVertical: 9, borderRadius: 9, alignItems: 'center'},
+  seg: {flexDirection: 'row', gap: 4, backgroundColor: C.panel2, borderRadius: R, padding: 3},
+  segB: {flex: 1, paddingVertical: 9, borderRadius: 4, alignItems: 'center'},
   segOn: {backgroundColor: C.accent},
-  segT: {color: C.dim, fontSize: 13, fontWeight: '800'},
+  segT: {color: C.dim, fontFamily: FONT.cond, fontSize: 15, fontWeight: '700'},
   segTOn: {color: C.onAccent},
   row: {flexDirection: 'row', gap: 10, marginTop: 12},
-  stepBox: {flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: C.panel2, borderRadius: 12, padding: 8},
-  btn: {width: 42, height: 42, borderRadius: 21, backgroundColor: C.panel, alignItems: 'center', justifyContent: 'center'},
-  btnT: {color: C.ink, fontSize: 22, fontWeight: '800', marginTop: -2},
-  num: {color: C.ink, fontSize: 26, fontWeight: '900', textAlign: 'center', padding: 0, width: 64},
-  unit: {color: C.dim, fontSize: 11.5, fontWeight: '700'},
   chips: {flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10},
-  chip: {backgroundColor: C.panel2, borderRadius: 999, paddingVertical: 7, paddingHorizontal: 12},
+  chip: {backgroundColor: C.panel2, borderRadius: R, paddingVertical: 8, paddingHorizontal: 12},
   chipOn: {backgroundColor: C.accent},
-  chipT: {color: C.ink, fontSize: 13, fontWeight: '700'},
+  chipT: {color: C.ink, fontFamily: FONT.cond, fontSize: 15, fontWeight: '600'},
   chipTOn: {color: C.onAccent},
-  lbl: {color: C.dim, fontSize: 12, fontWeight: '800', marginBottom: 4},
-  clock: {backgroundColor: C.panel2, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12, color: C.ink, fontSize: 24, fontWeight: '900', textAlign: 'center'},
-  bad: {borderWidth: 2, borderColor: C.bad},
-  now: {color: C.accentInk, fontSize: 13, fontWeight: '900', marginBottom: 4},
-  sum: {color: C.ink, fontSize: 15, fontWeight: '900', marginTop: 12},
+  lblRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4},
+  lbl: {color: C.dim, fontSize: 12.5, fontWeight: '700'},
+  clock: {backgroundColor: C.panel2, borderRadius: R, height: 52, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.edge},
+  clockT: {color: C.ink, fontFamily: FONT.cond, fontSize: 26, fontWeight: '700'},
+  now: {color: C.accentInk, fontFamily: FONT.cond, fontSize: 14.5, fontWeight: '700'},
+  sum: {color: C.ink, fontFamily: FONT.cond, fontSize: 17, fontWeight: '700', marginTop: 12},
 }));

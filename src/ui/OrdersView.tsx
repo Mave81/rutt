@@ -17,7 +17,7 @@ import {Sheet} from './parts';
 import {Bi, BiName} from './Bi';
 import Slider from './Slider';
 import ReorderSheet from './Reorder';
-import {parseClock} from './TidInput';
+import {TimeSheet} from './Wheel';
 import {loadJSON, saveJSON} from '../store';
 
 type Row = {kind: 'pickup' | 'drop'; st: any; cid: string; plan: any; dropLater?: {eta: Date | null; area: string} | null};
@@ -190,25 +190,19 @@ function SmsSheet({to, onClose}: {to: {name: string; num: string; who: string} |
 type JRow = Row & {state: 'act' | 'wait'};
 type JPlace = {key: string; st: any; rows: JRow[]; eta: any; late: number};
 
-// Klockslag: tryck och skriv (7.30 / 0730 / 07:30) eller "Nu". Dagens datum.
+// Klockslag: tryck → hjulet (som väckarklockan), eller "Nu". Dagens datum.
 function ClockField({label, value, onSet, placeholder = '--:--'}: {label: string; value: number | null; onSet: (v: number | null) => void; placeholder?: string}) {
-  const fmt = (v: number | null) => (v ? hhmm(new Date(v)) : '');
-  const [txt, setTxt] = useState(fmt(value));
-  const [bad, setBad] = useState(false);
-  React.useEffect(() => { setTxt(fmt(value)); setBad(false); }, [value]);
-  const commit = () => {
-    if (!txt.trim()) { onSet(null); return; }
-    const m = parseClock(txt); if (m == null) { setBad(true); return; }
-    const d = new Date(); d.setHours(Math.floor(m / 60), m % 60, 0, 0); onSet(d.getTime());
-  };
+  const [open, setOpen] = useState(false);
   return (
     <View style={{flex: 1, minWidth: 0}}>
       <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end'}}>
         <Text style={o.clkL}>{label}</Text>
         <Pressable hitSlop={8} onPress={() => onSet(Date.now())}><Text style={o.clkNow}>Nu</Text></Pressable>
       </View>
-      <TextInput style={[o.clk, bad && {borderColor: C.bad}]} value={txt} onChangeText={x => { setTxt(x); setBad(false); }} onEndEditing={commit} onSubmitEditing={commit}
-        placeholder={placeholder} placeholderTextColor={C.faint} keyboardType="numbers-and-punctuation" selectTextOnFocus />
+      <Pressable style={o.clk} onPress={() => setOpen(true)} accessibilityLabel={`${label}, tryck för att ändra`}>
+        <Text style={[o.clkT, !value && {color: C.faint, fontSize: 15}]}>{value ? hhmm(new Date(value)) : placeholder}</Text>
+      </Pressable>
+      <TimeSheet open={open} title={label === 'Start' ? 'Starttid' : label === 'Slut' ? 'Sluttid' : label} value={value} onClose={() => setOpen(false)} onDone={t => { setOpen(false); onSet(t); }} />
     </View>
   );
 }
@@ -452,7 +446,11 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
           {t || x.contact || x.qtyTxt ? <Text style={o.lgMeta}>{[x.qtyTxt, t, x.contact].filter(Boolean).join('  ·  ')}</Text> : null}
           {x.orderNo && key ? <Text style={o.mono}>order {x.orderNo}</Text> : null}
         </View>
-        {tel ? <Pressable hitSlop={6} style={o.lgTel} onPress={() => dial(tel.num)}><Bi n="telephone-fill" size={15} color={C.people} /></Pressable> : null}
+        {/* Navigera och ring direkt vid adressen – inte längst ner i bladet */}
+        <View style={{flexDirection: 'row', gap: 6}}>
+          {x.adr || x.lat != null ? <Pressable hitSlop={6} style={o.lgNav} onPress={() => navigate(x)} onLongPress={() => setNavFor(x)} accessibilityLabel={`Navigera till ${x.who || x.adr}`}><Bi n="cursor-fill" size={16} color="#000000" /></Pressable> : null}
+          {tel ? <Pressable hitSlop={6} style={o.lgTel} onPress={() => dial(tel.num)} accessibilityLabel={`Ring ${tel.label || ''}`}><Bi n="telephone-fill" size={15} color={C.people} /></Pressable> : null}
+        </View>
       </View>
     );
   };
@@ -708,7 +706,8 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
           <Pressable style={o.sqSm} onPress={() => navigate(st)} onLongPress={() => setNavFor(st)}><Bi n="cursor-fill" size={16} color="#000000" /></Pressable>
           <Pressable disabled={!tel.length} style={[o.sqSm, {backgroundColor: C.peopleSoft}, !tel.length && {opacity: 0.35}]} onPress={() => (tel.length === 1 ? dial(tel[0].num) : setCallStop(st))}><Bi n="telephone-fill" size={16} color={C.people} /></Pressable>
         </View>
-        {timSeg((dr.length ? dr : pk).filter(r => !r.st.own || r.st.parent).map(r => r.st))}
+        {/* På timme nere vid reglaget bara när det berör stoppet (valt Ja, eller ordern nämner timmar) – annars i ordern */}
+        {(() => { const sts = (dr.length ? dr : pk).filter(r => !r.st.own || r.st.parent).map(r => r.st); return timOf && sts.some(x => timOf(x).on || timOf(x).auto) ? timSeg(sts) : null; })()}
         {dr.length ? <Slider key={'d' + pl.key + dr.length} label={`Dra för Lossad${dr.length > 1 ? ` · ${dr.length}` : ''}`} tone="ok" onDone={() => doPlace(pl, 'drop')} /> : null}
         {pk.length ? <Slider style={dr.length ? {marginTop: 8} : undefined} key={'p' + pl.key + pk.length} label={`Dra för Lastad${pk.length > 1 ? ` · ${pk.length}` : ''}`} tone="go" onDone={() => doPlace(pl, 'pickup')} /> : null}
       </View>
@@ -863,12 +862,14 @@ const o = themed(() => StyleSheet.create({
   lgWho: {color: C.ink, fontFamily: FONT.cond, fontSize: 17, fontWeight: '700', lineHeight: 20},
   lgAdr: {color: C.dim, fontSize: 13.5, marginTop: 1},
   lgMeta: {color: C.faint, fontSize: 12.5, marginTop: 2},
-  lgTel: {width: 36, height: 36, borderRadius: R, backgroundColor: C.peopleSoft, alignItems: 'center', justifyContent: 'center'},
+  lgNav: {width: 40, height: 40, borderRadius: R, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center'},
+  lgTel: {width: 40, height: 40, borderRadius: R, backgroundColor: C.peopleSoft, alignItems: 'center', justifyContent: 'center'},
   tim: {flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8},
   timRow: {flexDirection: 'row', gap: 8, marginTop: 2},
   clkL: {color: C.dim, fontSize: 12.5, fontWeight: '700'},
   clkNow: {color: C.accentInk, fontFamily: FONT.cond, fontSize: 14, fontWeight: '700'},
-  clk: {backgroundColor: C.panel, borderRadius: R, borderWidth: 1, borderColor: C.edge, height: 42, marginTop: 3, color: C.ink, fontFamily: FONT.cond, fontSize: 20, fontWeight: '700', textAlign: 'center', padding: 0},
+  clk: {backgroundColor: C.panel, borderRadius: R, borderWidth: 1, borderColor: C.edge, height: 42, marginTop: 3, alignItems: 'center', justifyContent: 'center'},
+  clkT: {color: C.ink, fontFamily: FONT.cond, fontSize: 20, fontWeight: '700'},
   timSum: {color: C.ink, fontFamily: FONT.cond, fontSize: 15.5, fontWeight: '700', textAlign: 'right'},
   timBig: {backgroundColor: C.panel2, borderRadius: R, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 8, marginTop: 10},
   timL: {color: C.ink, fontFamily: FONT.cond, fontSize: 15.5, fontWeight: '700'},

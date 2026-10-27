@@ -352,7 +352,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
           ) : (
             <>
               <View style={st.secHead}><Text style={st.sec}>Tid</Text><Text style={st.hint}>{timjobb ? 'Timjobb · ' : ''}{tid ? fmtMin(tid) + ' · ' : ''}skickas till Opter</Text></View>
-              <TidInput minutes={null} onChange={setTid} start={start} end={end} initial={timjobb ? 'span' : 'hm'} />
+              <TidInput minutes={null} onChange={setTid} start={start} end={end} initial={timjobb ? 'span' : 'hm'} bg={C.bg} />
             </>
           ))}
 

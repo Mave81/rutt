@@ -35,6 +35,7 @@ jest.mock('../src/opter/OpterClient', () => jest.fn().mockImplementation(() => (
 const App = require('../App').default;
 const OrdersView = require('../src/ui/OrdersView').default;
 const SignScreen = require('../src/ui/SignScreen').default;
+const {TimeSheet} = require('../src/ui/Wheel');
 const texts = (r: any) => r.root.findAll((n: any) => n.type === Text).map((n: any) => [].concat(n.props.children).map((x: any) => (typeof x === 'string' || typeof x === 'number' ? x : '')).join('')).join(' | ');
 const press = async (r: any, label: RegExp) => {
   const tn = r.root.findAll((c: any) => c.type === Text && label.test([].concat(c.props.children).map((x: any) => (typeof x === 'string' || typeof x === 'number' ? x : '')).join('')))[0];
@@ -123,12 +124,12 @@ test('BDX-hämtning: På timme Ja direkt i ordern (även vid Hämta), start sät
   expect(st0.on).toBe(true);
   expect(typeof st0.start).toBe('number');
   // Starttid 07:15 och sluttid 15:30 skrivs in
-  const startIn = r.root.findAll((n: any) => n.props && n.props.placeholder === '--:--' && n.props.onEndEditing)[0];
-  await ReactTestRenderer.act(async () => { startIn.props.onChangeText('7.15'); });
-  await ReactTestRenderer.act(async () => { startIn.props.onEndEditing(); });
-  const endIn = r.root.findAll((n: any) => n.props && n.props.placeholder === 'vid Lossad' && n.props.onEndEditing)[0];
-  await ReactTestRenderer.act(async () => { endIn.props.onChangeText('1530'); });
-  await ReactTestRenderer.act(async () => { endIn.props.onEndEditing(); });
+  // Start och Slut väljs med hjulet (tryck på tiden → hjulbladet → Klar)
+  const at = (h: number, m: number) => { const d = new Date(); d.setHours(h, m, 0, 0); return d.getTime(); };
+  const sheets = () => r.root.findAllByType(TimeSheet);
+  expect(sheets().map((x: any) => x.props.title)).toEqual(['Starttid', 'Sluttid']);
+  await ReactTestRenderer.act(async () => { sheets()[0].props.onDone(at(7, 15)); });
+  await ReactTestRenderer.act(async () => { sheets()[1].props.onDone(at(15, 30)); });
   expect(texts(r)).toContain('8 h 15 min');
   const tt = r.root.findByType(OrdersView).props.timOf(pick);
   expect(new Date(tt.start).toTimeString().slice(0, 5)).toBe('07:15');

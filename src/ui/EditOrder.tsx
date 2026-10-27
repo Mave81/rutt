@@ -186,7 +186,7 @@ export default function EditSheet({item, opts, history, onClose, onSend, onRepod
         {back}
         <Text style={e.h}>{String(timeField.label || 'Tid').replace(/\s*\(.*\)/, '')}</Text>
         <Text style={e.p}>{cur ? `Nu på ordern: ${fmtMin(cur)}. ` : ''}Går till Opter som en ändring på ordern, samma som Tid i Opter Driver.</Text>
-        <TidInput minutes={cur || null} onChange={setTid} start={item.start || null} />
+        <TidInput minutes={cur || null} onChange={setTid} start={item.start || null} bg={C.panel} />
         <SendBtn ok={tid != null && tid > 0 && tid !== cur} why={tid === cur ? 'Samma tid som redan står på ordern.' : 'Välj tid.'}
           label={`Tid ${tid ? fmtMin(tid) : ''}`}
           edit={() => ({changes: [{cet: timeField.cet, kind: 'dec', value: String(tid)}]})} />
