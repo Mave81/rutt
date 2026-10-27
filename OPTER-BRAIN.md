@@ -193,3 +193,7 @@ Fält: 1 RES_Id, 2 VHC_Id, **3 SHI_Id (meddelandet kan höra till en order!)**, 
 - RUTT 3.52: StatusExtras (src/ui/StatusExtras.tsx) = Frågor + Artikel + Ändringar i kvittensen och i "Innan du lastar". Skickas i pre-ändringen före statusen (sendLoad/sendUnload).
 - Tidshjul (src/ui/Wheel.tsx), navigera-knapp vid varje adress, strip-etiketter på en rad, tillgänglighetsnamn på ikonknappar.
 - Kvar att bygga (finns i Opter, inte i RUTT): Kollin (nytt kolli), visa bifogade filer, fraktsedelkontroll (CUS_ForceFreightBillCheck*), SMS-signatur, Ge bort alla.
+
+## 21. 3.53 (27 okt)
+- Imorgon-planen (PlanDay): varje rad går att trycka på → samma orderblad som idag (OrdersView sheetOnly + openReq).
+- "1 stopp hittas inte på kartan" = Lyckås måleri, "klockelundsvägen" (utan nummer, nybyggt område) 12363 Farsta. Nominatim-reserv: gata+postnr+ort → fritext → gata+ort → postnr → ort; ungefärlig plats markeras (geoApprox) och PlanDay säger vilket stopp. Gamla "hittades inte" provas om.

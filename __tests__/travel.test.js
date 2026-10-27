@@ -48,3 +48,12 @@ test('adress utan koordinater slås upp och används i rutten; okänd adress spa
   expect(g[1].lat).toBeUndefined();
   expect(await T.geocode(stops, async () => { throw new Error('ska inte anropas igen'); })).toBe(0); // båda sparade
 }, 15000);
+
+test('gatan finns inte på kartan (Lyckås måleri, "klockelundsvägen", 12363 Farsta) → postnumret ger ungefärlig plats', async () => {
+  const calls = [];
+  const fake = async (u) => { calls.push(u); return {json: async () => (/[?&]postalcode=12363$/.test(u) ? [{lat: '59.2425', lon: '18.0989'}] : [])}; };
+  const stops = [{drop: 'L', who: 'Lyckås måleri', adr: 'klockelundsvägen', zip: '12363', area: 'Farsta'}];
+  expect(await T.geocode(stops, fake)).toBe(1);
+  expect(calls.length).toBe(4); // gata+postnr+ort, fritext, gata+ort, postnr
+  expect(T.withGeo(stops)[0]).toMatchObject({lat: 59.2425, lng: 18.0989, geo: true, geoApprox: 'postnr'});
+}, 15000);

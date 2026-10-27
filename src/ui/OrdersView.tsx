@@ -207,7 +207,7 @@ function ClockField({label, value, onSet, placeholder = '--:--'}: {label: string
   );
 }
 
-export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell, me = '', onAddNum, onScan, timOf, onSetTim, onSetTimes, sedelOf}: {
+export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell, me = '', onAddNum, onScan, timOf, onSetTim, onSetTimes, sedelOf, sheetOnly = false, openReq = null}: {
   route: any; cargo: any; ost: Record<string, any>; allStops: any[];
   onLoaded: (st: any, more?: any[]) => void; onUnload: (st: any, more?: any[]) => void;
   onEdit: (cid: string, st: any) => void;
@@ -222,6 +222,8 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   onSetTim?: (sts: any[], on: boolean) => void;
   onSetTimes?: (sts: any[], t: {start?: number | null; end?: number | null}) => void;
   sedelOf?: (cid: string) => any;
+  sheetOnly?: boolean; // bara bladen (används av Imorgon-planen: tryck på en order → samma blad som idag)
+  openReq?: {key: number; cid: string; kind: 'pickup' | 'drop'} | null;
 }) {
   const [callStop, setCallStop] = useState<any>(null);
   const [sms, setSms] = useState<any>(null);
@@ -266,6 +268,14 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     return out;
   }, [rows]);
   const k = (r: Row) => r.kind + r.cid;
+  // Öppna en order utifrån (Imorgon-listan)
+  React.useEffect(() => {
+    if (!openReq) return;
+    const r = rows.find(x => x.kind === openReq.kind && String(x.cid) === String(openReq.cid));
+    if (r) { setOpenRow(r); return; }
+    const st = (allStops || []).find((x: any) => String(openReq.kind === 'pickup' ? x.pickup : x.drop) === String(openReq.cid));
+    if (st) setOpenRow({kind: openReq.kind, st, cid: openReq.cid, plan: null, state: 'wait'} as any);
+  }, [openReq && openReq.key]);
   const multi = !perm || perm.multi !== false;
   const canP = !perm || perm.pickup !== false, canD = !perm || perm.delivery !== false;
   const canAct = (r: JRow) => r.state === 'act' && (r.kind === 'pickup' ? canP : canD);
@@ -723,6 +733,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
 
   return (
     <View style={{flex: 1}}>
+      {!sheetOnly ? <>
       {selMode ? selBar : (places.length ? strip : null)}
       <ScrollView style={{flex: 1}} contentContainerStyle={{paddingHorizontal: 12, paddingBottom: 18}} keyboardShouldPersistTaps="handled">
         {places.length ? places.map(placeBlock) : (
@@ -752,6 +763,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         ) : null}
       </ScrollView>
       {selMode ? selDock : nextDock()}
+      </> : null}
 
       {rowSheet()}
       {shopView()}

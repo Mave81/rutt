@@ -14,7 +14,7 @@ import {simulateLoad} from '../opter/optimizer';
 const SHADES = ['#FF9117', '#FFC27A', '#B85F00', '#FFE0B8', '#7A3F00', '#E87A00', '#FFAA45', '#4F2900'];
 const INK = ['#000', '#000', '#FFF', '#000', '#FFF', '#000', '#000', '#FFF'];
 
-export default function PlanDay({route, cargo, onReorder, starts = [], startId, onStart}: {route: any; cargo: any; onReorder: (keys: string[] | null) => void; starts?: {id: string; label: string}[]; startId?: string; onStart?: (id: string) => void}) {
+export default function PlanDay({route, cargo, onReorder, starts = [], startId, onStart, onOpen}: {route: any; cargo: any; onReorder: (keys: string[] | null) => void; starts?: {id: string; label: string}[]; startId?: string; onStart?: (id: string) => void; onOpen?: (s: any) => void}) {
   const bottom = useSafeAreaInsets().bottom + 30;
   const [open, setOpen] = useState(false);
   const order: any[] = (route && route.order) || [];
@@ -27,10 +27,11 @@ export default function PlanDay({route, cargo, onReorder, starts = [], startId, 
     const pal = cids.reduce((n, c) => n + (Number((cargo[c] || {}).pal) || 0), 0);
     const peak = (sim.peak || []).filter(Boolean).length;
     const late = (route && route.plan && route.plan.broken) || [];
-    const nogeo = order.filter((s: any) => s.lat == null).length;
+    const nogeoL = order.filter((s: any) => s.lat == null), nogeo = nogeoL.length;
+    const approxL = order.filter((s: any) => s.geoApprox);
     const est = rows.filter((r: any, i: number) => i > 0 && r && r.leg && r.leg.est && !r.nogeo).length;
     const tps = order.map((s: any, i: number) => ({s, r: rows[i]})).filter((x: any) => x.s.tidspass);
-    return {cids, pal, peak, blocks: sim.blocks || [], late, end: route && route.plan && route.plan.end, nogeo, est, tps};
+    return {cids, pal, peak, blocks: sim.blocks || [], late, end: route && route.plan && route.plan.end, nogeo, nogeoL, approxL, est, tps};
   }, [route, cargo]);
   if (!route || !order.length) return <View style={p.empty}><Bi n="calendar-event" size={30} color={C.faint} /><Text style={p.emptyT}>Inga order för imorgon än.</Text></View>;
   const date = route.day ? new Date(route.day + 'T12:00').toLocaleDateString('sv-SE', {weekday: 'long', day: 'numeric', month: 'long'}) : '';
@@ -61,7 +62,8 @@ export default function PlanDay({route, cargo, onReorder, starts = [], startId, 
               <Text style={p.tpT}>Tidspassning {x.s.who || ''}{x.s.tidspass.time ? ` kl ${x.s.tidspass.time}` : ' – tiden står inte i ordern, kolla med kontoret'}{x.s.tidspass.time && x.r && x.r.eta ? ` · du är där ca ${hhmm(new Date(x.r.eta))}` : ''}</Text>
             </View>
           ))}
-          {info.nogeo ? <Text style={[p.sumS, {color: C.bad}]}>{info.nogeo} stopp hittas inte på kartan – körtiden dit är okänd, ordningen kan bli fel</Text>
+          {info.approxL.length ? <Text style={p.sumS}>Ungefärlig plats (gatan finns inte på kartan, postnumret används): {info.approxL.map((x: any) => `${x.who || x.adr} – ${[x.adr, x.area].filter(Boolean).join(', ')}`).join('; ')}</Text> : null}
+          {info.nogeo ? <Text style={[p.sumS, {color: C.bad}]}>Hittas inte på kartan: {info.nogeoL.map((x: any) => `${x.who || '—'} (${[x.adr, x.zip, x.area].filter(Boolean).join(' ') || 'adress saknas'})`).join(', ')} – körtiden dit är okänd, ordningen kan bli fel</Text>
             : info.est ? <Text style={p.sumS}>Körtider uppskattade (inget svar från kartan än)</Text>
             : <Text style={p.sumS}>Körtider längs vägarna (OpenStreetMap)</Text>}
         </View>
@@ -72,7 +74,7 @@ export default function PlanDay({route, cargo, onReorder, starts = [], startId, 
             ? `Hämta ${pal ? pal + ' pall' : ''}${s.open ? ` · öppnar ${s.open}` : ''}`
             : `Lämna ${pal ? pal + ' pall' : ''}${s.area ? ` · ${s.area}` : ''}${s.deadline ? ` · senast ${s.deadline}` : ''}`;
           return (
-            <View key={(s.pickup ? 'p' : 'd') + cid} style={p.row}>
+            <Pressable key={(s.pickup ? 'p' : 'd') + cid} style={p.row} onPress={() => onOpen && onOpen(s)} android_ripple={{color: C.edge}} accessibilityLabel={`${s.pickup ? 'Hämta' : 'Lämna'} ${s.who || ''} – visa ordern`}>
               <View style={[p.n, {backgroundColor: SHADES[n % SHADES.length]}]}><Text style={[p.nT, {color: INK[n % INK.length]}]}>{n + 1}</Text></View>
               <Bi n={s.pickup ? 'box-arrow-up-right' : 'check2'} size={15} color={s.pickup ? C.accentInk : C.accent2} />
               <View style={{flex: 1, minWidth: 0}}>
@@ -81,7 +83,8 @@ export default function PlanDay({route, cargo, onReorder, starts = [], startId, 
                 <Text style={p.sub} numberOfLines={1}>{sub}</Text>
               </View>
               <Text style={[p.tm, r.late ? {color: C.bad} : null]}>{r.eta ? `ca ${hhmm(new Date(r.eta))}` : ''}</Text>
-            </View>
+              {onOpen ? <Bi n="chevron-right" size={13} color={C.faint} /> : null}
+            </Pressable>
           );
         })}
         <Pressable style={p.btn} onPress={() => setOpen(true)} android_ripple={{color: C.edge}}>

@@ -53,7 +53,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '27 okt · 3.52 · Artiklar, Frågor, Ändringar som i Opter';
+const BUILD = '27 okt · 3.53 · Imorgon går att trycka på, adress hittas via postnr';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -183,6 +183,7 @@ function AppInner(): React.JSX.Element {
   const markEgen = (ids: string[], patch: Partial<Egen>) => { const set = new Set(ids.filter(isEgen)); if (set.size) saveEgna(l => l.map(e => (set.has(e.id) ? {...e, ...patch} : e))); };
   const saveEgna = (f: (l: Egen[]) => Egen[]) => setEgna(l => { const n = f(l); if (egnaLoaded.current) saveJSON(EGNA_KEY, n); return n; });
   const [sedelFor, setSedelFor] = useState<{media?: any; job?: Egen} | null>(null);
+  const [planOpen, setPlanOpen] = useState<{key: number; cid: string; kind: 'pickup' | 'drop'} | null>(null);
   const [scan, setScan] = useState<'camera' | 'gallery' | null | false>(false); // Skanna: false = stängd, null = välj Kamera/Bilder
   const [scanPages, setScanPages] = useState<{uri: string; name?: string}[] | null>(null); // delad turlista → rakt in
   const [smsOpter, setSmsOpter] = useState(false); // Lastat/Lossat-SMS även för Opter-order (Inställningar)
@@ -1523,7 +1524,14 @@ function AppInner(): React.JSX.Element {
               ))}
             </View>
           )}
-          {tab === 'plan' && planDay === 'imorgon' && later.length > 0 && <PlanDay route={laterRoute} cargo={fullSrc ? fullSrc.cargo : {}} onReorder={saveManualLater} starts={STARTS} startId={startId} onStart={pickStart} />}
+          {tab === 'plan' && planDay === 'imorgon' && later.length > 0 && <PlanDay route={laterRoute} cargo={fullSrc ? fullSrc.cargo : {}} onReorder={saveManualLater} starts={STARTS} startId={startId} onStart={pickStart}
+            onOpen={(x: any) => setPlanOpen({key: Date.now(), cid: String(x.pickup || x.drop), kind: x.pickup ? 'pickup' : 'drop'})} />}
+          {/* Imorgon: tryck på en order → samma blad som idag (hela körningen, texten, navigera, ring, Mer) */}
+          {tab === 'plan' && planDay === 'imorgon' && laterRoute && !(laterRoute as any).error ? (
+            <OrdersView sheetOnly openReq={planOpen} route={laterRoute} cargo={fullSrc ? fullSrc.cargo : {}} ost={ost} allStops={later} onLoaded={onLoaded} onUnload={openSign}
+              onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live}
+              perm={demo ? null : orders.perm} me={driverName} onAddNum={addJobNum} timOf={timOf} onSetTim={setTim} onSetTimes={setTimes} sedelOf={(cid: string) => sedelInfo[cid] || null} />
+          ) : null}
           {tab === 'plan' && <RevokedBar list={revLog} onConfirm={confirmRevoked} onOpen={() => { setTab('klart'); setKlartView('aterkallade'); }} />}
           {tab === 'plan' && (planDay === 'idag' || !later.length) && !orders.stops.length && !demo && (
             <View style={s.emptyBox}>
