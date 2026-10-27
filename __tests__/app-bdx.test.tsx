@@ -23,11 +23,12 @@ function payload() {
 }
 const mockRutt = P.toRutt(P.decodeSync(payload()));
 const mockSet = jest.fn(async () => ({confirmed: true, rutt: mockRutt}));
+const mockEdit = jest.fn(async () => ({confirmed: true, sent: true, changesSeen: {total: 1, seen: 1, missing: []}, rutt: mockRutt}));
 jest.mock('../src/opter/OpterClient', () => jest.fn().mockImplementation(() => ({
   logon: {acdOffId: 7, vhcId: 1, ok: true},
   connect: jest.fn(async () => {}), doLogon: jest.fn(async () => ({ok: true, needChoose: false, resId: 5, name: 'Kenneth Andersson'})),
   syncRef: jest.fn(async () => ({rows: []})), resources: () => [], startWork: jest.fn(async () => ({rutt: mockRutt})),
-  messages: () => [], poll: jest.fn(async () => ({rutt: mockRutt, msgs: []})), markRead: jest.fn(), setStatus: mockSet,
+  messages: () => [], poll: jest.fn(async () => ({rutt: mockRutt, msgs: []})), markRead: jest.fn(), setStatus: mockSet, editShipment: mockEdit,
   disconnect: jest.fn(), dump: jest.fn(), workStatus: jest.fn(),
 })));
 (NativeModules as any).RuttSms = {ocr: jest.fn(async (uri: string) => require('./fixtures/' + uri.replace(/^file:\/\/\//, '').replace(/\.jpg$/, '') + '.json'))};
@@ -139,5 +140,15 @@ test('BDX-hämtning: På timme Ja direkt i ordern (även vid Hämta), start sät
   expect(sg.props.timjobb).toBe(true);
   expect(new Date(sg.props.start).toTimeString().slice(0, 5)).toBe('07:15');
   expect(new Date(sg.props.end).toTimeString().slice(0, 5)).toBe('15:30');
+  // Kvittera med Tid 8 h 15 min → Tid (CET 34 = 495 min) skickas FÖRE Lossad, i samma kö (som Opter Driver)
+  mockEdit.mockClear(); mockSet.mockClear();
+  await ReactTestRenderer.act(async () => { sg.props.onDone({mode: 'name', name: 'Kalle', sig: null, photos: [], adds: [], kolli: null, comment: '', comment2: '', typeId: 0, subId: 0, typeName: '', timeMin: 495, at: Date.now()}); });
+  await tick(2000);
+  expect(mockEdit).toHaveBeenCalledTimes(1);
+  expect((mockEdit.mock.calls[0] as any)[1].changes).toEqual([{cet: 34, kind: 'dec', value: '495'}]);
+  const unload = mockSet.mock.calls.findIndex((c: any) => c[0] && c[0].shiId === 234100);
+  expect(unload).toBeGreaterThanOrEqual(0);
+  expect(mockEdit.mock.invocationCallOrder[0]).toBeLessThan(mockSet.mock.invocationCallOrder[unload]);
+  expect(texts(r)).toContain('Tid 8 h 15 min syns i Opter');
   jest.useRealTimers();
 });

@@ -52,7 +52,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '27 okt · 3.49 · På timme + start/slut i ordern, även vid Hämta';
+const BUILD = '27 okt · 3.50 · Tid och tillägg skickas före Lossad (som Opter)';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -575,7 +575,7 @@ function AppInner(): React.JSX.Element {
     const o = orders.opts || {};
     return {needs, reasons: o.delayReasons || [], damageTypes: o.damageTypes || []};
   }
-  async function sendUnload(st: any, pod: any) {
+  async function sendUnload(st: any, pod: any, tidMin: number | null = null, adds: any[] = []) {
     const L = st.live;
     if (!live || !L || !L.unloadSt) return;
     const podData = await podPayload(L, pod);
@@ -587,8 +587,30 @@ function AppInner(): React.JSX.Element {
     const pre: any = {};
     if (need && need.reason && dl.tfrId && dl.comment) pre.changes = [{cet: 106, kind: 'str', value: dl.comment}, {cet: 107, kind: 'int', value: String(dl.tfrId)}];
     if (need && need.damage && dl.damage) pre.damages = [{ddtId: dl.damage.ddtId, daeId: dl.damage.daeId, darId: dl.damage.darId, comment: dl.damage.comment || '', images: []}];
+    // Tid (timjobb): som Opter Driver – Ändringar läggs på ordern i samma veva som Lossad, FÖRE statusen.
+    // (3.45–3.49 skickade den 8 s efter Lossad, då var ordern redan klar och Opter tog inte emot tiden.)
+    if (tidMin && tidMin > 0) pre.changes = [...(pre.changes || []), {cet: 34, kind: 'dec', value: String(Math.round(tidMin))}];
+    // Tillägg (väntetid m.m.) också före statusen, som Opter Driver (AddService läggs på ordern, sen setStatus).
+    if (adds && adds.length) pre.addServices = adds.map((a: any) => ({satId: a.satId, number: a.number, descr: ''}));
+    const addLabel = adds && adds.length ? 'Tillägg: ' + adds.map((a: any) => a.name + (a.number ? ' ' + a.number : '')).join(', ') : '';
+    const tidLabel = tidMin ? `Tid ${tidMin >= 60 ? Math.floor(tidMin / 60) + ' h' : ''}${tidMin % 60 ? ' ' + (tidMin % 60) + ' min' : ''}`.trim() : '';
     queueSend(st.drop, 'unload', async () => {
-      if (pre.changes || pre.damages) { try { const e = await client.editShipment(L, pre); dlog('försening ' + st.drop + ' ' + JSON.stringify(e && (e.confirmed != null ? {ok: e.confirmed} : e)).slice(0, 80)); } catch (e: any) { dlog('försening fel ' + String(e?.message || e)); } }
+      if (pre.changes || pre.damages || pre.addServices) {
+        try {
+          const e: any = await client.editShipment(L, pre);
+          dlog('ändring före lossad ' + st.drop + ' ' + JSON.stringify(e && {ok: e.confirmed, seen: e.changesSeen}).slice(0, 120));
+          if (addLabel) {
+            const id = 'add' + Date.now();
+            setOst(o => { const cur = {...(o[st.drop] || {})}; cur.edits = [...(cur.edits || []), {id, label: addLabel, at: Date.now(), state: e && e.confirmed ? 'ok' : 'unconfirmed'}]; return {...o, [st.drop]: cur}; });
+          }
+          if (tidLabel) {
+            const cs = e && e.changesSeen; const seen = !!(cs && cs.total && cs.seen === cs.total);
+            const id = 'tid' + Date.now();
+            setOst(o => { const cur = {...(o[st.drop] || {})}; cur.edits = [...(cur.edits || []), {id, label: tidLabel, at: Date.now(), state: e && e.confirmed ? (seen || !cs ? 'ok' : 'unconfirmed') : 'unconfirmed'}]; return {...o, [st.drop]: cur}; });
+            flash(e && e.confirmed ? (seen ? `${tidLabel} syns i Opter` : `${tidLabel} skickad – Opter visar den inte än`) : `${tidLabel}: Opter bekräftade inte`, null);
+          }
+        } catch (e: any) { dlog('ändring före lossad fel ' + String(e?.message || e)); if (tidLabel) flash(`${tidLabel}: kunde inte nå Opter`, null); }
+      }
       const r = await client.setStatus(L, L.unloadSt.id, podData); return (!podData && hadPod && r.confirmed) ? {...r, noPod: true} : r; });
   }
   // Kvittensen som sparades vid lossningen (signatur + namn) skickas till Opter igen, utan ny signatur.
@@ -641,7 +663,7 @@ function AppInner(): React.JSX.Element {
     const o = ost[cid] || {};
     const pick = fullSrc && fullSrc.stops.find((s: any) => String(s.pickup) === String(cid));
     const drop = fullSrc && fullSrc.stops.find((s: any) => String(s.drop) === String(cid));
-    if (o.doneAt && drop) sendUnload(drop, podMem.current[cid] || o.pod || {});
+    if (o.doneAt && drop) { const pd = podMem.current[cid] || o.pod || {}; sendUnload(drop, pd, pd.timeMin || null); } // tillägg skickas inte igen (kan redan ha kommit fram)
     else if (o.loadedAt && pick) sendLoad(pick);
   }
 
@@ -845,26 +867,9 @@ function AppInner(): React.JSX.Element {
     for (const st of list) {
       const pod = many ? {...pod0, kolli: st.kolli != null ? st.kolli : null} : pod0;
       podMem.current[st.drop] = pod;
-      sendUnload(st, pod);
+      // Tid och tillägg gäller hela stoppet → på första Opter-ordern (en väntetid debiteras en gång), i samma sändning som Lossad.
+      sendUnload(st, pod, pod0.timeMin && st === firstLive ? pod0.timeMin : null, st === firstLive ? (pod0.adds || []).filter((a: any) => a.satId) : []);
       if (!demo) { const cid = String(st.drop); const d = dayOrderOf(cid); DB.logEvent({t: doneT, kind: 'unload', cid, who: st.who, lat: st.lat, lng: st.lng, pal: d.pal}); DB.saveOrder(DB.ymdOf(doneT), {...d, doneAt: doneT, podName: pod.name || '', kolli: pod.kolli != null ? pod.kolli : null}); }
-      // Tid (timjobb) från kvittensen: skickas som Opters "Tid" (minuter) när Ångra gått ut, på första ordern.
-      if (pod0.timeMin && st === firstLive) {
-        const tm = pod0.timeMin, key = st.drop + ':tid';
-        if (addTimers.current[key]) clearTimeout(addTimers.current[key].t);
-        const fireTid = () => { if (!addTimers.current[key] || addTimers.current[key].fire !== fireTid) return; clearTimeout(addTimers.current[key].t); delete addTimers.current[key]; sendEdit(st.drop, st, {changes: [{cet: 34, kind: 'dec', value: String(tm)}]}, `Tid ${tm >= 60 ? Math.floor(tm / 60) + ' h ' : ''}${tm % 60 ? (tm % 60) + ' min' : ''}`.trim()); };
-        addTimers.current[key] = {t: setTimeout(fireTid, 8400), fire: fireTid};
-      }
-      // Tillägg valda i kvittensen skickas när Ångra gått ut (samma väntan som Lossad).
-      const adds = (pod0.adds || []).filter((a: any) => a.satId);
-      // Gäller hela stoppet → läggs på första ordern (en väntetid debiteras en gång), som när man gör det i Opter.
-      if (adds.length && st === firstLive) {
-        const mine = adds;
-        {
-          if (addTimers.current[st.drop]) clearTimeout(addTimers.current[st.drop].t);
-          const fireAdd = () => { if (!addTimers.current[st.drop] || addTimers.current[st.drop].fire !== fireAdd) return; clearTimeout(addTimers.current[st.drop].t); delete addTimers.current[st.drop]; sendEdit(st.drop, st, {addServices: mine.map((a: any) => ({satId: a.satId, number: a.number, descr: ''}))}, 'Tillägg: ' + mine.map((a: any) => a.name + (a.number ? ' ' + a.number : '')).join(', ')); };
-          addTimers.current[st.drop] = {t: setTimeout(fireAdd, 8400), fire: fireAdd};
-        }
-      }
     }
     smsLater(list.map((x: any) => ({st: x, cid: String(x.drop)})), 'unload', doneT, pod0.name || '');
     markEgen(list.map((x: any) => String(x.drop)), {doneAt: doneT});

@@ -181,3 +181,9 @@ Fält: 1 RES_Id, 2 VHC_Id, **3 SHI_Id (meddelandet kan höra till en order!)**, 
 - **På timme Ja/Nej finns i varje Opter-order**, även vid Hämta (BDX 234661 "3 stopp" visade det inte – bara lämningar hade det). Ja → Start sätts direkt (när du lastade, annars nu). Start och Slut går att ändra: "Nu" eller skriv 7.15 / 0715 / 07:15. Summan visas (8 h 15 min). Sparas i ost[cid].timStart/timEnd.
 - Vid Lossad: Tid öppen med samma start och slut (slut = nu om inget satts) → skickas som Opters Tid (CET 34).
 - "Läs in turleveranslistan" visas inte för BDX-hämtningar (Kenta: BDX ger papperen, behöver inte skannas).
+
+## 19. 3.50 (27 okt) – Tid kom inte fram (09:45–12:45 → Opter visade tom Tid)
+- **Fel**: 3.45–3.49 skickade Tid (och tillägg) i en egen sändning 8 s EFTER Lossad. Opter Driver gör tvärtom (ShipmentDetailViewPager, statusdialogen): kvittens (registerPod), AddService och ShipmentChange (Ändringar) läggs på ordern och sedan setStatus – allt i samma veva, innan ordern är klar.
+- **Nu**: sendUnload skickar Tid (CET 34, minuter) + tillägg + försening som en ändring direkt före Lossad-statusen i samma kö. Ångra stoppar båda. Efteråt visas "Tid 3 h syns i Opter" / "skickad – Opter visar den inte än" (changesSeen) och raden hamnar i orderns historik.
+- Tid i Opter = minuter (Util.getTimeHourAndMinutesString delar med 60).
+- Ej verifierat mot riktig server än. Ordern från förmiddagen (09:45–12:45) fick ingen Tid.
