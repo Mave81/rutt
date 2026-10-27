@@ -93,7 +93,7 @@ Opters menyval (`ShipmentListFragment.OptionsItem`) och var RUTT står:
 | Välj status… | SetArbitraryStatusPermission | ✔ |
 | Leveransbevis | ProofOfDeliveryPermission | ✔ |
 | Confirm revoked (kvittera återkallad) | – | ✔ 3.43 (`client.confirmRevoked`, fält 67) **[OVERIFIERAT mot server]** |
-| Artiklar (Bomkörning, Budtransport TIM, Express, Inbärning, Lastningstid, Lossningstid, OB1 – "Enhet 1") | ArticlesPermission (Kentas kontor: **true**) | ✘ **saknas** – ShipmentArticle + ShipmentPriceItem (SPI_SAR_Id, SPI_Unit1Quantity) |
+| Artiklar (Bomkörning, Budtransport TIM, Express, Inbärning, Lastningstid, Lossningstid, OB1 – "Enhet 1") | ArticlesPermission (Kentas kontor: **true**) | ✔ 3.52 – Mer → Artiklar + i kvittensen. ShipmentChange: CET 68 SPI_SAR_Id (ny, SCV_SPI_Id utelämnas) + 45 Unit1Quantity (+46, 59 Descr); befintlig rad = SCV_SPI_Id (prop 4). **[OVERIFIERAT mot server]** |
 | Tillägg | AddServicePermission (Kentas kontor: **false**) | dolt, som Opter |
 | Ändringar (Vikt, Volym, Pallplats, Flakmeter, Kollin, Tid, Avstånd, Fraktsedel, Littera, Ref …) | ChangesPermission + SHI_*Permission | ✔ (Tid 3.40) |
 | Kollin (Nytt kolli: vikt, volym, L/B/H, kollislag, godstyp, flakmeter, kollinr, antal) | – | ✘ saknas |
@@ -101,7 +101,7 @@ Opters menyval (`ShipmentListFragment.OptionsItem`) och var RUTT står:
 | Bifogade filer (visa + Lägg till) | – | delvis: lägga till bild ✔, visa lista ✘ |
 | Lägg till bild (Kamera/Galleri) | AddImagePermission | ✔ |
 | Ge bort / (alla) – Välj fordon | GiveAwayPermission | ✔ (ge bort), "alla" ✘ |
-| Frågor (ShipmentQuery: vid hämtning/lämning, ja/nej eller text) | – | ✘ saknas |
+| Frågor (ShipmentQuery: vid hämtning/lämning, ja/nej eller text) | Query (default true) | ✔ 3.52 – krävs när statusen har SHS_QueryEnabled (22): "Innan du lastar" + i kvittensen. Svar = ShipmentQuery (befintlig nyckel) → ny ShipmentAnswer (1 SHI, 2 SHQ, 5 text / 6 bool, 7/8 lat/lng), före statusen. **[OVERIFIERAT mot server]** |
 | Lås upp, Skriv ut, SMS-signatur, Lösa artiklar, Kontrollera fraktsedel | – | ✘ (sällan använt) |
 
 ## 8. Chatten (FreeTextMessage)
@@ -187,3 +187,9 @@ Fält: 1 RES_Id, 2 VHC_Id, **3 SHI_Id (meddelandet kan höra till en order!)**, 
 - **Nu**: sendUnload skickar Tid (CET 34, minuter) + tillägg + försening som en ändring direkt före Lossad-statusen i samma kö. Ångra stoppar båda. Efteråt visas "Tid 3 h syns i Opter" / "skickad – Opter visar den inte än" (changesSeen) och raden hamnar i orderns historik.
 - Tid i Opter = minuter (Util.getTimeHourAndMinutesString delar med 60).
 - Ej verifierat mot riktig server än. Ordern från förmiddagen (09:45–12:45) fick ingen Tid.
+
+## 20. 3.51–3.52 (27 okt) – genomgång av hela appen
+- Opters statusdialog (ShipmentDetailViewPager ~985–1080): vid Lastad/Lossad visas Kvittens, SMS-signatur, Fraktsedelkontroll, Tillägg, **Artiklar**, **Ändringar (krävs om SHS_Changes, prop 12)**, **Frågor (krävs vid hämtning/lämning om SHS_QueryEnabled, prop 22)**, Försening, Avvikelse – och allt läggs på ordern före setStatus.
+- RUTT 3.52: StatusExtras (src/ui/StatusExtras.tsx) = Frågor + Artikel + Ändringar i kvittensen och i "Innan du lastar". Skickas i pre-ändringen före statusen (sendLoad/sendUnload).
+- Tidshjul (src/ui/Wheel.tsx), navigera-knapp vid varje adress, strip-etiketter på en rad, tillgänglighetsnamn på ikonknappar.
+- Kvar att bygga (finns i Opter, inte i RUTT): Kollin (nytt kolli), visa bifogade filer, fraktsedelkontroll (CUS_ForceFreightBillCheck*), SMS-signatur, Ge bort alla.

@@ -7,13 +7,14 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {Dimensions, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {C, themed} from './theme';
+import {C, themed, R} from './theme';
 import {MAX_PHOTOS, SigData, SignaturePad, SigPreview, SignFullscreen, pickPhoto, useKeyboardLift} from './parts';
 import {Bi} from './Bi';
 import TidInput, {fmtMin} from './TidInput';
+import StatusExtras, {Extras, ExtrasValue} from './StatusExtras';
 
 
-export default function SignScreen({stop, savedNames, saved, onCancel, onDone, addOk = true, timeOk = false, start = null, end = null, delay = null, timjobb = false}: {timjobb?: boolean; end?: number | null; delay?: {needs: {cid: string; who: string; orderNo?: string; reason: boolean; damage: boolean; late?: string}[]; reasons: {id: number; name: string; descr?: string}[]; damageTypes: any[]} | null; stop: any; savedNames: string[]; saved?: any; onCancel: () => void; onDone: (pod: any) => void; addOk?: boolean; timeOk?: boolean; start?: number | null}) {
+export default function SignScreen({stop, savedNames, saved, onCancel, onDone, addOk = true, timeOk = false, start = null, end = null, delay = null, timjobb = false, extras = null}: {extras?: Extras | null; timjobb?: boolean; end?: number | null; delay?: {needs: {cid: string; who: string; orderNo?: string; reason: boolean; damage: boolean; late?: string}[]; reasons: {id: number; name: string; descr?: string}[]; damageTypes: any[]} | null; stop: any; savedNames: string[]; saved?: any; onCancel: () => void; onDone: (pod: any) => void; addOk?: boolean; timeOk?: boolean; start?: number | null}) {
   const insets = useSafeAreaInsets();
   const {kb, lift} = useKeyboardLift();
   const [sig, setSig] = useState<SigData | null>(null);
@@ -32,6 +33,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
   const [comment2, setComment2] = useState('');
   const [typeId, setTypeId] = useState(0);
   const [tidOpen, setTidOpen] = useState(false);
+  const [exV, setExV] = useState<ExtrasValue | null>(null);
   const [tid, setTid] = useState<number | null>(null);
   const [subId, setSubId] = useState(0);
   // Försening (som Opter): orsak + kommentar, och avvikelse om kunden kräver det.
@@ -106,6 +108,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
       if (dType.forcePicture && photos.length === 0) missing.push('foto på avvikelsen');
     }
   }
+  if (exV) missing.push(...exV.missing);
   const ok = missing.length === 0;
 
   async function addPhoto(cam: boolean) {
@@ -115,7 +118,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
     if (!ok) return;
     const autoNote = mode === 'foto' ? `Kund ej på plats – foto taget på begäran av ${name.trim()}` : '';
     const cm = comment.trim() || autoNote;
-    onDone({mode, name: name.trim(), sig: mode === 'sig' || officeSig ? sig : null, photos, adds: Object.entries(adds).map(([id, n]) => ({satId: Number(id), number: String(n || '').trim(), name: (addTypes.find((t: any) => String(t.id) === id) || {}).name || 'Tillägg'})), kolli: group.length ? null : kolli, comment: cm, comment2: comment2.trim(), typeId: type ? type.id : 0, subId: sub ? sub.id : 0, typeName: eff ? eff.name : '', timeMin: tidOpen && tid ? tid : null, at: Date.now(),
+    onDone({mode, name: name.trim(), sig: mode === 'sig' || officeSig ? sig : null, photos, adds: Object.entries(adds).map(([id, n]) => ({satId: Number(id), number: String(n || '').trim(), name: (addTypes.find((t: any) => String(t.id) === id) || {}).name || 'Tillägg'})), kolli: group.length ? null : kolli, comment: cm, comment2: comment2.trim(), typeId: type ? type.id : 0, subId: sub ? sub.id : 0, typeName: eff ? eff.name : '', timeMin: tidOpen && tid ? tid : null, at: Date.now(), answers: exV ? exV.answers : [], xChanges: exV ? exV.changes : [], xLabels: exV ? exV.labels : [],
       delay: dNeeds.length ? {needs: dNeeds, tfrId: tfr, tfrName: (dReasons.find(r => r.id === tfr) || {name: ''}).name, comment: tfText.trim(),
         damage: needDmg && dType ? {ddtId: dType.id, daeId: dEv ? dEv.id : 0, darId: dRs ? dRs.id : 0, name: dType.name, comment: tfText.trim() || cm} : null} : null});
   }
@@ -344,6 +347,8 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
             </>
           ))}
 
+          {!stop.repod ? <StatusExtras x={extras} onChange={v => setExV(o => (JSON.stringify(o) === JSON.stringify(v) ? o : v))} many={group.length > 1} /> : null}
+
           {!stop.repod && timeOk && (!tidOpen ? (
             <Pressable style={st.devToggle} onPress={() => setTidOpen(true)}>
               <Text style={st.devToggleTxt}>Timjobb eller tid som ska debiteras? Lägg till tid</Text>
@@ -413,9 +418,9 @@ const st = themed(() => StyleSheet.create({
   photoAdd: {width: 84, height: 84, borderRadius: 12, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, alignItems: 'center', justifyContent: 'center'},
   photoAddIco: {color: C.accentInk, fontSize: 22, fontWeight: '700'},
   photoAddTxt: {color: C.dim, fontSize: 12, marginTop: 2, fontWeight: '600'},
-  devToggle: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 20, backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1, borderRadius: 12, paddingVertical: 13, paddingHorizontal: 14},
-  devToggleTxt: {color: C.ink, fontSize: 14, fontWeight: '600', flex: 1},
-  devPlus: {color: C.accentInk, fontSize: 18, fontWeight: '800', marginLeft: 8},
+  devToggle: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, backgroundColor: C.panel, borderRadius: R, height: 48, paddingHorizontal: 12},
+  devToggleTxt: {color: C.ink, fontSize: 14.5, flex: 1},
+  devPlus: {color: C.accentInk, fontSize: 20, fontWeight: '700', marginLeft: 8},
   hint: {color: C.faint, fontSize: 12},
   kolliRow: {flexDirection: 'row', alignItems: 'center', gap: 18},
   kBtn: {width: 52, height: 52, borderRadius: 14, backgroundColor: C.panel2, borderColor: C.edge, borderWidth: 1, alignItems: 'center', justifyContent: 'center'},

@@ -548,7 +548,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
           {act && canAct(r) ? <Pressable style={[o.bigBtn, {backgroundColor: pick ? C.accent : C.accent2}]} onPress={() => { close(); if (pick) onLoaded(st); else onUnload(st); }}><Text style={[o.bigBtnT, {color: pick ? '#000000' : '#FFFFFF'}]}>{pick ? 'Lastad' : 'Lossad'}</Text></Pressable> : null}
         </View>
         <Pressable style={o.moreRow} onPress={() => { close(); onEdit(st.parent && st.own ? String(st.parent) : r.cid, st); }}>
-          <Bi n="three-dots" size={16} color={C.dim} /><Text style={o.moreRowT}>Mer: status, tid, tillägg, bild, avvikelse, ändring</Text>
+          <Bi n="three-dots" size={16} color={C.dim} /><Text style={o.moreRowT}>Mer: artiklar, tid, ändring, bild, avvikelse, status</Text>
         </Pressable>
       </Sheet>
     );
@@ -670,9 +670,9 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   const leftQ = sumQty(left.filter(r => r.kind === 'drop'));
   const strip = (
     <View style={o.strip}>
-      <View style={o.stat}><Text style={o.statN}>{cidsLeft.size}</Text><Text style={o.statL}>ORDER KVAR</Text></View>
-      <View style={o.stat}><Text style={o.statN}>{leftQ.kli || leftQ.pal || 0}</Text><Text style={o.statL}>{leftQ.kli ? 'KOLLI KVAR' : 'PALL KVAR'}</Text></View>
-      <View style={o.stat}><Text style={o.statN}>{places.length}</Text><Text style={o.statL}>STOPP KVAR</Text></View>
+      <View style={o.stat}><Text style={o.statN}>{cidsLeft.size}</Text><Text style={o.statL} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>ORDER KVAR</Text></View>
+      <View style={o.stat}><Text style={o.statN}>{leftQ.kli || leftQ.pal || 0}</Text><Text style={o.statL} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{leftQ.kli ? 'KOLLI KVAR' : 'PALL KVAR'}</Text></View>
+      <View style={o.stat}><Text style={o.statN}>{places.length}</Text><Text style={o.statL} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>STOPP KVAR</Text></View>
       {onScan ? <Pressable style={o.stripBtn} hitSlop={6} onPress={onScan}><Bi n="upc-scan" size={15} color={C.ink} /><Text style={o.stripBtnT}>Skanna</Text></Pressable> : null}
       {onReorder && places.length > 1 ? <Pressable style={o.stripBtn} hitSlop={6} onPress={() => setReorder(true)}><Bi n="list-ul" size={16} color={C.ink} /><Text style={o.stripBtnT}>Ordning</Text></Pressable> : null}
     </View>
@@ -817,7 +817,7 @@ const o = themed(() => StyleSheet.create({
   mono: {fontFamily: FONT.mono, fontSize: 12.5, color: C.faint},
   tp: {color: C.accentInk, fontWeight: '700'},
   strip: {flexDirection: 'row', alignItems: 'center', marginHorizontal: 12, marginBottom: 6, backgroundColor: C.panel, borderRadius: R},
-  stat: {flex: 1, paddingVertical: 7, paddingHorizontal: 10},
+  stat: {flex: 1, minWidth: 0, paddingVertical: 7, paddingHorizontal: 8},
   statN: {color: C.ink, fontFamily: FONT.cond, fontSize: 19, fontWeight: '700', lineHeight: 21},
   statL: {color: C.faint, fontFamily: FONT.cond, fontSize: 10.5, fontWeight: '600', letterSpacing: 0.8},
   stripBtn: {flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, height: 34, marginRight: 6, borderRadius: R, backgroundColor: C.panel2},

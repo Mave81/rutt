@@ -29,6 +29,7 @@ import * as SND from './src/sounds';
 import RevokedView, {RevokedBar, RevEntry, REVOKED_KEY} from './src/ui/RevokedView';
 import ChatView, {stripEmoji} from './src/ui/ChatView';
 import SoundSettings from './src/ui/SoundSettings';
+import StatusExtras, {extrasFor} from './src/ui/StatusExtras';
 import TurScan, {TurParent} from './src/ui/TurScan';
 import {turToEgen, turParents, isTimjobb, countsText} from './src/tur';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -52,7 +53,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '27 okt · 3.51 · tidshjul, navigera vid adressen';
+const BUILD = '27 okt · 3.52 · Artiklar, Frågor, Ändringar som i Opter';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -560,10 +561,17 @@ function AppInner(): React.JSX.Element {
     const sub = AppState.addEventListener('change', (st: string) => { if (st !== 'active') flushSends(); });
     return () => sub.remove();
   }, []);
-  function sendLoad(st: any) {
+  function sendLoad(st: any, xx: {answers?: any[]; changes?: any[]} = {}) {
     const L = st.live;
     if (!live || !L || !L.loadSt) return;
-    queueSend(st.pickup, 'load', () => client.setStatus(L, L.loadSt.id, null));
+    const pre: any = {};
+    if (xx.answers && xx.answers.length) pre.answers = xx.answers;
+    if (xx.changes && xx.changes.length) pre.changes = xx.changes;
+    queueSend(st.pickup, 'load', async () => {
+      // Som Opter: svar på frågor och ändringar läggs på ordern, sen Lastad.
+      if (pre.answers || pre.changes) { try { const e: any = await client.editShipment(L, pre); dlog('före lastad ' + st.pickup + ' ' + JSON.stringify(e && {ok: e.confirmed}).slice(0, 60)); } catch (e: any) { dlog('före lastad fel ' + String(e?.message || e)); } }
+      return client.setStatus(L, L.loadSt.id, null);
+    });
   }
   // Lossad → Opter, byte för byte som Opter Driver (registerPod + setShipmentStatus i samma synk).
   // Som Opter: vid Lossad efter senaste leveranstid frågas efter orsak när kunden kräver det.
@@ -575,7 +583,7 @@ function AppInner(): React.JSX.Element {
     const o = orders.opts || {};
     return {needs, reasons: o.delayReasons || [], damageTypes: o.damageTypes || []};
   }
-  async function sendUnload(st: any, pod: any, tidMin: number | null = null, adds: any[] = []) {
+  async function sendUnload(st: any, pod: any, tidMin: number | null = null, adds: any[] = [], xx: {answers?: any[]; changes?: any[]; labels?: string[]} = {}) {
     const L = st.live;
     if (!live || !L || !L.unloadSt) return;
     const podData = await podPayload(L, pod);
@@ -591,14 +599,21 @@ function AppInner(): React.JSX.Element {
     // (3.45–3.49 skickade den 8 s efter Lossad, då var ordern redan klar och Opter tog inte emot tiden.)
     if (tidMin && tidMin > 0) pre.changes = [...(pre.changes || []), {cet: 34, kind: 'dec', value: String(Math.round(tidMin))}];
     // Tillägg (väntetid m.m.) också före statusen, som Opter Driver (AddService läggs på ordern, sen setStatus).
+    // Frågor (svar), artiklar och ändringar från kvittensen – också före statusen.
+    if (xx.answers && xx.answers.length) pre.answers = xx.answers;
+    if (xx.changes && xx.changes.length) pre.changes = [...(pre.changes || []), ...xx.changes];
     if (adds && adds.length) pre.addServices = adds.map((a: any) => ({satId: a.satId, number: a.number, descr: ''}));
     const addLabel = adds && adds.length ? 'Tillägg: ' + adds.map((a: any) => a.name + (a.number ? ' ' + a.number : '')).join(', ') : '';
     const tidLabel = tidMin ? `Tid ${tidMin >= 60 ? Math.floor(tidMin / 60) + ' h' : ''}${tidMin % 60 ? ' ' + (tidMin % 60) + ' min' : ''}`.trim() : '';
     queueSend(st.drop, 'unload', async () => {
-      if (pre.changes || pre.damages || pre.addServices) {
+      if (pre.changes || pre.damages || pre.addServices || pre.answers) {
         try {
           const e: any = await client.editShipment(L, pre);
           dlog('ändring före lossad ' + st.drop + ' ' + JSON.stringify(e && {ok: e.confirmed, seen: e.changesSeen}).slice(0, 120));
+          if (xx.labels && xx.labels.length || (xx.answers && xx.answers.length)) {
+            const lb = [...(xx.labels || []), ...((xx.answers || []).map((a: any) => `Svar: ${a.question} – ${a.bool != null ? (a.bool ? 'Ja' : 'Nej') : a.text}`))];
+            setOst(o => { const cur = {...(o[st.drop] || {})}; cur.edits = [...(cur.edits || []), ...lb.map((label, i) => ({id: 'x' + Date.now() + i, label, at: Date.now(), state: e && e.confirmed ? 'ok' : 'unconfirmed'}))]; return {...o, [st.drop]: cur}; });
+          }
           if (addLabel) {
             const id = 'add' + Date.now();
             setOst(o => { const cur = {...(o[st.drop] || {})}; cur.edits = [...(cur.edits || []), {id, label: addLabel, at: Date.now(), state: e && e.confirmed ? 'ok' : 'unconfirmed'}]; return {...o, [st.drop]: cur}; });
@@ -722,13 +737,20 @@ function AppInner(): React.JSX.Element {
       && (fams.has(String(x.pickup)) || (x.parent && fams.has(String(x.parent)))));
     return [...list0, ...extra];
   }
-  function onLoaded(st: any, more: any[] = []) {
+  // Lastad: har kontoret frågor vid hämtning (eller kräver statusen ändringar) frågar RUTT först – som Opter.
+  const [loadAsk, setLoadAsk] = useState<{st: any; more: any[]; x: any} | null>(null);
+  const [loadAskV, setLoadAskV] = useState<any>(null);
+  function onLoaded(st: any, more: any[] = [], xx: any = null) {
+    if (!xx && live) {
+      const x = extrasFor(family([st, ...more]), 'load', orders.opts);
+      if (x && (x.queries.length || x.requireChanges)) { setLoadAskV(null); setLoadAsk({st, more, x}); return; }
+    }
     const list = family([st, ...more]);
     const prev: Record<string, any> = {};
     for (const x of list) prev[x.pickup] = ost[x.pickup];
     const at = Date.now();
     setOst(o => { const n = {...o}; for (const x of list) n[x.pickup] = {...(o[x.pickup] || {}), loadedAt: at}; return n; });
-    list.forEach(x => sendLoad(x));
+    list.forEach(x => sendLoad(x, xx ? {answers: (xx.answers || []).filter((a: any) => a.cid === String(x.pickup)), changes: x === list.find((y: any) => y.live && !y.own) ? xx.changes : []} : {}));
     smsLater(list.map(x => ({st: x, cid: String(x.pickup)})), 'load', at, '');
     markEgen(list.map(x => String(x.pickup)), {loadedAt: at});
     if (!demo) for (const x of list) { const cid = String(x.pickup); const d = dayOrderOf(cid); DB.logEvent({t: at, kind: 'load', cid, who: x.who, lat: x.lat, lng: x.lng, pal: d.pal}); DB.saveOrder(DB.ymdOf(at), {...d, loadedAt: at}); }
@@ -868,7 +890,8 @@ function AppInner(): React.JSX.Element {
       const pod = many ? {...pod0, kolli: st.kolli != null ? st.kolli : null} : pod0;
       podMem.current[st.drop] = pod;
       // Tid och tillägg gäller hela stoppet → på första Opter-ordern (en väntetid debiteras en gång), i samma sändning som Lossad.
-      sendUnload(st, pod, pod0.timeMin && st === firstLive ? pod0.timeMin : null, st === firstLive ? (pod0.adds || []).filter((a: any) => a.satId) : []);
+      sendUnload(st, pod, pod0.timeMin && st === firstLive ? pod0.timeMin : null, st === firstLive ? (pod0.adds || []).filter((a: any) => a.satId) : [],
+        {answers: (pod0.answers || []).filter((a: any) => a.cid === String(st.drop)), changes: st === firstLive ? pod0.xChanges || [] : [], labels: st === firstLive ? pod0.xLabels || [] : []});
       if (!demo) { const cid = String(st.drop); const d = dayOrderOf(cid); DB.logEvent({t: doneT, kind: 'unload', cid, who: st.who, lat: st.lat, lng: st.lng, pal: d.pal}); DB.saveOrder(DB.ymdOf(doneT), {...d, doneAt: doneT, podName: pod.name || '', kolli: pod.kolli != null ? pod.kolli : null}); }
     }
     smsLater(list.map((x: any) => ({st: x, cid: String(x.drop)})), 'unload', doneT, pod0.name || '');
@@ -1248,6 +1271,8 @@ function AppInner(): React.JSX.Element {
     SM.shareImage(e.signed.image, chefC ? chefC.num : '', statusSms(e, 'load', {me: driverName})).catch(() => flash('Kunde inte öppna Meddelanden', null));
   }
   // ---- Skanna: turleveranslista → stopp kopplade till Opter-ordern ----
+  // Kvittensen: Opters frågor vid lämning, artiklar och ändringar för ordern/orderna som lossas.
+  const signExtras = useMemo(() => (signStop && live && !signStop.repod && !signStop.ownSign ? extrasFor(signStop.group || [signStop], 'unload', orders.opts) : null), [signStop, orders.opts, live]);
   const openStops = useMemo(() => (fullSrc ? fullSrc.stops.filter((x: any) => cls[String(x.pickup || x.drop)] === 'todo' || cls[String(x.pickup || x.drop)] === 'new') : []), [fullSrc, cls]);
   const turPar: TurParent[] = useMemo(() => {
     const m = new Map<string, any>(); for (const k of ['bevego-tur', 'bdx-frakt']) for (const p of turParents(openStops, k)) if (!m.has(p.cid)) m.set(p.cid, p);
@@ -1380,9 +1405,9 @@ function AppInner(): React.JSX.Element {
             );
           })()}
           {step === 'route' && (
-            <Pressable hitSlop={8} onPress={() => setWorkSheet(true)} style={[s.iconBtn, work !== 'igång' && {borderColor: C.bad, backgroundColor: C.badSoft}]}><Bi n="cup-hot-fill" size={16} color={work === 'igång' ? C.dim : C.bad} /></Pressable>
+            <Pressable hitSlop={8} accessibilityLabel="Arbetstid, rast och lunch" onPress={() => setWorkSheet(true)} style={[s.iconBtn, work !== 'igång' && {borderColor: C.bad, backgroundColor: C.badSoft}]}><Bi n="cup-hot-fill" size={16} color={work === 'igång' ? C.dim : C.bad} /></Pressable>
           )}
-          <Pressable hitSlop={8} onPress={() => setDiag(true)} style={s.iconBtn}><Bi n="gear-fill" size={16} color={C.dim} /></Pressable>
+          <Pressable hitSlop={8} accessibilityLabel="Inställningar" onPress={() => setDiag(true)} style={s.iconBtn}><Bi n="gear-fill" size={16} color={C.dim} /></Pressable>
         </View>
         <Text style={s.tag} numberOfLines={1}>{title}</Text>
       </View>
@@ -1639,10 +1664,22 @@ function AppInner(): React.JSX.Element {
           end={(() => { const g = signStop.group || [signStop]; const e = g.map((x: any) => timOf(x).end).filter(Boolean); return e.length ? Math.max(...e) : null; })()}
           timjobb={(signStop.group || [signStop]).some((x: any) => timOf(x).on)}
           delay={delayFor(signStop)}
+          extras={signExtras}
           onCancel={() => setSignStop(null)}
           onDone={(pod: any) => onSigned(signStop, pod)}
         />
       )}
+
+      {loadAsk ? (
+        <Sheet open onClose={() => setLoadAsk(null)} title="Innan du lastar" sub={loadAsk.x.queries.length ? 'Kontoret vill ha svar vid hämtningen – som i Opter' : 'Kontoret vill att du kollar ändringarna'} scroll>
+          <StatusExtras x={loadAsk.x} onChange={v => setLoadAskV((o: any) => (JSON.stringify(o) === JSON.stringify(v) ? o : v))} many={(loadAsk.more || []).length > 0} />
+          {loadAskV && loadAskV.missing.length ? <Text style={{color: C.bad, fontSize: 13, marginTop: 10, textAlign: 'center'}}>Saknas: {loadAskV.missing.join(', ')}</Text> : null}
+          <Pressable disabled={!loadAskV || loadAskV.missing.length > 0} style={{backgroundColor: C.accent, borderRadius: 6, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 12, opacity: !loadAskV || loadAskV.missing.length ? 0.4 : 1}}
+            onPress={() => { const a = loadAsk; setLoadAsk(null); onLoaded(a.st, a.more, loadAskV); }}>
+            <Text style={{color: '#000000', fontSize: 18, fontWeight: '700'}}>Lastad</Text>
+          </Pressable>
+        </Sheet>
+      ) : null}
 
       {claudeSend && (
         <Pressable style={[s.claudeBar, claudeSend.state === 'err' && {borderColor: C.bad}]} onPress={() => claudeSend.state !== 'busy' && setClaudeSend(null)}>

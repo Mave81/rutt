@@ -25,9 +25,9 @@ test('tillägg, avvikelse, ändring och bild avkodas tillbaka rätt och i Opters
   expect(sd.columns).toMatchObject({ddtId: 3, daeId: 8, comment: 'trasig pall'});
   expect(da.parent.table).toBe('ShipmentDamage');
   expect(da.columns.p3).toBe('IMG_1.jpg');
-  expect(v1.columns).toMatchObject({p2: 40, p5: 4});
-  expect(v2.columns).toMatchObject({p2: 39, p5: 12.5});
-  expect(v3.columns).toMatchObject({p2: 42, p5: ''});
+  expect(v1.columns).toMatchObject({cet: 40, value: 4});
+  expect(v2.columns).toMatchObject({cet: 39, value: 12.5});
+  expect(v3.columns).toMatchObject({cet: 42, value: ''});
   expect(at.columns).toMatchObject({delId: 226815, filename: 'image', comment: 'lossat vid port', fftId: 7});
 });
 test('bara status: ingen kvittens, inget externt id', () => {

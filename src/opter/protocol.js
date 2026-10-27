@@ -66,7 +66,10 @@ const F = {
   ShipmentPodSuggestion: { 1: 'shiId', 2: 'name', 3: 'revoked' },
   Setting: { 1: 'name', 2: 'value', 3: 'descr', 5: 'active' },
   Position: { 1: 'resId', 2: 'vhcId', 3: 'lng', 4: 'lat', 5: 'alt', 6: 'dir', 7: 'speed', 8: 'time' },
-  ShipmentStatus: { 1: 'shiId', 2: 'dstId', 3: 'arrived', 4: 'accepted', 5: 'rejected', 6: 'pickup', 7: 'delivery', 8: 'completed', 10: 'userOption', 11: 'msgRequired', 14: 'pod', 15: 'code', 16: 'name', 21: 'order' },
+  ShipmentStatus: { 1: 'shiId', 2: 'dstId', 3: 'arrived', 4: 'accepted', 5: 'rejected', 6: 'pickup', 7: 'delivery', 8: 'completed', 10: 'userOption', 11: 'msgRequired', 12: 'changes', 13: 'changesCustomerAgrees', 14: 'pod', 15: 'code', 16: 'name', 21: 'order', 22: 'queryEnabled' },
+  // Frågor på ordern (Opter: Frågor – vid hämtning/lämning, ja/nej eller text) och svaren
+  ShipmentQuery: { 1: 'shiId', 2: 'question', 3: 'isBool', 4: 'onPickup', 5: 'onDelivery', 6: 'externalId', 7: 'changed' },
+  ShipmentAnswer: { 1: 'shiId', 2: 'shqId', 3: 'resId', 4: 'vhcId', 5: 'text', 6: 'bool', 7: 'lat', 8: 'lng', 9: 'externalId', 10: 'changed' },
   ShipmentStatusLog: { 1: 'shiId', 2: 'shsId', 3: 'deleted', 4: 'logTime' },
   ShipmentPodType: { 1: 'shiId', 2: 'nameReq', 3: 'sigReq', 4: 'remarkReq', 5: 'name', 6: 'descr', 7: 'revoked', 8: 'externalId', 9: 'isDefault', 10: 'mainId', 11: 'showSub', 12: 'requireSub', 13: 'externalIdMain', 14: 'commentReq', 15: 'scanCommentReq', 16: 'picReq' },
   DefaultPodType: { 1: 'nameReq', 2: 'sigReq', 3: 'remarkReq', 4: 'name', 5: 'descr', 6: 'externalId', 7: 'isDefault', 8: 'active', 9: 'mainId', 10: 'showSub', 11: 'requireSub', 12: 'externalIdMain', 13: 'commentReq', 14: 'scanCommentReq', 15: 'picReq', 16: 'allowBeforePickup', 17: 'allowAfterPickup' },
@@ -74,6 +77,11 @@ const F = {
   ShipmentPackagePod: { 1: 'spaId' },
   ShipmentPackage: { 1: 'shiId', 2: 'quantity', 3: 'weight', 14: 'text', 15: 'packageType' },
   ShipmentAddServiceType: { 1: 'shiId', 2: 'name', 3: 'descr', 4: 'externalId', 5: 'revoked' },
+  // Artiklar (Opter: menyn Artiklar – Budtransport TIM, Lastningstid, Lossningstid, Bomkörning, Inbärning, OB1 …)
+  ShipmentChange: { 1: 'shiId' },
+  ShipmentChangeValue: { 1: 'schId', 2: 'cet', 3: 'adrId', 4: 'spiId', 5: 'value', 6: 'spaId', 7: 'sdaId', 8: 'shqId', 9: 'dlbId' },
+  ShipmentArticle: { 1: 'shiId', 2: 'code', 3: 'name', 4: 'unit1', 5: 'unit2', 6: 'externalId', 7: 'revoked', 8: 'descr' },
+  ShipmentPriceItem: { 1: 'shiId', 2: 'sarId', 3: 'quantity', 4: 'q1', 5: 'q2', 6: 'unit1', 7: 'unit2', 16: 'code', 17: 'name', 18: 'descr', 19: 'externalId', 20: 'externalIdRequest', 21: 'active' },
   ShipmentAddService: { 1: 'shiId', 2: 'satId', 3: 'number', 4: 'code', 5: 'descr', 6: 'externalId', 8: 'active' },
   DefaultDamageType: { 1: 'name', 2: 'descr', 3: 'externalId', 4: 'order', 5: 'active', 6: 'id', 7: 'forceComment', 8: 'isDefault', 9: 'forceEvent', 10: 'forcePicture', 11: 'inMobile' },
   DamageEvent: { 1: 'name', 2: 'descr', 3: 'order', 4: 'active', 5: 'id', 6: 'forceReason' },
@@ -329,8 +337,20 @@ const CET = {
   SHI_CustomerReference: 23, SHI_FreightBill: 30, SHI_GoodsType: 33, SHI_TimeMinutes: 34, SHI_DistanceKM: 35, SHI_Volume: 36,
   SHI_Area: 37, SHI_LoadMeter: 38, SHI_Weight: 39, SHI_Packages: 40, SHI_ExternalMessage: 41, SHI_Message: 42, SHI_DriverMessage: 43,
   SHI_SenderReference: 69, SHI_ReceiverReference: 70, SHI_TimeFailureComment: 106, SHI_TFR_Id: 107,
+  // Artiklar (ShipmentPriceItem): SCV_SPI_Id pekar ut raden, 0 = ny rad
+  SPI_Quantity: 44, SPI_Unit1Quantity: 45, SPI_Unit2Quantity: 46, SPI_Descr: 59, SPI_SAR_Id: 68, SPI_Remove: 97,
 };
-function encodeShipmentEdit({ live, statusId, pod, addServices, damages, changes, images, revokedConfirmed }) {
+// Ändringar för en artikel – som Opter Driver (ChangeablePropertiesList → ShipmentChange): ny = SAR_Id + antal, befintlig = antal på raden.
+function articleChanges({spiId = 0, sarId = 0, q1 = null, q2 = null, descr = null, remove = false, name = ''}) {
+  if (remove) return [{cet: CET.SPI_Remove, kind: 'str', value: name || '', spiId}];
+  const out = [];
+  if (!spiId && sarId) out.push({cet: CET.SPI_SAR_Id, kind: 'int', value: String(sarId), spiId: 0});
+  if (q1 != null && q1 !== '') out.push({cet: CET.SPI_Unit1Quantity, kind: 'dec', value: String(q1).replace(',', '.'), spiId});
+  if (q2 != null && q2 !== '') out.push({cet: CET.SPI_Unit2Quantity, kind: 'dec', value: String(q2).replace(',', '.'), spiId});
+  if (descr != null && descr !== '') out.push({cet: CET.SPI_Descr, kind: 'str', value: descr, spiId});
+  return out;
+}
+function encodeShipmentEdit({ live, statusId, pod, addServices, damages, changes, images, revokedConfirmed, answers }) {
   const w = W();
   const k = live.key;
   wB(w, DT.StartTable); wB(w, TableOrd.Shipment); wB(w, 14);
@@ -367,11 +387,26 @@ function encodeShipmentEdit({ live, statusId, pod, addServices, damages, changes
     wDate(w, 4, new Date());
     wEndTable(w, 'ShipmentStatusLog');
   }
+  // Svar på frågor: frågeraden (befintlig, egen nyckel) med ett nytt ShipmentAnswer under – som Opter (QueryList.addShipmentAnswer).
+  for (const a of answers || []) {
+    const qk = a.key || {}, qh = a.hdr || {};
+    wB(w, DT.StartTable); wB(w, TableOrd.ShipmentQuery); wB(w, 14);
+    wI32(w, qk.identityId || 0); wI32(w, qk.offId || 0); wI32(w, qk.xxxId || 0); wB(w, qh.extra || 0); wB(w, qh.conf || 0);
+    wNewRow(w, 'ShipmentAnswer', qk.offId || 0);
+    wInt(w, 1, live.shiId);                                              // SHR_SHI_Id
+    wInt(w, 2, qk.xxxId);                                                // SHR_SHQ_Id
+    if (a.text != null && a.text !== '') wStr(w, 5, String(a.text));     // SHR_StringAnswer
+    if (a.bool != null) wBool(w, 6, !!a.bool);                           // SHR_BooleanAnswer
+    if (a.lat != null && a.lng != null) { wDecExact(w, 7, Number(a.lat).toFixed(6)); wDecExact(w, 8, Number(a.lng).toFixed(6)); }
+    wEndTable(w, 'ShipmentAnswer');
+    wEndTable(w, 'ShipmentQuery');
+  }
   if (changes && changes.length) {
     wNewRow(w, 'ShipmentChange', 0);
     for (const c of changes) {
       wNewRow(w, 'ShipmentChangeValue', 0);
       wInt(w, 2, c.cet);                                                 // SCV_CET_Id
+      if (c.spiId) wInt(w, 4, c.spiId);                                  // SCV_SPI_Id – artikelraden som ändras (0 = ny artikel)
       if (c.kind === 'int') wInt(w, 5, parseInt(c.value, 10) || 0);      // SCV_Value (Integer, skrivs alltid)
       else if (c.kind === 'dec') wDecExact(w, 5, c.value === '' || c.value == null ? '0' : c.value);
       else wStrAlways(w, 5, c.value);
@@ -480,7 +515,7 @@ function editOptions(decoded) {
     perm: {
       pod: sBool('ProofOfDeliveryPermission', true), addService: sBool('AddServicePermission', true), giveAway: sBool('GiveAwayPermission', true),
       changes: sBool('ChangesPermission', true), damages: sBool('DamagesPermission', true),
-      addImage: sBool('AddImagePermission', true), status: sBool('SetArbitraryStatusPermission', true),
+      addImage: sBool('AddImagePermission', true), articles: sBool('ArticlesPermission', true), deletePriceItem: sBool('DeletePriceItemPermission', false), status: sBool('SetArbitraryStatusPermission', true),
       statusDone: sBool('SetArbitraryStatusDoneTabPermission', true),
       pickup: sBool('ManualStatusChangePickUpPermission', true), delivery: sBool('ManualStatusChangeDeliveryPermission', true),
     },
@@ -885,19 +920,34 @@ function toRutt(decoded) {
     const nameOfSat = (id) => { const t = addTypes.find(a => a.id === id); return t ? t.name : 'Tillägg'; };
     const addDone = decoded.rows.filter(x => x.table === 'ShipmentAddService' && belongs(x, shiId) && x.columns.active !== false)
       .map(x => ({id: x.key.xxxId, name: nameOfSat(x.columns.satId), number: x.columns.number != null ? x.columns.number : null, descr: x.columns.descr || ''}));
+    // Artiklar: vilka som får läggas till på ordern (ShipmentArticle, ej återkallade) och vilka som redan ligger där (ShipmentPriceItem).
+    const articles = decoded.rows.filter(x => x.table === 'ShipmentArticle' && belongs(x, shiId) && !x.columns.revoked)
+      .map(x => ({id: x.key.xxxId, name: String(x.columns.name || x.columns.code || 'Artikel'), code: x.columns.code || '', unit1: x.columns.unit1 || '', unit2: x.columns.unit2 || '', descr: x.columns.descr || ''}))
+      .filter(a => a.id).sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+    const priceItems = decoded.rows.filter(x => x.table === 'ShipmentPriceItem' && belongs(x, shiId) && x.columns.active !== false)
+      .map(x => { const a = articles.find(y => y.id === x.columns.sarId); return {id: x.key.xxxId, sarId: x.columns.sarId || 0, name: String(x.columns.name || (a && a.name) || 'Artikel'),
+        q1: x.columns.q1 != null ? Number(x.columns.q1) : null, q2: x.columns.q2 != null ? Number(x.columns.q2) : null,
+        unit1: x.columns.unit1 || (a && a.unit1) || '', unit2: x.columns.unit2 || (a && a.unit2) || '', descr: x.columns.descr || '', external: !!x.columns.externalId}; });
     const ddtName = (id) => { const t = decoded.rows.find(x => x.table === 'DefaultDamageType' && x.key.xxxId === id); return t ? String(t.columns.name || 'Avvikelse') : 'Avvikelse'; };
     const dmgDone = decoded.rows.filter(x => x.table === 'ShipmentDamage' && belongs(x, shiId) && x.columns.active !== false)
       .map(x => ({id: x.key.xxxId, name: ddtName(x.columns.ddtId), comment: x.columns.comment || ''}));
     const attDone = decoded.rows.filter(x => x.table === 'Attachment' && x.parent && x.parent.table === 'Shipment' && x.parent.key.xxxId === shiId && !x.columns.revoked).length;
     const values = {}; for (const f of CHANGE_FIELDS) values[f[3]] = c[f[3]] != null ? c[f[3]] : null;
-    const edit = { addTypes, addDone, dmgDone, attDone, values, orderId: c.orderId || null, completed: !!(curSt && curSt.completed),
+    // Frågor (Opter: QueryList) – ställs vid hämtning/lämning när statusen har frågor påslagna. Besvarade har ett ShipmentAnswer under sig.
+    const queries = decoded.rows.filter(x => x.table === 'ShipmentQuery' && belongs(x, shiId)).map(x => {
+      const ans = decoded.rows.filter(a => a.table === 'ShipmentAnswer' && ((a.parent && a.parent.table === 'ShipmentQuery' && a.parent.key.xxxId === x.key.xxxId) || a.columns.shqId === x.key.xxxId));
+      const last = ans[ans.length - 1];
+      return {id: x.key.xxxId, key: x.key, hdr: x.hdr, question: String(x.columns.question || ''), isBool: Number(x.columns.isBool) === 1 || x.columns.isBool === true,
+        onPickup: !!x.columns.onPickup, onDelivery: !!x.columns.onDelivery, answer: last ? (last.columns.bool != null ? (last.columns.bool ? 'Ja' : 'Nej') : String(last.columns.text || '')) : null};
+    }).filter(q => q.id && q.question);
+    const edit = { addTypes, addDone, dmgDone, attDone, values, articles, priceItems, queries, orderId: c.orderId || null, completed: !!(curSt && curSt.completed),
       statuses: statuses.map(s => ({id: s.id, name: String(s.name || ''), userOption: !!s.userOption, accepted: !!s.accepted, pickup: !!s.pickup, delivery: !!s.delivery, completed: !!s.completed, pod: !!s.pod, rejected: !!s.rejected})) };
     const live = { key: r.key, hdr: r.hdr, shiId, offId: r.key.offId, edit, statuses: statuses.map(s => ({id: s.id, name: s.name})), cur: curSt ? curSt.name : null, curId: c.shsId || 0,
       isNew: isNew && !consHidden, tab: tabF, revoked: revokedOpen, revokedAny: revoked, revokedConfirmed: !!c.revokedConfirmed, consignment: !!c.isConsignment || !!c.consignmentParent, locked: !!c.locked,
       shipDate: (c.shipmentDate instanceof Date && c.shipmentDate.getFullYear() > 2001) ? ymd(c.shipmentDate) : (c.orderDate instanceof Date && c.orderDate.getFullYear() > 2001 ? ymd(c.orderDate) : null),
       doneAt: (() => { const logs = decoded.rows.filter(x => x.table === 'ShipmentStatusLog' && belongs(x, shiId) && x.columns.shsId === c.shsId && x.columns.logTime instanceof Date); return logs.length ? Math.max(...logs.map(x => x.columns.logTime.getTime())) : null; })(),
       serverDone, acceptSt: acceptSt ? {id: acceptSt.id, name: acceptSt.name} : null, rejectSt: rejectSt ? {id: rejectSt.id, name: rejectSt.name} : null,
-      loadSt: loadSt ? {id: loadSt.id, name: loadSt.name} : null, unloadSt: unloadSt ? {id: unloadSt.id, name: unloadSt.name, pod: !!unloadSt.pod} : null,
+      loadSt: loadSt ? {id: loadSt.id, name: loadSt.name, changes: !!loadSt.changes, queries: !!loadSt.queryEnabled} : null, unloadSt: unloadSt ? {id: unloadSt.id, name: unloadSt.name, pod: !!unloadSt.pod, changes: !!unloadSt.changes, queries: !!unloadSt.queryEnabled} : null,
       podType: podType ? {id: podType.id, name: podType.name} : null, hasSpt, externalId: c.externalId || '',
       packageIds: pkgs.map(p => p._id).filter(Boolean),
       // Försening som Opter: kunden kräver orsak (och ev. avvikelse) när ordern lossas efter senaste leveranstid.
@@ -946,5 +996,5 @@ function toRutt(decoded) {
 module.exports = {
   MessageType, Table, DT, RST, F, frame, unframe, decodeSync, ticksToDate,
   logonPayload, parseLogon, resourceList, encodeStartWork, encodeWorkStatus, toRutt,
-  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, splitNums, avisering, tidspass, palFromText, team, encodeShipmentStatus, encodeShipmentEdit, encodeGiveAway, editOptions, isLateDelivery, delayNeeds, CET, CHANGE_FIELDS, changesSeen, signatureString, encodePosition, setting,
+  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, splitNums, avisering, tidspass, palFromText, team, encodeShipmentStatus, encodeShipmentEdit, encodeGiveAway, editOptions, isLateDelivery, delayNeeds, CET, CHANGE_FIELDS, changesSeen, articleChanges, signatureString, encodePosition, setting,
 };

@@ -12,9 +12,10 @@ import {C, themed, hhmm} from './theme';
 import {MAX_PHOTOS, Sheet, pickPhoto} from './parts';
 import {Bi, BiName} from './Bi';
 import TidInput, {fmtMin} from './TidInput';
+import P from '../opter/protocol';
 
 export type Edit = {statusId?: number; addServices?: any[]; damages?: any[]; changes?: any[]; images?: any[]};
-type Screen = 'menu' | 'status' | 'image' | 'add' | 'change' | 'damage' | 'time';
+type Screen = 'menu' | 'status' | 'image' | 'add' | 'change' | 'damage' | 'time' | 'art';
 
 // Demo: så det går att prova utan Opter. Märks som demo i appen och skickas aldrig.
 export const DEMO_OPTS = {
@@ -31,6 +32,7 @@ export const DEMO_OPTS = {
     {id: 3, name: 'Fel kolliantal', forceComment: true, forceEvent: false, forcePicture: false, events: []},
   ],
 };
+const DEMO_ART = [{id: 1, name: 'Budtransport TIM', unit1: 'Timmar', unit2: ''}, {id: 2, name: 'Lastningstid', unit1: 'Minuter', unit2: ''}, {id: 3, name: 'Lossningstid', unit1: 'Minuter', unit2: ''}, {id: 4, name: 'Bomkörning', unit1: '', unit2: ''}];
 const DEMO_ADD = [{id: 1, name: 'Väntetid'}, {id: 2, name: 'Inbärning'}, {id: 3, name: 'Bomkörning'}];
 const DEMO_STATUS = [{id: 11, name: 'Lastad', userOption: true, pickup: true}, {id: 12, name: 'Lossad', userOption: true, delivery: true}];
 
@@ -58,8 +60,9 @@ export default function EditSheet({item, opts, history, onClose, onSend, onRepod
   const [dTxt, setDTxt] = useState('');
   const [dImg, setDImg] = useState<any[]>([]);
   const [tid, setTid] = useState<number | null>(null);
+  const [art, setArt] = useState<{sarId?: number; spiId?: number; q1: string; q2: string; d: string} | null>(null);
   useEffect(() => {
-    setScr('menu'); setTid(null); setStatusId(null); setImg([]); setImgTxt(''); setAdds({}); setVals({});
+    setScr('menu'); setTid(null); setArt(null); setStatusId(null); setImg([]); setImgTxt(''); setAdds({}); setVals({});
     setDType(null); setDEv(null); setDRs(null); setDTxt(''); setDImg([]);
   }, [item && item.cid]);
   if (!item) return null;
@@ -71,6 +74,8 @@ export default function EditSheet({item, opts, history, onClose, onSend, onRepod
   const gone = !!(st.gone || (L && L.gone)); // finns inte längre hos Opter (klarmarkerad) – visas bara
   const locked = gone || !!(L && (L.locked || (E && E.completed)));
   const addTypes = E ? E.addTypes : DEMO_ADD;
+  const articles = E ? (E.articles || []) : DEMO_ART;
+  const priceItems = E ? (E.priceItems || []) : [];
   const statuses = (E ? E.statuses : DEMO_STATUS);
   const curId = L ? L.curId : item.done ? 12 : 0; // demo: Klart står som Lossad
   // Opter: Välj status = alla statusar kontoret låter föraren välja (UserOption), hämtning/leverans bara med behörighet.
@@ -193,6 +198,55 @@ export default function EditSheet({item, opts, history, onClose, onSend, onRepod
       </Sheet>
     );
   }
+  // ---- Artiklar (Opter: menyn Artiklar – Budtransport TIM, Lastningstid, Lossningstid, Bomkörning …) ----
+  if (scr === 'art') {
+    const a = art && art.sarId ? articles.find((x: any) => x.id === art.sarId) : null;
+    const pi = art && art.spiId ? priceItems.find((x: any) => x.id === art.spiId) : null;
+    const u1 = (pi && pi.unit1) || (a && a.unit1) || '', u2 = (pi && pi.unit2) || (a && a.unit2) || '';
+    const qOk = (v: string) => !v || numOk(v);
+    const ok = !!art && (!!art.sarId || !!art.spiId) && qOk(art.q1) && qOk(art.q2) && (!!art.sarId || art.q1 !== '' || art.q2 !== '' || art.d !== '');
+    const name = (pi && pi.name) || (a && a.name) || 'Artikel';
+    return (
+      <Sheet open onClose={onClose} scroll>
+        {back}
+        <Text style={e.h}>Artiklar</Text>
+        <Text style={e.p}>Som Artiklar i Opter Driver. Läggs på ordern och går till kontoret för debitering.</Text>
+        {priceItems.length ? <Text style={e.sec}>PÅ ORDERN – TRYCK FÖR ATT ÄNDRA ANTAL</Text> : null}
+        {priceItems.map((x: any) => {
+          const on = art && art.spiId === x.id;
+          return (
+            <Pressable key={'p' + x.id} style={[e.opt, on && e.optOn]} onPress={() => setArt({spiId: x.id, q1: x.q1 != null ? String(x.q1) : '', q2: x.q2 != null ? String(x.q2) : '', d: ''})}>
+              <View style={[e.radio, on && e.radioOn]}>{on ? <View style={e.radioDot} /> : null}</View>
+              <Text style={[e.optT, {flex: 1}]}>{x.name}</Text>
+              <Text style={e.optS}>{[x.q1 != null ? `${x.q1} ${x.unit1 || ''}`.trim() : '', x.q2 != null ? `${x.q2} ${x.unit2 || ''}`.trim() : ''].filter(Boolean).join(' · ')}</Text>
+            </Pressable>
+          );
+        })}
+        {articles.length ? <Text style={e.sec}>LÄGG TILL</Text> : <Text style={e.p}>Kontoret har inte lagt några artiklar att välja på den här ordern.</Text>}
+        {articles.map((x: any) => {
+          const on = art && art.sarId === x.id;
+          return (
+            <Pressable key={'a' + x.id} style={[e.opt, on && e.optOn]} onPress={() => setArt({sarId: x.id, q1: '', q2: '', d: ''})}>
+              <View style={[e.radio, on && e.radioOn]}>{on ? <View style={e.radioDot} /> : null}</View>
+              <Text style={[e.optT, {flex: 1}]}>{x.name}</Text>
+              {x.unit1 ? <Text style={e.optS}>{x.unit1}</Text> : null}
+            </Pressable>
+          );
+        })}
+        {art ? (
+          <View style={{marginTop: 12, gap: 8}}>
+            <Text style={[e.lbl, {marginTop: 0}]}>{name}{u1 ? ` – antal ${u1.toLowerCase()}` : ' – antal'}</Text>
+            <TextInput style={e.input} value={art.q1} onChangeText={v => setArt({...art, q1: v})} keyboardType="decimal-pad" placeholder={u1 ? `T.ex. 3 (${u1.toLowerCase()})` : 'Antal'} placeholderTextColor={C.faint} />
+            {u2 ? <TextInput style={e.input} value={art.q2} onChangeText={v => setArt({...art, q2: v})} keyboardType="decimal-pad" placeholder={u2} placeholderTextColor={C.faint} /> : null}
+            <TextInput style={e.input} value={art.d} onChangeText={v => setArt({...art, d: v})} placeholder="Beskrivning (valfritt)" placeholderTextColor={C.faint} />
+          </View>
+        ) : null}
+        <SendBtn ok={ok} why={!art ? 'Välj en artikel.' : 'Skriv antal som ett tal, t.ex. 3 eller 1,5.'}
+          label={`Artikel: ${name}${art && art.q1 ? ' ' + art.q1 + (u1 ? ' ' + u1.toLowerCase() : '') : ''}`}
+          edit={() => ({changes: (P as any).articleChanges({spiId: art!.spiId || 0, sarId: art!.sarId || 0, q1: art!.q1 || null, q2: art!.q2 || null, descr: art!.d || null})})} />
+      </Sheet>
+    );
+  }
   // ---- Ändring (fälten kontoret tillåter: kolli, vikt, tid …) ----
   if (scr === 'change') {
     const fields = (O.fields || []).filter((f: any) => f.cetName !== 'SHI_TimeMinutes');
@@ -301,6 +355,7 @@ export default function EditSheet({item, opts, history, onClose, onSend, onRepod
         <Item on={item.done && perm.pod && !!onRepod} icon="pen-fill" t="Ny kvittens" s="Signatur, namn eller foto igen" go={() => { onClose(); onRepod && onRepod(); }} />
         <Item on={perm.addImage} icon="camera-fill" t="Lägg till bild" s="Bild på ordern, utan ny kvittens" go={() => setScr('image')} />
         <Item on={perm.addService} icon="plus-circle-fill" t="Tillägg" s={addTypes.length ? addTypes.slice(0, 3).map((a: any) => a.name).join(', ') + (addTypes.length > 3 ? '…' : '') : 'Väntetid, inbärning …'} go={() => setScr('add')} tint={C.accentInk} />
+        <Item on={perm.articles !== false && (articles.length > 0 || priceItems.length > 0)} icon="receipt" t="Artiklar" s={(priceItems.length ? priceItems.map((x: any) => x.name) : articles.map((x: any) => x.name)).slice(0, 3).join(', ') + ((priceItems.length || articles.length) > 3 ? '…' : '')} go={() => setScr('art')} tint={C.accentInk} />
         <Item on={perm.changes && !!timeField} icon="clock-fill" t="Tid" s="Timmar och minuter, eller timjobb med start och slut" go={() => setScr('time')} tint={C.accentInk} />
         <Item on={perm.changes} icon="input-cursor-text" t="Ändring" s={(O.fields || []).slice(0, 4).map((f: any) => f.label.replace(/\s*\(.*\)/, '')).join(', ') || 'Kolli, vikt …'} go={() => setScr('change')} />
         <Item on={perm.damages} icon="exclamation-triangle-fill" t="Avvikelse" s="Skada, fel antal, saknas …" go={() => setScr('damage')} tint={C.bad} />
@@ -346,6 +401,7 @@ const e = themed(() => StyleSheet.create({
   optOn: {borderColor: C.accent},
   optT: {color: C.ink, fontSize: 15.5, fontWeight: '700'},
   optS: {color: C.faint, fontSize: 12, marginTop: 1},
+  sec: {color: C.faint, fontSize: 11, fontWeight: '800', letterSpacing: 1, marginTop: 14, marginBottom: 2},
   radio: {width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: C.edge, alignItems: 'center', justifyContent: 'center'},
   radioOn: {borderColor: C.accent},
   radioDot: {width: 10, height: 10, borderRadius: 5, backgroundColor: C.accent},

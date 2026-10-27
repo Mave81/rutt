@@ -32,6 +32,6 @@ test('orsaken skickas som Opter: en ShipmentChange med kommentar (106) och orsak
   const d = P.decodeSync(P.encodeShipmentEdit({live, changes: [{cet: 106, kind: 'str', value: 'Kö på Essingeleden'}, {cet: 107, kind: 'int', value: '3'}]}));
   expect(d.decodedBytes).toBe(d.totalBytes);
   expect(d.rows.map(r => r.table)).toEqual(['Shipment', 'ShipmentChange', 'ShipmentChangeValue', 'ShipmentChangeValue']);
-  expect(d.rows[2].columns).toMatchObject({p2: 106, p5: 'Kö på Essingeleden'});
-  expect(d.rows[3].columns).toMatchObject({p2: 107, p5: 3});
+  expect(d.rows[2].columns).toMatchObject({cet: 106, value: 'Kö på Essingeleden'});
+  expect(d.rows[3].columns).toMatchObject({cet: 107, value: 3});
 });
