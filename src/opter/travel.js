@@ -111,7 +111,17 @@ function geoOf(s) {
   const g = geo.get(geoKey(s));
   return g && !g.miss ? g : null;
 }
-async function geocode(stops, fetchImpl) {
+// 3.58: EN kö i taget. Förut startade varje synk (var 30:e s) en ny uppslagning bredvid den gamla → två–tre anrop per
+// sekund till kartan, som då spärrar en stund. Svaren blev fel och adresser stod som "hittas inte" fast de aldrig slogs upp.
+let chain = Promise.resolve(0);
+let onFound = null;
+function setOnFound(f) { onFound = f; }
+function geocode(stops, fetchImpl) {
+  const run = chain.then(() => geocodeRun(stops, fetchImpl), () => geocodeRun(stops, fetchImpl));
+  chain = run.catch(() => 0);
+  return run;
+}
+async function geocodeRun(stops, fetchImpl) {
   const f = fetchImpl || fetch;
   let found = 0;
   const todo = [];
@@ -122,7 +132,7 @@ async function geocode(stops, fetchImpl) {
     if (g && (!g.miss || Date.now() - g.at < 7 * 86400000)) continue; // "hittades inte" provas igen efter en vecka
     todo.push(s);
   }
-  for (const s of todo.slice(0, 25)) {
+  for (const s of todo.slice(0, 80)) {
     // Exakt först. Hittas inte gatan (nybyggt, saknar husnummer, felstavat) → postnumret, sist orten – ungefärlig plats
     // är bättre än ingen: då blir körordningen ändå rimlig, och RUTT säger att platsen är ungefärlig.
     const zip = String(s.zip || '').replace(/\s/g, '');
@@ -135,30 +145,46 @@ async function geocode(stops, fetchImpl) {
       ...(zip ? [[`postalcode=${encodeURIComponent(zip)}`, 'postnr']] : []),
       ...(s.area ? [[`city=${encodeURIComponent(s.area)}`, 'ort']] : []),
     ].filter((t) => s.adr || t[1] === 'postnr' || t[1] === 'ort'); // utan gata: bara postnummer/ort
-    let hit = null;
+    let hit = null, broken = false;
     for (const [qs, approx] of tries) {
-      const wait = lastGeo + 1100 - Date.now();
-      if (wait > 0) await new Promise(r => setTimeout(r, wait));
-      lastGeo = Date.now();
-      try {
-        const r = await f(`${NOMI}?format=jsonv2&limit=1&countrycodes=se&${qs}`, {headers: {'User-Agent': 'RUTT/1 (forre.nu)', 'Accept-Language': 'sv'}});
-        const j = await r.json();
-        // Kartan svarar ibland med GATAN när husnumret saknas där (Paradistorget 4 → gatans mitt = nr 2). Det är ungefärligt, inte exakt.
-        const streetOnly = !approx && /\d/.test(String(s.adr || '')) && j && j[0] && (j[0].category === 'highway' || /^(road|street|residential)$/.test(String(j[0].addresstype || '')));
-        const ap = approx || (streetOnly ? 'gata' : null);
-        if (Array.isArray(j) && j[0] && j[0].lat) { hit = {lat: Number(j[0].lat), lng: Number(j[0].lon), v: 4, ...(ap ? {approx: ap} : {})}; break; }
-      } catch (e) { return found; } // inget nät → försök nästa gång
+      let j = null;
+      for (let attempt = 0; attempt < 2 && j === null; attempt++) {
+        const wait = lastGeo + (attempt ? 4000 : 1100) - Date.now();
+        if (wait > 0) await new Promise(r => setTimeout(r, wait));
+        lastGeo = Date.now();
+        try {
+          const r = await f(`${NOMI}?format=jsonv2&limit=1&countrycodes=se&${qs}`, {headers: {'User-Agent': 'RUTT/1 (forre.nu)', 'Accept-Language': 'sv'}});
+          if (r && r.ok === false) throw new Error('http ' + r.status); // spärrad/överbelastad – inte "finns inte"
+          const v = await r.json();
+          j = Array.isArray(v) ? v : [];
+        } catch (e) { j = null; }
+      }
+      if (j === null) { broken = true; break; } // inget nät eller spärrat → inget sparas, provas nästa gång
+      // Kartan svarar ibland med GATAN när husnumret saknas där (Paradistorget 4 → gatans mitt = nr 2). Det är ungefärligt, inte exakt.
+      const streetOnly = !approx && /\d/.test(String(s.adr || '')) && j[0] && (j[0].category === 'highway' || /^(road|street|residential)$/.test(String(j[0].addresstype || '')));
+      const ap = approx || (streetOnly ? 'gata' : null);
+      if (j[0] && j[0].lat) { hit = {lat: Number(j[0].lat), lng: Number(j[0].lon), v: 4, ...(ap ? {approx: ap} : {})}; break; }
     }
-    geo.set(geoKey(s), hit || {miss: true, at: Date.now(), v2: true});
-    if (hit) found++;
+    if (broken) break;
+    geo.set(geoKey(s), hit || {miss: true, at: Date.now(), v3: true});
+    if (hit) { found++; if (onFound) try { onFound(); } catch (e) {} }
   }
   if (todo.length && store) store.save('rutt.geo.v1', [...geo.entries()].slice(-3000));
   return found;
 }
+// Läget för en adress: 'ok' (Opter eller kartan), 'approx' (gata/postnr/ort), 'pending' (inte uppslagen än), 'miss' (finns inte ens orten).
+function geoState(s) {
+  if (!s) return 'miss';
+  if (s.lat != null && s.lng != null && !s.geo) return 'ok';
+  const g = geo.get(geoKey(s));
+  if (!g) return 'pending';
+  if (g.miss) return 'miss';
+  return g.approx ? 'approx' : 'ok';
+}
 // "Hittades inte" från före 3.53 provas igen direkt (nu finns reserv på postnummer/ort).
 // v4: gatuträffar räknas som ungefärliga – äldre sparade träffar slås upp igen.
-async function initGeo() { if (!store) return; try { const v = await store.load('rutt.geo.v1', null); if (Array.isArray(v)) for (const [k, x] of v) if (x && (x.miss ? x.v2 : x.v === 4)) geo.set(k, x); } catch (e) {} }
+async function initGeo() { if (!store) return; try { const v = await store.load('rutt.geo.v1', null); if (Array.isArray(v)) for (const [k, x] of v) if (x && (x.miss ? x.v3 : x.v === 4)) geo.set(k, x); } catch (e) {} }
 // Stoppen med koordinater ifyllda där Opter saknade dem. geo:true = uppslagen adress.
 const withGeo = stops => (stops || []).map(s => { if (!s || (s.lat != null && s.lng != null)) return s; const g = geoOf(s); return g ? {...s, lat: g.lat, lng: g.lng, geo: true, ...(g.approx ? {geoApprox: g.approx} : {})} : s; });
 
-module.exports = {travel, ensure, init, learn, getFactor, learned, geocode, initGeo, withGeo, _reset: () => { _reset0(); geo.clear(); lastGeo = 0; }};
+module.exports = {travel, ensure, init, learn, getFactor, learned, geocode, initGeo, withGeo, geoState, setOnFound, _reset: () => { _reset0(); geo.clear(); lastGeo = 0; chain = Promise.resolve(0); }};

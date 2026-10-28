@@ -10,6 +10,7 @@ import {C, themed, hhmm} from './theme';
 import {Bi} from './Bi';
 import ReorderSheet from './Reorder';
 import {simulateLoad} from '../opter/optimizer';
+const TRAVEL = require('../opter/travel');
 
 const SHADES = ['#FF9117', '#FFC27A', '#B85F00', '#FFE0B8', '#7A3F00', '#E87A00', '#FFAA45', '#4F2900'];
 const INK = ['#000', '#000', '#FFF', '#000', '#FFF', '#000', '#000', '#FFF'];
@@ -27,11 +28,15 @@ export default function PlanDay({route, cargo, onReorder, starts = [], startId, 
     const pal = cids.reduce((n, c) => n + (Number((cargo[c] || {}).pal) || 0), 0);
     const peak = (sim.peak || []).filter(Boolean).length;
     const late = (route && route.plan && route.plan.broken) || [];
-    const nogeoL = order.filter((s: any) => s.lat == null), nogeo = nogeoL.length;
+    // 3.58: skilj på "letar fortfarande" och "finns verkligen inte". Samma adress räknas en gång.
+    const uniqBy = (l: any[]) => l.filter((x: any, i: number) => l.findIndex((y: any) => [y.adr, y.zip, y.area].join('|') === [x.adr, x.zip, x.area].join('|')) === i);
+    const nogeoAll = order.filter((s: any) => s.lat == null);
+    const pendL = uniqBy(nogeoAll.filter((s: any) => TRAVEL.geoState(s) === 'pending'));
+    const nogeoL = uniqBy(nogeoAll.filter((s: any) => TRAVEL.geoState(s) !== 'pending')), nogeo = nogeoL.length;
     const approxL = order.filter((s: any) => s.geoApprox);
     const est = rows.filter((r: any, i: number) => i > 0 && r && r.leg && r.leg.est && !r.nogeo).length;
     const tps = order.map((s: any, i: number) => ({s, r: rows[i]})).filter((x: any) => x.s.tidspass);
-    return {cids, pal, peak, blocks: sim.blocks || [], late, end: route && route.plan && route.plan.end, nogeo, nogeoL, approxL, est, tps};
+    return {cids, pal, peak, blocks: sim.blocks || [], late, end: route && route.plan && route.plan.end, nogeo, nogeoL, pendL, approxL, est, tps};
   }, [route, cargo]);
   if (!route || !order.length) return <View style={p.empty}><Bi n="calendar-event" size={30} color={C.faint} /><Text style={p.emptyT}>Inga order för imorgon än.</Text></View>;
   const date = route.day ? new Date(route.day + 'T12:00').toLocaleDateString('sv-SE', {weekday: 'long', day: 'numeric', month: 'long'}) : '';
@@ -63,6 +68,7 @@ export default function PlanDay({route, cargo, onReorder, starts = [], startId, 
             </View>
           ))}
           {info.approxL.length ? <Text style={p.sumS}>Ungefärlig plats på kartan (körtiden blir ungefärlig, navigeringen går till adressen): {info.approxL.map((x: any) => `${x.who || x.adr} – ${x.geoApprox === 'gata' ? 'husnumret saknas, gatan används' : x.geoApprox === 'postnr' ? 'gatan saknas, postnumret används' : 'bara orten hittades'}`).join('; ')}</Text> : null}
+          {info.pendL.length ? <Text style={p.sumS}>Letar upp {info.pendL.length === 1 ? '1 adress' : `${info.pendL.length} adresser`} på kartan ({info.pendL.map((x: any) => x.who || x.adr).join(', ')}) – tiderna blir exakta när de är klara</Text> : null}
           {info.nogeo ? <Text style={[p.sumS, {color: C.bad}]}>Hittas inte på kartan: {info.nogeoL.map((x: any) => `${x.who || '—'} (${[x.adr, x.zip, x.area].filter(Boolean).join(' ') || 'adress saknas'})`).join(', ')} – körtiden dit är okänd, ordningen kan bli fel</Text>
             : info.est ? <Text style={p.sumS}>Körtider uppskattade (inget svar från kartan än)</Text>
             : <Text style={p.sumS}>Körtider längs vägarna (OpenStreetMap)</Text>}

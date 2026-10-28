@@ -73,3 +73,26 @@ test('Paradistorget 4: kartan svarar med gatan (inte huset) → räknas som unge
   expect(await T.geocode(stops, fake)).toBe(1);
   expect(T.withGeo(stops)[0]).toMatchObject({lat: 59.2343342, geo: true, geoApprox: 'gata'});
 }, 15000);
+
+test('3.58: kartan spärrar (429) → inget sparas som "hittas inte", adressen står som "letar" och provas igen', async () => {
+  T._reset();
+  const s = [{drop: 'K', who: 'Alcro Studio Bromma', adr: 'Karlsbodavägen 13C', zip: '16867', area: 'Bromma'}];
+  let n = 0;
+  const blocked = async () => { n++; return {ok: false, status: 429, json: async () => { throw new Error('html'); }}; };
+  expect(await T.geocode(s, blocked)).toBe(0);
+  expect(n).toBe(2); // ett nytt försök efter paus, sen stopp
+  expect(T.geoState(s[0])).toBe('pending');
+  const ok = async () => ({ok: true, json: async () => [{lat: '59.3542', lon: '17.9591', category: 'building', addresstype: 'building'}]});
+  expect(await T.geocode(s, ok)).toBe(1);
+  expect(T.geoState(s[0])).toBe('ok');
+}, 20000);
+
+test('3.58: två synkar samtidigt slår inte upp samma adress två gånger', async () => {
+  T._reset();
+  const s = [{drop: 'T', who: 'Timblads', adr: 'Klädesvägen 4', zip: '17837', area: 'Ekerö'}];
+  let n = 0;
+  const f = async () => { n++; return {ok: true, json: async () => [{lat: '59.29', lon: '17.81'}]}; };
+  const [a, b] = await Promise.all([T.geocode(s, f), T.geocode(s, f)]);
+  expect(a + b).toBe(1);
+  expect(n).toBe(1);
+}, 20000);

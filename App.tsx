@@ -54,7 +54,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '28 okt · 3.57 · skarpa färger, 3D-reglage, signering i helskärm, Plan A/B/C';
+const BUILD = '28 okt · 3.58 · adresser slås upp en i taget (inga falska hittas inte), 3D-reglage, Plan A/B/C';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -477,6 +477,8 @@ function AppInner(): React.JSX.Element {
   }
   // Riktiga körtider (OpenStreetMap) för alla adresser i dagens och kommande dagars plan. Utan nät: uppskattning.
   useEffect(() => { TRAVEL.init({load: loadJSON, save: saveJSON}).then(() => TRAVEL.initGeo()).then(() => setTravelVer(v => v + 1)); }, []);
+  // Varje adress som hittas på kartan uppdaterar planen direkt (inte först när alla är klara).
+  useEffect(() => { TRAVEL.setOnFound(() => setTravelVer(v => v + 1)); return () => TRAVEL.setOnFound(null); }, []);
   // Adresser som Opter skickat utan koordinater slås upp (OpenStreetMap), annars blir körtiden 0 och rutten blind.
   useEffect(() => { if (demo || !fullSrc) return; let alive = true; TRAVEL.geocode(fullSrc.stops).then((n: number) => { if (alive && n) setTravelVer(v => v + 1); }); return () => { alive = false; }; }, [fullSrc, demo]);
   const travelPts = useMemo(() => {
