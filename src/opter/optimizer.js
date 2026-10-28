@@ -43,11 +43,24 @@ function preOnboard() {
   for (const s of STOPS) if (s.drop && !s.done && !STOPS.some(x => x.pickup === s.drop && !x.done)) set.add(s.drop);
   return set;
 }
-function servOf(s) {
+// Samma ställe som förra stoppet (t.ex. två order till Timblads, Klädesvägen 4): du står redan där – ingen ny
+// framkörning, backning eller anmälan, bara godset. 3.58.
+const nAdr = x => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+function sameSpot(a, b) {
+  if (!a || !b) return false;
+  const ka = nAdr(a.adr) + '|' + nAdr(a.area), kb = nAdr(b.adr) + '|' + nAdr(b.area);
+  if (nAdr(a.adr) && ka === kb) return true;
+  if (a.lat != null && b.lat != null && !a.geoApprox && !b.geoApprox) {
+    const d = km(a, b) / ROUTE_FACTOR; if (d < 0.05) return true;
+  }
+  return false;
+}
+const SAME_SPOT_MIN = 2;
+function servOf(s, prev) {
   if (s && s.serv != null) return s.serv;
   const cid = s && (s.pickup || s.drop);
   const pal = (cid && CARGO[cid]) ? (CARGO[cid].pal || 0) : 0;
-  return SERVICE_MIN + Math.round(PAL_MIN * pal);
+  return (prev && sameSpot(prev, s) ? SAME_SPOT_MIN : SERVICE_MIN) + Math.round(PAL_MIN * pal);
 }
 function planStart() {
   // START.cur = där föraren står nu (senast avklarade stopp); annars startadressen.
@@ -71,7 +84,7 @@ function restIndex(order, s0) {
     const s = order[i];
     t = new Date(t.getTime() + driveInfo(pos, s).min * 60000);
     if (s.open) { const op = stopTime(s.open, s.openDate || s.dlDate, s0.t0); if (t < op) t = new Date(Math.min(op.getTime(), t.getTime() + MAX_WAIT * 60000)); }
-    t = new Date(t.getTime() + servOf(s) * 60000);
+    t = new Date(t.getTime() + servOf(s, order[i - 1]) * 60000);
     if (s.lat != null) pos = s;
   }
   if (t.getTime() + REST_MIN * 60000 <= by.getTime()) best = order.length;
@@ -104,9 +117,10 @@ function plan(order) {
     }
     // Tiden som visas = när du kan börja på stället (efter väntan på öppning), inte när du rullar in.
     const arrive = eta, at = new Date(t);
-    t = new Date(t.getTime() + servOf(s) * 60000);
+    const sv = servOf(s, order[idx - 1]);
+    t = new Date(t.getTime() + sv * 60000);
     if (!nogeo) pos = s;
-    return {s, eta: at, arrive, late, early, waitCap, nogeo, leg, rest: idx === restAt, serv: servOf(s)};
+    return {s, eta: at, arrive, late, early, waitCap, nogeo, leg, rest: idx === restAt, serv: sv, same: !!(idx && sameSpot(order[idx - 1], s))};
   });
   if (order.length && (restAt < 0 || restAt >= order.length)) { restTime = new Date(t); t = new Date(t.getTime() + REST_MIN * 60000); }
   let end = t, backKm = 0, back = null;
@@ -140,7 +154,7 @@ function scoreOrder(order, ctx) {
     if (d != null) { const marg = d - t; if (marg < -GRACE_MIN) { broken++; late -= marg; } else if (marg < 0) nick -= marg; else if (marg < TIGHT_MIN) tight += TIGHT_MIN - marg; }
     const o = ctx.op != null ? ctx.op.get(s) : null;
     if (o != null && t < o) { const w = Math.min(o - t, MAX_WAIT); wait += w; t += w; }
-    t += servOf(s);
+    t += servOf(s, order[i - 1]);
   }
   let over = 0;
   // Hemresan väger lätt: nya jobb kommer under dagen, så sista lossningen ska inte styras av vägen hem.
@@ -234,13 +248,14 @@ function seedGreedy(list, ctx, urgency) {
       if (s.pickup && pal + ((CARGO[s.pickup] && CARGO[s.pickup].pal) || 0) > CAP_SLOTS) continue;
       const d = s.lat != null ? driveInfo(pos, s).min : 0;
       let v = d; const dl = ctx.dl.get(s);
+      if (out.length && sameSpot(out[out.length - 1], s)) v -= 6; // samma ställe som nyss: ta det direkt
       if (urgency && dl != null) { const slack = dl - (t + d); if (slack < 60) v -= (60 - Math.max(slack, -60)) * urgency; }
       if (v < bv) { bv = v; bi = i; }
     }
     if (bi === -1) bi = 0;
     const s = left.splice(bi, 1)[0];
     if (s.lat != null) { t += driveInfo(pos, s).min; pos = s; }
-    t += servOf(s);
+    t += servOf(s, out[out.length - 1]);
     if (s.pickup) { seen.add(s.pickup); pal += (CARGO[s.pickup] && CARGO[s.pickup].pal) || 0; }
     if (s.drop) pal -= (CARGO[s.drop] && CARGO[s.drop].pal) || 0;
     out.push(s);
@@ -362,5 +377,5 @@ function computeRoute(stops, cargo, start, now, fixed) {
 }
 
 const baseDriveMin = (a, b) => { const x = baseDrive(a, b); return x.min; };
-export {computeRoute, simulateLoad, slotWhere, stopKey, baseDriveMin, servOf, TOTAL_SLOTS, SLOTS_LONG, CAP_SLOTS, SERVICE_MIN, PAL_MIN};
+export {computeRoute, simulateLoad, slotWhere, stopKey, baseDriveMin, servOf, sameSpot, TOTAL_SLOTS, SLOTS_LONG, CAP_SLOTS, SERVICE_MIN, PAL_MIN};
 export default computeRoute;

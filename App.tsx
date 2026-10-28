@@ -54,7 +54,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '28 okt · 3.58 · adresser slås upp en i taget (inga falska hittas inte), 3D-reglage, Plan A/B/C';
+const BUILD = '28 okt · 3.59 · samma ställe = ett stopp i Imorgon, kartan provas igen varje minut';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 

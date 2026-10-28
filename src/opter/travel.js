@@ -114,6 +114,14 @@ function geoOf(s) {
 // 3.58: EN kö i taget. Förut startade varje synk (var 30:e s) en ny uppslagning bredvid den gamla → två–tre anrop per
 // sekund till kartan, som då spärrar en stund. Svaren blev fel och adresser stod som "hittas inte" fast de aldrig slogs upp.
 let chain = Promise.resolve(0);
+let blockedAt = 0, retryT = null;
+// Kartan svarar inte (inget nät, eller spärrad en stund) → nytt försök om en minut, utan att vänta på nästa synk.
+function retryLater(stops, fetchImpl) {
+  if (retryT || typeof setTimeout !== 'function') return;
+  retryT = setTimeout(() => { retryT = null; geocode(stops, fetchImpl).then(n => { if (n && onFound) try { onFound(); } catch (e) {} }); }, 60000);
+  if (retryT && retryT.unref) retryT.unref();
+}
+const geoBlocked = () => blockedAt > 0;
 let onFound = null;
 function setOnFound(f) { onFound = f; }
 function geocode(stops, fetchImpl) {
@@ -165,7 +173,8 @@ async function geocodeRun(stops, fetchImpl) {
       const ap = approx || (streetOnly ? 'gata' : null);
       if (j[0] && j[0].lat) { hit = {lat: Number(j[0].lat), lng: Number(j[0].lon), v: 4, ...(ap ? {approx: ap} : {})}; break; }
     }
-    if (broken) break;
+    if (broken) { blockedAt = Date.now(); retryLater(stops, fetchImpl); break; }
+    blockedAt = 0;
     geo.set(geoKey(s), hit || {miss: true, at: Date.now(), v3: true});
     if (hit) { found++; if (onFound) try { onFound(); } catch (e) {} }
   }
@@ -187,4 +196,4 @@ async function initGeo() { if (!store) return; try { const v = await store.load(
 // Stoppen med koordinater ifyllda där Opter saknade dem. geo:true = uppslagen adress.
 const withGeo = stops => (stops || []).map(s => { if (!s || (s.lat != null && s.lng != null)) return s; const g = geoOf(s); return g ? {...s, lat: g.lat, lng: g.lng, geo: true, ...(g.approx ? {geoApprox: g.approx} : {})} : s; });
 
-module.exports = {travel, ensure, init, learn, getFactor, learned, geocode, initGeo, withGeo, geoState, setOnFound, _reset: () => { _reset0(); geo.clear(); lastGeo = 0; chain = Promise.resolve(0); }};
+module.exports = {travel, ensure, init, learn, getFactor, learned, geocode, initGeo, withGeo, geoState, setOnFound, geoBlocked, _reset: () => { _reset0(); geo.clear(); lastGeo = 0; chain = Promise.resolve(0); blockedAt = 0; if (retryT) clearTimeout(retryT); retryT = null; }};

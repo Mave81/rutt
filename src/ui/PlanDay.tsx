@@ -38,6 +38,14 @@ export default function PlanDay({route, cargo, onReorder, starts = [], startId, 
     const tps = order.map((s: any, i: number) => ({s, r: rows[i]})).filter((x: any) => x.s.tidspass);
     return {cids, pal, peak, blocks: sim.blocks || [], late, end: route && route.plan && route.plan.end, nogeo, nogeoL, pendL, approxL, est, tps};
   }, [route, cargo]);
+  const groups = useMemo(() => {
+    const out: {s: any; r: any}[][] = [];
+    order.forEach((s: any, i: number) => {
+      const last = out[out.length - 1], r = rows[i] || {};
+      if (last && r.same && !!last[0].s.pickup === !!s.pickup) last.push({s, r}); else out.push([{s, r}]);
+    });
+    return out;
+  }, [route]);
   if (!route || !order.length) return <View style={p.empty}><Bi n="calendar-event" size={30} color={C.faint} /><Text style={p.emptyT}>Inga order för imorgon än.</Text></View>;
   const date = route.day ? new Date(route.day + 'T12:00').toLocaleDateString('sv-SE', {weekday: 'long', day: 'numeric', month: 'long'}) : '';
   const num = (cid: string) => info.cids.indexOf(cid);
@@ -68,29 +76,46 @@ export default function PlanDay({route, cargo, onReorder, starts = [], startId, 
             </View>
           ))}
           {info.approxL.length ? <Text style={p.sumS}>Ungefärlig plats på kartan (körtiden blir ungefärlig, navigeringen går till adressen): {info.approxL.map((x: any) => `${x.who || x.adr} – ${x.geoApprox === 'gata' ? 'husnumret saknas, gatan används' : x.geoApprox === 'postnr' ? 'gatan saknas, postnumret används' : 'bara orten hittades'}`).join('; ')}</Text> : null}
-          {info.pendL.length ? <Text style={p.sumS}>Letar upp {info.pendL.length === 1 ? '1 adress' : `${info.pendL.length} adresser`} på kartan ({info.pendL.map((x: any) => x.who || x.adr).join(', ')}) – tiderna blir exakta när de är klara</Text> : null}
+          {info.pendL.length && TRAVEL.geoBlocked() ? <Text style={p.sumS}>Kartan svarar inte just nu – RUTT provar igen varje minut. Tiderna är uppskattade tills dess ({info.pendL.map((x: any) => x.who || x.adr).join(', ')}).</Text> : info.pendL.length ? <Text style={p.sumS}>Letar upp {info.pendL.length === 1 ? '1 adress' : `${info.pendL.length} adresser`} på kartan ({info.pendL.map((x: any) => x.who || x.adr).join(', ')}) – tiderna blir exakta när de är klara</Text> : null}
           {info.nogeo ? <Text style={[p.sumS, {color: C.bad}]}>Hittas inte på kartan: {info.nogeoL.map((x: any) => `${x.who || '—'} (${[x.adr, x.zip, x.area].filter(Boolean).join(' ') || 'adress saknas'})`).join(', ')} – körtiden dit är okänd, ordningen kan bli fel</Text>
             : info.est ? <Text style={p.sumS}>Körtider uppskattade (inget svar från kartan än)</Text>
             : <Text style={p.sumS}>Körtider längs vägarna (OpenStreetMap)</Text>}
         </View>
-        {order.map((s: any, i: number) => {
-          const cid = String(s.pickup || s.drop), n = num(cid), r = rows[i] || {};
-          const pal = Number((cargo[cid] || {}).pal) || 0;
+        {groups.map(g => {
+          // 3.58: flera order till samma ställe i rad = ett stopp: en tid, summerat gods, ett nummer per order.
+          const s = g[0].s, r = g[0].r;
+          const pals = g.reduce((n, x) => n + (Number((cargo[String(x.s.pickup || x.s.drop)] || {}).pal) || 0), 0);
+          const many = g.length > 1;
           const sub = s.pickup
-            ? `Hämta ${pal ? pal + ' pall' : ''}${s.open ? ` · öppnar ${s.open}` : ''}`
-            : `Lämna ${pal ? pal + ' pall' : ''}${s.area ? ` · ${s.area}` : ''}${s.deadline ? ` · senast ${s.deadline}` : ''}`;
+            ? `Hämta ${pals ? pals + ' pall' : ''}${many ? ` · ${g.length} order` : ''}${s.open ? ` · öppnar ${s.open}` : ''}`
+            : `Lämna ${pals ? pals + ' pall' : ''}${many ? ` · ${g.length} order` : ''}${s.area ? ` · ${s.area}` : ''}${s.deadline ? ` · senast ${s.deadline}` : ''}`;
+          const late = g.some(x => x.r && x.r.late);
           return (
-            <Pressable key={(s.pickup ? 'p' : 'd') + cid} style={p.row} onPress={() => onOpen && onOpen(s)} android_ripple={{color: C.edge}} accessibilityLabel={`${s.pickup ? 'Hämta' : 'Lämna'} ${s.who || ''} – visa ordern`}>
-              <View style={[p.n, {backgroundColor: SHADES[n % SHADES.length]}]}><Text style={[p.nT, {color: INK[n % INK.length]}]}>{n + 1}</Text></View>
-              <Bi n={s.pickup ? 'box-arrow-up-right' : 'check2'} size={15} color={s.pickup ? C.accentInk : C.accent2} />
-              <View style={{flex: 1, minWidth: 0}}>
-                <Text style={p.who} numberOfLines={1}>{s.who || s.adr || '—'}</Text>
-                {s.tidspass ? <Text style={p.tpS} numberOfLines={1}>TIDSPASSNING{s.tidspass.time ? ` kl ${s.tidspass.time}` : ' – tid saknas'}</Text> : null}
-                <Text style={p.sub} numberOfLines={1}>{sub}</Text>
-              </View>
-              <Text style={[p.tm, r.late ? {color: C.bad} : null]}>{r.eta ? `ca ${hhmm(new Date(r.eta))}` : ''}</Text>
-              {onOpen ? <Bi n="chevron-right" size={13} color={C.faint} /> : null}
-            </Pressable>
+            <View key={g.map(x => (x.s.pickup ? 'p' : 'd') + (x.s.pickup || x.s.drop)).join('-')} style={p.row}>
+              <Pressable style={p.rowIn} onPress={() => onOpen && onOpen(s)} android_ripple={{color: C.edge}} accessibilityLabel={`${s.pickup ? 'Hämta' : 'Lämna'} ${s.who || ''} – visa ordern`}>
+                <View style={p.nums}>
+                  {g.map(x => { const n = num(String(x.s.pickup || x.s.drop)); return <View key={n} style={[p.n, {backgroundColor: SHADES[n % SHADES.length]}]}><Text style={[p.nT, {color: INK[n % INK.length]}]}>{n + 1}</Text></View>; })}
+                </View>
+                <Bi n={s.pickup ? 'box-arrow-up-right' : 'check2'} size={15} color={s.pickup ? C.accentInk : C.accent2} />
+                <View style={{flex: 1, minWidth: 0}}>
+                  <Text style={p.who} numberOfLines={1}>{s.who || s.adr || '—'}</Text>
+                  {g.some(x => x.s.tidspass) ? <Text style={p.tpS} numberOfLines={1}>TIDSPASSNING{s.tidspass && s.tidspass.time ? ` kl ${s.tidspass.time}` : ' – tid saknas'}</Text> : null}
+                  <Text style={p.sub} numberOfLines={1}>{sub}</Text>
+                </View>
+                <Text style={[p.tm, late ? {color: C.bad} : null]}>{r && r.eta ? `ca ${hhmm(new Date(r.eta))}` : ''}</Text>
+                {onOpen && !many ? <Bi n="chevron-right" size={13} color={C.faint} /> : null}
+              </Pressable>
+              {many ? g.map(x => {
+                const cid = String(x.s.pickup || x.s.drop), other = x.s.pickup ? null : order.find((y: any) => String(y.pickup) === cid);
+                const pal = Number((cargo[cid] || {}).pal) || 0;
+                return (
+                  <Pressable key={cid} style={p.sub2} onPress={() => onOpen && onOpen(x.s)} android_ripple={{color: C.edge}}>
+                    <Text style={p.sub2T} numberOfLines={1}>{x.s.orderNo || cid}{other ? `  ·  från ${other.who || other.adr || ''}` : ''}{pal ? `  ·  ${pal} pall` : ''}</Text>
+                    {onOpen ? <Bi n="chevron-right" size={12} color={C.faint} /> : null}
+                  </Pressable>
+                );
+              }) : null}
+            </View>
           );
         })}
         <Pressable style={p.btn} onPress={() => setOpen(true)} android_ripple={{color: C.edge}}>
@@ -113,7 +138,11 @@ const p = themed(() => StyleSheet.create({
   sum: {backgroundColor: C.panel, borderRadius: 12, padding: 12, marginBottom: 8, gap: 3},
   sumT: {color: C.ink, fontSize: 15.5, fontWeight: '900'},
   sumS: {color: C.dim, fontSize: 12.5, fontWeight: '600'},
-  row: {flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.panel, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12, marginTop: 6},
+  row: {backgroundColor: C.panel, borderRadius: 12, marginTop: 6, overflow: 'hidden', borderWidth: 1, borderColor: C.edge, borderBottomWidth: 2, borderBottomColor: C.trkA},
+  rowIn: {flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12},
+  nums: {flexDirection: 'row', gap: 3},
+  sub2: {flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: 12, marginRight: 12, paddingVertical: 9, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.edge},
+  sub2T: {flex: 1, color: C.dim, fontSize: 13, fontWeight: '600'},
   n: {width: 26, height: 26, borderRadius: 8, alignItems: 'center', justifyContent: 'center'},
   nT: {fontSize: 13, fontWeight: '900'},
   who: {color: C.ink, fontSize: 15, fontWeight: '800'},
