@@ -11,6 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 25 # ett bygge tar ~5 min; hänger det avbryts det i stället för att blockera
     steps:
       - name: Hämta koden
         uses: actions/checkout@v4
