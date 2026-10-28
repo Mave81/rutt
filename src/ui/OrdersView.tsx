@@ -13,7 +13,7 @@ import React, {useMemo, useState} from 'react';
 import {FlatList, Linking, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, themed, hhmm, prettyPhone, whenText, FONT, R} from './theme';
-import {Sheet} from './parts';
+import {Sheet, BigText} from './parts';
 import {Bi, BiName} from './Bi';
 import Slider from './Slider';
 import ReorderSheet from './Reorder';
@@ -239,6 +239,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   const [sel, setSel] = useState<Record<string, boolean>>({});
   const [selMode, setSelMode] = useState(false);
   const [openRow, setOpenRow] = useState<JRow | null>(null);
+  const [bigText, setBigText] = useState<string | null>(null);
   const [shop, setShop] = useState<JRow[] | null>(null);
   const [addNum, setAddNum] = useState<{cid: string; label: string; num: string} | null>(null);
   const [planned, setPlanned] = useState<any>(null);
@@ -544,10 +545,10 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         ) : null}
         {sedelBox(r, st)}
         {notes.length > 0 && (
-          <View style={o.fullTxt}>
-            <Text style={o.fullK}>TEXT I ORDERN</Text>
-            <Text style={o.fullV} selectable>{notes.join('\n\n')}</Text>
-          </View>
+          <Pressable style={o.fullTxt} onPress={() => setBigText(notes.join('\n\n'))} accessibilityLabel="Visa texten stort">
+            <View style={{flexDirection: 'row', alignItems: 'center'}}><Text style={[o.fullK, {flex: 1}]}>TEXT I ORDERN</Text><Bi n="zoom-in" size={14} color={C.faint} /><Text style={[o.fullK, {marginLeft: 5}]}>STOR</Text></View>
+            <Text style={o.fullV}>{notes.join('\n\n')}</Text>
+          </Pressable>
         )}
         {!st.own || st.parent ? timSeg([st], true) : null}
         <View style={o.kv}>
@@ -771,6 +772,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
       </> : null}
 
       {rowSheet()}
+      <BigText text={bigText} onClose={() => setBigText(null)} />
       {shopView()}
       {placeSheetView()}
       <CallSheet st={callStop} onClose={() => setCallStop(null)} />

@@ -5,10 +5,10 @@
  * Kraven från ordern (signatur/namn/foto/kommentar obligatoriskt) styr "Klar".
  */
 import React, {useEffect, useMemo, useState} from 'react';
-import {Dimensions, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
+import {Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, themed, R} from './theme';
-import {MAX_PHOTOS, SigData, SignaturePad, SigPreview, SignFullscreen, pickPhoto, useKeyboardLift} from './parts';
+import {MAX_PHOTOS, NameAsk, SigData, SigPreview, SignFullscreen, pickPhoto, useKeyboardLift} from './parts';
 import {Bi} from './Bi';
 import TidInput, {fmtMin} from './TidInput';
 import StatusExtras, {Extras, ExtrasValue} from './StatusExtras';
@@ -18,12 +18,12 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
   const insets = useSafeAreaInsets();
   const {kb, lift} = useKeyboardLift();
   const [sig, setSig] = useState<SigData | null>(null);
-  const [drawing, setDrawing] = useState(false);
+  const drawing = false;
   // Hur kvitteras det? Signatur är standard. Bara namn, eller foto när kunden inte är på plats.
   const [mode, setMode] = useState<'sig' | 'namn' | 'foto'>('sig');
   const [fs, setFs] = useState(false); // helskärm för kunden
-  const [fsSig, setFsSig] = useState(false); // signaturen kom från helskärm
-  const [padKey, setPadKey] = useState(0);
+  const [, setFsSig] = useState(false); // signaturen kom från helskärm
+  const [askName, setAskName] = useState(false); // namnet efteråt (3.57)
   const [name, setName] = useState('');
   const [photos, setPhotos] = useState<any[]>([]);
   const [extOpen, setExtOpen] = useState(false);
@@ -50,7 +50,6 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
     setKolli((saved && saved.kolli) || (stop && stop.kolli) || 0);
   }, [stop, saved]);
 
-  const padH = Math.max(230, Math.min(400, Math.round(Dimensions.get('window').height * 0.36)));
   // Kvittenstyp väljer du själv (som i Opter). Krav = orderns krav OCH typens krav.
   const P = (stop && stop.pod) || null;
   // Tilläggen som kontoret lagt på ordern (Opter: ShipmentAddServiceType). Demo: exempel.
@@ -253,19 +252,20 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
             <Text style={st.sec}>Mottagarens underskrift</Text>
             <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View>
           </View>
-          <Pressable style={st.fsBtn} onPress={() => setFs(true)}>
-            <Bi n="pen-fill" size={16} color={C.people} />
-            <Text style={st.fsTxt}>Ge telefonen till kunden – signera i helskärm</Text>
-          </Pressable>
-          {fsSig && sig ? (
+          {sig ? (
             <>
               <SigPreview data={sig} height={140} />
-              <Pressable hitSlop={10} style={{alignSelf: 'flex-end', paddingVertical: 8}} onPress={() => { setSig(null); setFsSig(false); setPadKey(k => k + 1); }}>
+              <Pressable hitSlop={10} style={{alignSelf: 'flex-end', paddingVertical: 8}} onPress={() => { setSig(null); setFsSig(false); setFs(true); }}>
                 <Text style={st.redo}>Signera om</Text>
               </Pressable>
             </>
           ) : (
-            <SignaturePad key={padKey} height={padH} onChange={setSig} onDrawing={setDrawing} hint="Signera på linjen" />
+            // 3.57: kunden signerar alltid i helskärm – stor ruta som står still. Namnet frågas efteråt.
+            <Pressable style={st.paperTile} onPress={() => setFs(true)} accessibilityLabel="Signera i helskärm">
+              <Bi n="pen-fill" size={24} color="#B35300" />
+              <Text style={st.paperT}>Tryck – kunden signerar</Text>
+              <Text style={st.paperS}>Hela skärmen blir en ruta som står still</Text>
+            </Pressable>
           )}
           </>}
 
@@ -384,7 +384,8 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
           </Pressable>
         </View>
       </View>
-      <SignFullscreen open={fs} who={stop.who} onCancel={() => setFs(false)} onDone={d => { setSig(d); setFsSig(true); setFs(false); }} />
+      <SignFullscreen open={fs} who={stop.who} onCancel={() => setFs(false)} onDone={d => { setSig(d); setFsSig(true); setFs(false); if (name.trim().length < 2) setAskName(true); }} />
+      <NameAsk open={askName} suggestions={suggestions} required={!!req.name} onSkip={() => setAskName(false)} onSave={n => { setName(n); setAskName(false); }} />
     </Modal>
   );
 }
@@ -439,8 +440,9 @@ const st = themed(() => StyleSheet.create({
   hint2: {color: C.faint, fontSize: 12, marginTop: 6},
   bigCam: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 14, backgroundColor: C.accent, borderRadius: 14, paddingVertical: 20},
   bigCamTxt: {color: C.onAccent, fontSize: 17, fontWeight: '800'},
-  fsBtn: {flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.peopleSoft, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, marginBottom: 10},
-  fsTxt: {color: C.people, fontSize: 14.5, fontWeight: '800', flex: 1},
+  paperTile: {height: 150, borderRadius: 18, backgroundColor: '#FFFFFF', borderColor: C.accent, borderWidth: 2, borderBottomWidth: 5, borderBottomColor: C.accentLo, alignItems: 'center', justifyContent: 'center', gap: 6},
+  paperT: {color: '#0B1220', fontSize: 19, fontWeight: '800'},
+  paperS: {color: '#5B6678', fontSize: 13.5, fontWeight: '600'},
   redo: {color: C.accentInk, fontSize: 14, fontWeight: '700'},
   doneBtn: {backgroundColor: C.accent2, borderRadius: 14, paddingVertical: 17, alignItems: 'center'},
   doneTxt: {color: '#FFFFFF', fontSize: 18, fontWeight: '800'},

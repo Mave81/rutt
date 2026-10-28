@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView, useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, themed, hhmm, isFutureDay, applyTheme, prettyPhone, slack} from './src/ui/theme';
+import {useLook, setLook} from './src/ui/look';
 import {Bi} from './src/ui/Bi';
 import {Sheet} from './src/ui/parts';
 import OrdersView, {DoneView, setNavApp, NavApp} from './src/ui/OrdersView';
@@ -225,6 +226,7 @@ function AppInner(): React.JSX.Element {
   if (C.mode !== mode) applyTheme(mode);
   useEffect(() => { loadJSON('rutt.theme', 'auto').then((v: any) => { if (v === 'dark' || v === 'light' || v === 'auto') setThemePref(v); }); }, []);
   function pickTheme(v: 'auto' | 'dark' | 'light') { setThemePref(v); saveJSON('rutt.theme', v); }
+  const look = useLook();
   const [navApp, setNavAppState] = useState<NavApp>('google');
   useEffect(() => { loadJSON('rutt.nav', 'google').then((v: any) => { if (v === 'waze' || v === 'google') setNavAppState(v); }); }, []);
   function pickNav(v: NavApp) { setNavAppState(v); setNavApp(v); }
@@ -1596,6 +1598,22 @@ function AppInner(): React.JSX.Element {
             <Pressable key={k} style={[s.segBtn, themePref === k && s.segOn]} onPress={() => pickTheme(k)}>
               <Bi n={icon} size={15} color={themePref === k ? C.onAccent : C.dim} />
               <Text style={[s.segTxt, themePref === k && {color: C.onAccent}]}>{label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <Text style={s.podLabel}>Planen</Text>
+        <View style={s.seg}>
+          {([['A', 'Kort'], ['B', 'Nästa stort'], ['C', 'En rad']] as const).map(([k, label]) => (
+            <Pressable key={k} style={[s.segBtn, look.plan === k && s.segOn]} onPress={() => setLook({plan: k})}>
+              <Text style={[s.segTxt, look.plan === k && {color: C.onAccent}]}>{k} · {label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <Text style={s.podLabel}>Dra för Lossad</Text>
+        <View style={s.seg}>
+          {([['A', 'Cel 3D'], ['B', 'Fart'], ['C', 'Smäll']] as const).map(([k, label]) => (
+            <Pressable key={k} style={[s.segBtn, look.slide === k && s.segOn]} onPress={() => setLook({slide: k})}>
+              <Text style={[s.segTxt, look.slide === k && {color: C.onAccent}]}>{k} · {label}</Text>
             </Pressable>
           ))}
         </View>
