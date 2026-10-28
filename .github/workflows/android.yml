@@ -11,7 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 25 # ett bygge tar ~5 min; hänger det avbryts det i stället för att blockera
+    timeout-minutes: 45 # ett bygge tar ~5 min; hänger det avbryts det i stället för att blockera
     steps:
       - name: Hämta koden
         uses: actions/checkout@v4
@@ -29,6 +29,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+          cache: gradle
 
       - name: Bygg debug-APK
         run: |
@@ -37,6 +38,12 @@ jobs:
           set +e
           ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee /tmp/gradle.log
           CODE=${PIPESTATUS[0]}
+          # Nedladdning från Maven som tar timeout (28 okt: "Read timed out" på react-android) → ett nytt försök
+          if [ "$CODE" != "0" ] && grep -qE "Read timed out|Could not download|Could not GET|Connection reset|timed out" /tmp/gradle.log; then
+            echo "Nätfel mot Maven – försöker igen"
+            ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee /tmp/gradle.log
+            CODE=${PIPESTATUS[0]}
+          fi
           if [ "$CODE" != "0" ]; then
             # Plocka ut sektionen från "FAILURE:" till slut (rotorsaken), cappa till 10 rader (GH-gräns)
             awk '/FAILURE: Build failed/{f=1} f' /tmp/gradle.log | grep -vE "^\s*$" | head -10 \
