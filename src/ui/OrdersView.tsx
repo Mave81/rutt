@@ -29,12 +29,15 @@ loadJSON('rutt.nav', 'google').then((v: any) => { if (v === 'waze' || v === 'goo
 export function setNavApp(v: NavApp) { NAV = v; saveJSON('rutt.nav', v); }
 export const navAppName = (v: NavApp = NAV) => (v === 'waze' ? 'Waze' : 'Google Maps');
 export function navigate(st: any, app: NavApp | 'map' = NAV) {
-  // Adressen i ordern går före koordinaterna: Opters (eller uppslagna) koordinater kan ligga på fel husnummer
-  // (Morabergsvägen 25 → punkten låg vid nr 7). Koordinater används bara när ordern saknar gatuadress.
-  const hasAdr = !!(st.adr && /\d/.test(String(st.adr)) && (st.zip || st.area));
-  const geo = !hasAdr && st.lat != null && st.lng != null;
+  // Exakt som Opter Driver (XmlParser: ADDRESSTOLATITUDE/LONGITUDE, annars ADDRESSTOSTRING):
+  // finns Opters egna koordinater på adressen → navigera dit. Annars adressen som text.
+  // Koordinater som RUTT själv slagit upp (geo: true, kartans gissning) används ALDRIG för navigering –
+  // det var de som gav Morabergsvägen 7 i stället för 25. Döbelnsgatan 44 blev 73 när adresstexten användes (28 okt).
+  const opterLL = st.lat != null && st.lng != null && Number(st.lat) !== 0 && Number(st.lng) !== 0 && !st.geo && !st.geoApprox;
+  const geo = opterLL;
   const ll = geo ? `${st.lat},${st.lng}` : '';
-  const q = encodeURIComponent([st.adr, st.zip, st.area].filter(Boolean).join(', '));
+  // Adresstexten exakt som Opters Address.toStringForGoogleMaps(): "Gata Nr, Postnr Ort".
+  const q = encodeURIComponent([st.adr, [st.zip, st.area].filter(Boolean).join(' ')].filter(Boolean).join(', '));
   const web = `https://www.google.com/maps/dir/?api=1&destination=${geo ? ll : q}`;
   if (app === 'waze') { Linking.openURL(geo ? `https://waze.com/ul?ll=${ll}&navigate=yes` : `https://waze.com/ul?q=${q}&navigate=yes`).catch(() => Linking.openURL(web).catch(() => {})); return; }
   if (app === 'map') { Linking.openURL(geo ? `geo:${ll}?q=${ll}(${encodeURIComponent(st.who || 'Stopp')})` : `geo:0,0?q=${q}`).catch(() => Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${geo ? ll : q}`).catch(() => {})); return; }
