@@ -13,7 +13,12 @@ Det enda RUTT gör på eget sätt är knappar och utseende. Appen är ett verkty
    fraktsedel eller turlista, att den bara finns i telefonen och aldrig går till Opter. **EGET** betyder att du lagt
    till den själv. Inscannade ska kunna rensas bort i Klart.
 2. **Ord, inte färgade rader.** Opter färgar raderna: ljusblå ny, vit godkänd, grön lossad. RUTT ska *inte* göra
-   så. Varje order har i stället ett ord: **INTE MOTTAGEN · INTE LASTAD · LASTAD · KLART** (+ NEKAD, SKICKAS…, INTE I OPTER).
+   så. Varje order har i stället ett märke med ord och ikon (testversionen 28 okt):
+   - **INTE MOTTAGEN:** klocka, helt orange. Du måste svara.
+   - **INTE LASTAD:** låda, orange ram och orange text. Något du ska göra.
+   - **LASTAD:** lastbil, grön text på ljusgrön botten. I bilen, på väg.
+   - **KLART:** bock, helt grön. Lossad och bekräftad av Opter.
+   - **NEKAD:** grå. **SKICKAS…:** guld. **INTE I OPTER:** röd.
 3. **Färg = betydelse.**
    - Orange: det du ska göra nu.
    - Grön: klart och bekräftat av Opter.
