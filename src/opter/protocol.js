@@ -45,7 +45,7 @@ const RST = { None: 0, StartWork: 1, EndWork: 2, StartLunch: 3, EndLunch: 4, Sta
 
 /* Fältnummer (ordinal i varje entitets PropertyNumber-enum) */
 const F = {
-  Address: { 2: 'line1', 3: 'line2', 4: 'line3', 5: 'company', 6: 'street', 7: 'streetNo', 8: 'zip', 9: 'city', 11: 'entreCode', 12: 'phone', 16: 'driverMessage', 17: 'info', 18: 'lng', 19: 'lat' },
+  Address: { 1: 'hubId', 2: 'line1', 3: 'line2', 4: 'line3', 5: 'company', 6: 'street', 7: 'streetNo', 8: 'zip', 9: 'city', 11: 'entreCode', 12: 'phone', 16: 'driverMessage', 17: 'info', 18: 'lng', 19: 'lat' },
   Resource: { 1: 'name', 2: 'shortId', 3: 'externalId', 4: 'supplierId', 5: 'active', 8: 'driver' },
   Office: { 1: 'emailDispatch', 2: 'phoneDispatch' },
   Shipment: {
@@ -65,6 +65,8 @@ const F = {
   },
   ShipmentPodSuggestion: { 1: 'shiId', 2: 'name', 3: 'revoked' },
   Setting: { 1: 'name', 2: 'value', 3: 'descr', 5: 'active' },
+  // Kunden (Opter ShipmentCustomer.PropertyNumber): fraktsedelskontroll vid hämtning/lämning.
+  ShipmentCustomer: { 1: 'code', 2: 'name', 3: 'externalId', 4: 'active', 5: 'customerId', 20: 'fbPick', 21: 'fbPickForce', 22: 'fbDel', 23: 'fbDelForce', 24: 'fbCdc', 26: 'fbLen' },
   Position: { 1: 'resId', 2: 'vhcId', 3: 'lng', 4: 'lat', 5: 'alt', 6: 'dir', 7: 'speed', 8: 'time' },
   ShipmentStatus: { 1: 'shiId', 2: 'dstId', 3: 'arrived', 4: 'accepted', 5: 'rejected', 6: 'pickup', 7: 'delivery', 8: 'completed', 10: 'userOption', 11: 'msgRequired', 12: 'changes', 13: 'changesCustomerAgrees', 14: 'pod', 15: 'code', 16: 'name', 21: 'order', 22: 'queryEnabled' },
   // Frågor på ordern (Opter: Frågor – vid hämtning/lämning, ja/nej eller text) och svaren
@@ -483,14 +485,13 @@ const CHANGE_FIELDS = [
 ];
 function editOptions(decoded) {
   const rows = (decoded && decoded.rows) || [];
-  const truthy = (v) => /^(true|1|ja|yes)$/i.test(String(v));
-  const sGet = (name) => { const r = rows.find(x => x.table === 'Setting' && String(x.columns.name || '').toLowerCase() === name.toLowerCase()); return r ? r.columns.value : undefined; };
-  const sBool = (name, def) => { const v = sGet(name); return v == null || v === '' ? def : truthy(v); };
-  const anySHI = rows.some(x => x.table === 'Setting' && /^SHI_.+Permission$/i.test(String(x.columns.name || '')));
+  const sGet = (name) => { const r = settingRow(decoded, name); return r ? (r.columns.value == null ? '' : String(r.columns.value)) : undefined; };
+  const sBool = (name, def) => settingBool(decoded, name, def);
+  const anySHI = rows.some(x => x.table === 'Setting' && x.columns.active !== false && /^SHI_.+Permission$/.test(String(x.columns.name || ''))); // Opter: anyChangeElementPermissionExists (aktiva rader)
   const fields = CHANGE_FIELDS.map(([cetName, kind, def, col, label]) => ({
     cet: CET[cetName], cetName, kind, col,
     label: String(sGet(cetName + 'Name') || label),
-    order: parseInt(sGet(cetName + 'Order'), 10) || 99,
+    order: settingInt(decoded, cetName + 'Order', 99),
     on: sBool(cetName + 'Permission', def === 'z' ? !anySHI : def),
   })).filter(f => f.on).sort((a, b) => a.order - b.order);
   const byOrder = (a, b) => (Number(a.order) || 0) - (Number(b.order) || 0) || String(a.name).localeCompare(String(b.name), 'sv');
@@ -518,6 +519,8 @@ function editOptions(decoded) {
       addImage: sBool('AddImagePermission', true), articles: sBool('ArticlesPermission', true), deletePriceItem: sBool('DeletePriceItemPermission', false), status: sBool('SetArbitraryStatusPermission', true),
       statusDone: sBool('SetArbitraryStatusDoneTabPermission', true),
       pickup: sBool('ManualStatusChangePickUpPermission', true), delivery: sBool('ManualStatusChangeDeliveryPermission', true),
+      // Lösa artiklar (Opter: LooseItemsPermission, av som standard, och bara om det finns LooseItemType-rader). Byggt i RUTT: inte än – bara synligt.
+      looseItems: sBool('LooseItemsPermission', false) && rows.some(r => r.table === 'LooseItemType'), looseForce: sBool('LooseItemForceSetValue', false),
     },
     fields, damageTypes,
   };
@@ -559,13 +562,35 @@ function encodePosition({ lat, lng, alt, bearing, speedKmh, time }) {
   wEndData(w, null, null);
   return w.build();
 }
-/* Serverinställning (Setting-tabellen), t.ex. PositionUpdateInterval. */
-function setting(decoded, name, fallback) {
-  const r = (decoded && decoded.rows || []).find(x => x.table === 'Setting' && String(x.columns.name || '').toLowerCase() === name.toLowerCase());
-  if (!r) return fallback;
-  const v = r.columns.value;
-  return v == null || v === '' ? fallback : v;
+/* Nästa status EXAKT som Opter (Shipment.calculateNextStatus): lägsta SHS_Order över nuvarande, UserOption och inte Rejected.
+ * Är nuvarande status Completed finns ingen. */
+function nextStatusOf(statuses, cur) {
+  if (cur && cur.completed) return null;
+  const co = cur ? Number(cur.order) || 0 : -Infinity;
+  let best = null;
+  for (const s of statuses || []) if (s.userOption && !s.rejected && (Number(s.order) || 0) > co && (!best || (Number(s.order) || 0) < (Number(best.order) || 0))) best = s;
+  return best;
 }
+/* Statusarna Opter skulle gå igenom med "Sätt nästa status" innan målet nås (när kontoret stängt av "Välj status"). */
+function statusChain(live, targetId) {
+  const st = (live && live.statuses) || [], t = st.find(s => s.id === targetId); if (!t) return [];
+  let cur = st.find(s => s.id === live.curId) || null; const out = [];
+  for (let i = 0; i < 20; i++) { const n = nextStatusOf(st, cur); if (!n || n.id === targetId || (Number(n.order) || 0) >= (Number(t.order) || 0)) break; out.push({id: n.id, name: n.name}); cur = n; }
+  return out;
+}
+/* Serverinställningar EXAKT som Opter (syncdata/Setting.java):
+ *  get:        SISTA raden med SET_Active och exakt samma namn (skiftlägeskänsligt). SET_Active är sant om fältet saknas.
+ *  getString:  värdet, även tomt – standardvärdet bara när raden saknas.
+ *  getBoolean: Boolean.parseBoolean → bara "true" (oavsett versaler) är ja; finns raden men är något annat = nej.
+ *  getInteger: Integer.parseInt, går det inte → standardvärdet. */
+function settingRow(decoded, name) {
+  let hit = null;
+  for (const x of (decoded && decoded.rows) || []) if (x.table === 'Setting' && x.columns.active !== false && String(x.columns.name == null ? '' : x.columns.name) === name) hit = x;
+  return hit;
+}
+function setting(decoded, name, fallback) { const r = settingRow(decoded, name); return r ? (r.columns.value == null ? '' : String(r.columns.value)) : fallback; }
+function settingBool(decoded, name, def) { const r = settingRow(decoded, name); return r ? /^true$/i.test(String(r.columns.value == null ? '' : r.columns.value)) : def; }
+function settingInt(decoded, name, def) { const r = settingRow(decoded, name); if (!r) return def; const v = String(r.columns.value == null ? '' : r.columns.value); return /^[+-]?\d+$/.test(v) ? parseInt(v, 10) : def; }
 
 /* Tom uppladdning som ber om full synk tillbaka (EndData 0,0). */
 function encodeFullSync() { const w = W(); wEndData(w, null, null); return w.build(); }
@@ -824,9 +849,46 @@ function palFromText(text) {
   while ((m = re.exec(String(text || '')))) { const n = parseInt(m[1], 10); if (n > best && n <= 36) best = n; }
   return best;
 }
+/* ---- Fraktsedelskontroll exakt som Opter (ShipmentDetailViewPager ~1013 + shipment/FreightbillCheck) ---- */
+// Ordertyp som Opter (Shipment.getShipmentType): terminaladresser (ADR_HUB_Id) avgör.
+function shipmentType(from, to) {
+  if (!from || !to) return 'p2p';
+  const a = Number(from.hubId) || 0, b = Number(to.hubId) || 0;
+  if (!a && !b) return 'p2p';
+  if (a && b) return 'line';
+  return a ? 'delivery' : 'pickup';
+}
+// Krävs kontrollen för statusen? null = nej. force = fältet tomt (föraren skriver/scannar), annars förifyllt med SHI_FreightBill.
+function freightBillCheckFor(st, type, cus, all) {
+  if (!st || !cus) return null;
+  const pick = !!st.pickup, del = !!st.delivery;
+  const z = (type === 'pickup' && pick) || (type === 'delivery' && del) || (type === 'p2p' && (pick || del)) || !!all;
+  const on = (pick && (cus.fbPick || cus.fbPickForce)) || (del && (cus.fbDel || cus.fbDelForce));
+  if (!on || !z) return null;
+  return { force: pick ? !!cus.fbPickForce : !!cus.fbDelForce, check: pick ? !!cus.fbPick : !!cus.fbDel, cdc: Number(cus.fbCdc) || 0, len: Number(cus.fbLen) || 0 };
+}
+// OK-knappen i Opter är av tills värdet passar: längd (CUS_FreightBillNumberLength) och kontrollsiffra (0 Ingen, 1 Modulus10).
+// Andra kontrollmetoder stänger Opter direkt (raden blir aldrig klar) – samma här.
+function freightBillError(v, opt) {
+  const o = opt || {}, s = String(v == null ? '' : v), len = Number(o.len) || 0, cdc = Number(o.cdc) || 0;
+  if (cdc !== 0 && cdc !== 1) return 'Kontrollmetoden stöds inte (samma i Opter) – ring kontoret';
+  if (len > 0 && s.length < len) return `För kort – ska vara ${len} tecken`;
+  if (len > 0 && s.length > len) return `För långt – ska vara ${len} tecken`;
+  if (cdc === 1) {
+    if (!/^\d*$/.test(s)) return 'Bara siffror';
+    let sum = 0, dbl = false;
+    for (let i = s.length - 1; i >= 0; i--) { let d = s.charCodeAt(i) - 48; if (dbl) { d *= 2; if (d > 9) d = d % 10 + 1; } sum += d; dbl = !dbl; }
+    if (sum % 10 !== 0) return 'Fel kontrollsiffra – kolla numret';
+  }
+  return '';
+}
 /* ---- Opter-rader → rutt {cargo, stops} ---- */
 const hhmm = (d) => d ? new Intl.DateTimeFormat('sv-SE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Stockholm' }).format(d) : null;
 function toRutt(decoded) {
+  const customers = decoded.rows.filter(r => r.table === 'ShipmentCustomer').map(r => r.columns);
+  // Opter: DataContainer.getShipmentCustomerWithId – första kunden vars CUS_CustomerId == SHI_CustomerId (utan hänsyn till versaler).
+  const customerOf = (id) => { const k = String(id == null ? '' : id).toLowerCase(); return customers.find(x => String(x.customerId == null ? '' : x.customerId).toLowerCase() === k) || null; };
+  const fbAll = settingBool(decoded, 'CheckFreightBillAtAllPickUpAndDelivery', false);
   const addresses = {};
   for (const r of decoded.rows) if (r.table === 'Address') for (const id of [r.key.identityId, r.key.xxxId]) if (id) addresses[id] = r.columns;
   const pkgBy = {};
@@ -850,11 +912,11 @@ function toRutt(decoded) {
     const ok = defPods.filter(d => beforePickup ? d.allowBeforePickup : d.allowAfterPickup);
     return {main: ok.filter(d => !d.mainId), sub: ok.filter(d => d.mainId)};
   };
-  const sBool = (name, def) => /^(true|1|ja|yes)$/i.test(String(setting(decoded, name, def ? 'true' : 'false')));
+  const sBool = (name, def) => settingBool(decoded, name, def);
   const podFields = { remark: sBool('PodRemarkEnabled', true), comment: sBool('PodCommentEnabled', false), count: sBool('PodPackageCountEnabled', true), pic: sBool('PodPictureEnabled', false), commentName: String(setting(decoded, 'PodCommentName', '') || '') };
 
   // Serverinställningar som styr vilka ordrar Opter Driver visar.
-  const sTrue = (name) => /^(true|1|ja|yes)$/i.test(String(setting(decoded, name, 'false')));
+  const sTrue = (name) => settingBool(decoded, name, false);
   const showCons = sTrue('IncludeConsignments'), showConsChildren = sTrue('IncludeConsignmentChildren');
 
   const cargo = {}; const stops = []; let n = 0;
@@ -914,6 +976,10 @@ function toRutt(decoded) {
     const podTypes = pts.main.map(mk), podSubTypes = pts.sub.map(mk);
     const defPod = podTypes.find(t => c.customerDefaultPOT && t.id === c.customerDefaultPOT) || podTypes.find((t, i) => pts.main[i].isDefault) || podTypes[0] || null;
     const podType = defPod;
+    // Kvittens vid hämtning (Opter: loadDefaultPodTypes(..., isPickup=true) → bara typer med AllowBeforePickup). Krävs om Lastad-statusen har SHS_Pod.
+    const ptsP = podTypesFor(true);
+    const podTypesP = ptsP.main.map(mk), podSubTypesP = ptsP.sub.map(mk);
+    const defPodP = podTypesP.find(t => c.customerDefaultPOT && t.id === c.customerDefaultPOT) || podTypesP.find((t, i) => ptsP.main[i].isDefault) || podTypesP[0] || null;
     // Det som går att ändra i efterhand (Opter Driver: menyn på ordern, så länge den inte är klarmarkerad).
     const addTypes = decoded.rows.filter(x => x.table === 'ShipmentAddServiceType' && belongs(x, shiId) && !x.columns.revoked)
       .map(x => ({id: x.key.xxxId, name: String(x.columns.name || 'Tillägg'), descr: x.columns.descr || ''})).filter(t => t.id);
@@ -942,13 +1008,17 @@ function toRutt(decoded) {
     }).filter(q => q.id && q.question);
     const edit = { addTypes, addDone, dmgDone, attDone, values, articles, priceItems, queries, orderId: c.orderId || null, completed: !!(curSt && curSt.completed),
       statuses: statuses.map(s => ({id: s.id, name: String(s.name || ''), userOption: !!s.userOption, accepted: !!s.accepted, pickup: !!s.pickup, delivery: !!s.delivery, completed: !!s.completed, pod: !!s.pod, rejected: !!s.rejected})) };
-    const live = { key: r.key, hdr: r.hdr, shiId, offId: r.key.offId, edit, statuses: statuses.map(s => ({id: s.id, name: s.name})), cur: curSt ? curSt.name : null, curId: c.shsId || 0,
+    const live = { key: r.key, hdr: r.hdr, shiId, offId: r.key.offId, edit, statuses: statuses.map(s => ({id: s.id, name: s.name, order: Number(s.order) || 0, userOption: !!s.userOption, rejected: !!s.rejected, pickup: !!s.pickup, delivery: !!s.delivery, completed: !!s.completed})), cur: curSt ? curSt.name : null, curId: c.shsId || 0, curOrder: curSt ? Number(curSt.order) || 0 : 0,
+      nextSt: (() => { const n = nextStatusOf(statuses, curSt); return n ? {id: n.id, name: n.name} : null; })(),
       isNew: isNew && !consHidden, tab: tabF, revoked: revokedOpen, revokedAny: revoked, revokedConfirmed: !!c.revokedConfirmed, consignment: !!c.isConsignment || !!c.consignmentParent, locked: !!c.locked,
       shipDate: (c.shipmentDate instanceof Date && c.shipmentDate.getFullYear() > 2001) ? ymd(c.shipmentDate) : (c.orderDate instanceof Date && c.orderDate.getFullYear() > 2001 ? ymd(c.orderDate) : null),
       doneAt: (() => { const logs = decoded.rows.filter(x => x.table === 'ShipmentStatusLog' && belongs(x, shiId) && x.columns.shsId === c.shsId && x.columns.logTime instanceof Date); return logs.length ? Math.max(...logs.map(x => x.columns.logTime.getTime())) : null; })(),
       serverDone, acceptSt: acceptSt ? {id: acceptSt.id, name: acceptSt.name} : null, rejectSt: rejectSt ? {id: rejectSt.id, name: rejectSt.name} : null,
-      loadSt: loadSt ? {id: loadSt.id, name: loadSt.name, changes: !!loadSt.changes, queries: !!loadSt.queryEnabled} : null, unloadSt: unloadSt ? {id: unloadSt.id, name: unloadSt.name, pod: !!unloadSt.pod, changes: !!unloadSt.changes, queries: !!unloadSt.queryEnabled} : null,
+      loadSt: loadSt ? {id: loadSt.id, name: loadSt.name, changes: !!loadSt.changes, queries: !!loadSt.queryEnabled, pod: !!loadSt.pod} : null, unloadSt: unloadSt ? {id: unloadSt.id, name: unloadSt.name, pod: !!unloadSt.pod, changes: !!unloadSt.changes, queries: !!unloadSt.queryEnabled} : null,
       podType: podType ? {id: podType.id, name: podType.name} : null, hasSpt, externalId: c.externalId || '',
+      freightBill: c.freightBill == null ? '' : String(c.freightBill),
+      fbLoad: freightBillCheckFor(loadSt, shipmentType(from, to), customerOf(c.customerId), fbAll),
+      fbUnload: freightBillCheckFor(unloadSt, shipmentType(from, to), customerOf(c.customerId), fbAll),
       packageIds: pkgs.map(p => p._id).filter(Boolean),
       // Försening som Opter: kunden kräver orsak (och ev. avvikelse) när ordern lossas efter senaste leveranstid.
       tfrId: Number(c.tfrId) || 0, forceDelay: !!c.forceDelayReason, forceDamageDelay: !!c.forceDamageOnDelay,
@@ -959,6 +1029,7 @@ function toRutt(decoded) {
     const shipReq = { name: !!c.podNameReq, sig: !!c.podSigReq, remark: !!c.podRemarkReq, comment: !!c.podCommentReq, pic: !!c.podPicReq };
     const req = podType ? { name: shipReq.name && podType.req.name, sig: shipReq.sig && podType.req.sig, remark: shipReq.remark && podType.req.remark, comment: shipReq.comment && podType.req.comment, pic: shipReq.pic && podType.req.pic } : {};
     const pod = { types: podTypes, subTypes: podSubTypes, defaultId: podType ? podType.id : 0, shipReq, fields: podFields, lockMain: !!c.podLockMainType };
+    const podPick = { types: podTypesP, subTypes: podSubTypesP, defaultId: defPodP ? defPodP.id : 0, shipReq, fields: podFields, lockMain: !!c.podLockMainType };
     // All fritext för ordern, i den ordning Opter visar den, utan dubbletter.
     // Fritext: utan rader som bara är fraktsedel-/ordernumret och utan upprepade rader.
     const junk = new Set([String(c.freightBill || ''), String(c.shipmentId || ''), String(c.orderId || '')].filter(Boolean));
@@ -980,8 +1051,8 @@ function toRutt(decoded) {
     const kolli = Number(c.packages) || pkgs.reduce((s, p) => s + (Number(p.quantity) || 0), 0) || 0;
     const common = { live, shiId, extras: extras.join(', '), orderNo: c.orderId || null, freightBill: c.freightBill || c.shipmentId || null, customer: c.customer || '', service: c.serviceType || '', kg, pal, kolli, goods: pkgText, info, km: Number(c.distanceKm) || null, minutes: Number(c.timeMinutes) || null, msg: '', driverMsg: '' };
     const merge = (a, b) => { const seen = new Set(a.map(x => x.num)); return [...a, ...b.filter(x => !seen.has(x.num) && seen.add(x.num))]; };
-    stops.push({ ...common, verb: 'Hämta', adr: line(from), area: from && from.city ? from.city : '', zip: from && from.zip || '', lat: from && Number(from.lat) ? Number(from.lat) : null, lng: from && Number(from.lng) ? Number(from.lng) : null, pickup: cid, deadline: tLP && tLP.hhmm, dlDate: tLP && tLP.date, earliest: tEP && tEP.hhmm, openDate: tEP && tEP.date, tEarliest: tEP, tLatest: tLP, who: placeName(from) || c.customer || '', customer: c.customer || '', orderedBy: c.orderReceiver || '', contact: contact(from), tel: merge(phones(from, c, 'from'), textTel), code: from && from.entreCode || '', adrMsg: [from && from.driverMessage, from && from.info].filter(Boolean).join(' · '), ref: c.senderRef || '', note: [c.serviceType, kg ? kg + ' kg' : '', c.message].filter(Boolean).join(' · ') });
-    stops.push({ ...common, verb: 'Lämna', adr: line(to), area: to && to.city ? to.city : '', zip: to && to.zip || '', lat: to && Number(to.lat) ? Number(to.lat) : null, lng: to && Number(to.lng) ? Number(to.lng) : null, drop: cid, tidspass: tp, deadline: (tLD && tLD.hhmm) || (tp && tp.time) || null, dlDate: (tLD && tLD.date) || (tp && tp.time ? dDate : null), earliest: (tED && tED.hhmm) || tpOpen, openDate: (tED && tED.date) || (tpOpen ? dDate : null), tEarliest: tED, tLatest: tLD, who: placeName(to) || c.customer || '', customer: c.customer || '', orderedBy: c.orderReceiver || '', contact: contact(to), tel: merge(phones(to, c, 'to'), textTel), avise: avisering(info), code: to && to.entreCode || '', adrMsg: [to && to.driverMessage, to && to.info].filter(Boolean).join(' · '), ref: c.receiverRef || '', req, pod, suggest: [...new Set(sugBy[shiId] || [])], note: [kg ? kg + ' kg' : '', c.driverMessage].filter(Boolean).join(' · ') });
+    stops.push({ ...common, verb: 'Hämta', adr: line(from), area: from && from.city ? from.city : '', zip: from && from.zip || '', lat: from && Number(from.lat) ? Number(from.lat) : null, lng: from && Number(from.lng) ? Number(from.lng) : null, opterLL: !!(from && Number(from.lat) && Number(from.lng)), pickup: cid, deadline: tLP && tLP.hhmm, dlDate: tLP && tLP.date, earliest: tEP && tEP.hhmm, openDate: tEP && tEP.date, tEarliest: tEP, tLatest: tLP, who: placeName(from) || c.customer || '', customer: c.customer || '', orderedBy: c.orderReceiver || '', contact: contact(from), tel: merge(phones(from, c, 'from'), textTel), code: from && from.entreCode || '', adrMsg: [from && from.driverMessage, from && from.info].filter(Boolean).join(' · '), ref: c.senderRef || '', pod: podPick, note: [c.serviceType, kg ? kg + ' kg' : '', c.message].filter(Boolean).join(' · ') });
+    stops.push({ ...common, verb: 'Lämna', adr: line(to), area: to && to.city ? to.city : '', zip: to && to.zip || '', lat: to && Number(to.lat) ? Number(to.lat) : null, lng: to && Number(to.lng) ? Number(to.lng) : null, opterLL: !!(to && Number(to.lat) && Number(to.lng)), drop: cid, tidspass: tp, deadline: (tLD && tLD.hhmm) || (tp && tp.time) || null, dlDate: (tLD && tLD.date) || (tp && tp.time ? dDate : null), earliest: (tED && tED.hhmm) || tpOpen, openDate: (tED && tED.date) || (tpOpen ? dDate : null), tEarliest: tED, tLatest: tLD, who: placeName(to) || c.customer || '', customer: c.customer || '', orderedBy: c.orderReceiver || '', contact: contact(to), tel: merge(phones(to, c, 'to'), textTel), avise: avisering(info), code: to && to.entreCode || '', adrMsg: [to && to.driverMessage, to && to.info].filter(Boolean).join(' · '), ref: c.receiverRef || '', req, pod, suggest: [...new Set(sugBy[shiId] || [])], note: [kg ? kg + ' kg' : '', c.driverMessage].filter(Boolean).join(' · ') });
   }
   // Kontorets behörigheter för flera order samtidigt (Opter Driver: Setting.Permission + "Permission", standard true).
   const perm = {
@@ -996,5 +1067,6 @@ function toRutt(decoded) {
 module.exports = {
   MessageType, Table, DT, RST, F, frame, unframe, decodeSync, ticksToDate,
   logonPayload, parseLogon, resourceList, encodeStartWork, encodeWorkStatus, toRutt,
-  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, splitNums, avisering, tidspass, palFromText, team, encodeShipmentStatus, encodeShipmentEdit, encodeGiveAway, editOptions, isLateDelivery, delayNeeds, CET, CHANGE_FIELDS, changesSeen, articleChanges, signatureString, encodePosition, setting,
+  messageList, encodeMarkRead, optTime, ymd, encodeSendMessage, lastIdentity, encodeFullSync, extractPhones, splitNums, avisering, tidspass, palFromText, team, encodeShipmentStatus, encodeShipmentEdit, encodeGiveAway, editOptions, isLateDelivery, delayNeeds, CET, CHANGE_FIELDS, changesSeen, articleChanges, settingBool, settingInt, nextStatusOf, statusChain, signatureString, encodePosition, setting,
+  shipmentType, freightBillCheckFor, freightBillError,
 };

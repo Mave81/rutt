@@ -143,7 +143,10 @@ async function geocode(stops, fetchImpl) {
       try {
         const r = await f(`${NOMI}?format=jsonv2&limit=1&countrycodes=se&${qs}`, {headers: {'User-Agent': 'RUTT/1 (forre.nu)', 'Accept-Language': 'sv'}});
         const j = await r.json();
-        if (Array.isArray(j) && j[0] && j[0].lat) { hit = {lat: Number(j[0].lat), lng: Number(j[0].lon), ...(approx ? {approx, v: 3} : {})}; break; }
+        // Kartan svarar ibland med GATAN när husnumret saknas där (Paradistorget 4 → gatans mitt = nr 2). Det är ungefärligt, inte exakt.
+        const streetOnly = !approx && /\d/.test(String(s.adr || '')) && j && j[0] && (j[0].category === 'highway' || /^(road|street|residential)$/.test(String(j[0].addresstype || '')));
+        const ap = approx || (streetOnly ? 'gata' : null);
+        if (Array.isArray(j) && j[0] && j[0].lat) { hit = {lat: Number(j[0].lat), lng: Number(j[0].lon), v: 4, ...(ap ? {approx: ap} : {})}; break; }
       } catch (e) { return found; } // inget nät → försök nästa gång
     }
     geo.set(geoKey(s), hit || {miss: true, at: Date.now(), v2: true});
@@ -153,7 +156,8 @@ async function geocode(stops, fetchImpl) {
   return found;
 }
 // "Hittades inte" från före 3.53 provas igen direkt (nu finns reserv på postnummer/ort).
-async function initGeo() { if (!store) return; try { const v = await store.load('rutt.geo.v1', null); if (Array.isArray(v)) for (const [k, x] of v) if (x && (x.miss ? x.v2 : (!x.approx || x.v === 3))) geo.set(k, x); } catch (e) {} }
+// v4: gatuträffar räknas som ungefärliga – äldre sparade träffar slås upp igen.
+async function initGeo() { if (!store) return; try { const v = await store.load('rutt.geo.v1', null); if (Array.isArray(v)) for (const [k, x] of v) if (x && (x.miss ? x.v2 : x.v === 4)) geo.set(k, x); } catch (e) {} }
 // Stoppen med koordinater ifyllda där Opter saknade dem. geo:true = uppslagen adress.
 const withGeo = stops => (stops || []).map(s => { if (!s || (s.lat != null && s.lng != null)) return s; const g = geoOf(s); return g ? {...s, lat: g.lat, lng: g.lng, geo: true, ...(g.approx ? {geoApprox: g.approx} : {})} : s; });
 

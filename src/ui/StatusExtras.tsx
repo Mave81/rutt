@@ -3,6 +3,7 @@
  *   Frågor   – kontorets frågor vid hämtning/lämning (ja/nej eller text). Krävs, som i Opter.
  *   Artiklar – t.ex. Budtransport TIM, Lastningstid (valfritt).
  *   Ändringar – Kolli, Vikt, Fraktsedel … (öppen direkt när statusen kräver ändringar).
+ *   Fraktsedel – kontroll av fraktsedelsnumret när kunden kräver det (Opter: Kontrollera fraktsedelsnummer). Krävs.
  * Allt skickas i samma veva som statusen, före den – precis som Opter.
  */
 import React, {useEffect, useState} from 'react';
@@ -12,17 +13,22 @@ import {Bi} from './Bi';
 import P from '../opter/protocol';
 
 export type Q = {cid: string; who?: string; id: number; key: any; hdr: any; question: string; isBool: boolean};
-export type Extras = {queries: Q[]; articles: any[]; fields: any[]; values: any; requireChanges: boolean};
+export type FB = {cid: string; who?: string; current: string; force: boolean; len: number; cdc: number};
+export type Extras = {queries: Q[]; articles: any[]; fields: any[]; values: any; requireChanges: boolean; fb?: FB[]; loose?: 'force' | 'opt' | null};
 export type ExtrasValue = {answers: {cid: string; key: any; hdr: any; bool?: boolean | null; text?: string | null; question: string}[]; changes: any[]; labels: string[]; missing: string[]};
 
 const numOk = (v: string) => /^\d+([.,]\d+)?$/.test(String(v).trim());
 
-export default function StatusExtras({x, onChange, many = false}: {x: Extras | null; onChange: (v: ExtrasValue) => void; many?: boolean}) {
+export default function StatusExtras({x, onChange, many = false, hasOther = false}: {x: Extras | null; onChange: (v: ExtrasValue) => void; many?: boolean; hasOther?: boolean}) {
   const [ans, setAns] = useState<Record<string, {bool?: boolean | null; text?: string}>>({});
   const [artOpen, setArtOpen] = useState(false);
   const [art, setArt] = useState<{sarId: number; q1: string; d: string} | null>(null);
   const [chgOpen, setChgOpen] = useState(!!(x && x.requireChanges));
   const [vals, setVals] = useState<Record<string, string>>({});
+  // Fraktsedel per order: värdet (förifyllt om kunden inte tvingar fram inmatning) och om föraren bekräftat det (Opter: OK).
+  const [fbv, setFbv] = useState<Record<string, {v: string; ok: boolean}>>({});
+  const fbs = (x && x.fb) || [];
+  const fbOf = (f: FB) => fbv[f.cid] || {v: f.force ? '' : f.current, ok: false};
   const qs = (x && x.queries) || [], arts = (x && x.articles) || [], fields = (x && x.fields) || [], values = (x && x.values) || {};
 
   useEffect(() => {
@@ -48,12 +54,49 @@ export default function StatusExtras({x, onChange, many = false}: {x: Extras | n
       changes.push({cet: f.cet, kind: f.kind, value: f.kind === 'str' ? v : String(v).replace(',', '.')});
       labels.push(`${String(f.label).replace(/\s*\(.*\)/, '')}: ${v}`);
     }
+    for (const f of fbs) {
+      const o = fbOf(f), err = (P as any).freightBillError(o.v, f);
+      if (err || !o.ok) { missing.push(`fraktsedel${many && f.who ? ' (' + f.who + ')' : ''}: ${err || 'tryck Stämmer'}`); continue; }
+      // Opter: skickas bara när numret skiljer sig (equalsIgnoreCase) – som ändring av SHI_FreightBill.
+      if (o.v.toLowerCase() !== String(f.current || '').toLowerCase()) { changes.push({cid: f.cid, cet: (P as any).CET.SHI_FreightBill, kind: 'str', value: o.v}); labels.push(`Fraktsedel: ${o.v}`); }
+    }
+    // Opter (ChangesList): kräver statusen ändringar (SHS_Changes) går det bara vidare när minst ett fält ändrats. Tid räknas (hasOther).
+    if (x && x.requireChanges && fields.length && !hasOther && !changes.some((c: any) => fields.some((f: any) => f.cet === c.cet))) missing.push('minst en ändring (kontoret kräver)');
     onChange({answers, changes, labels, missing});
-  }, [ans, art, vals, x]);
+  }, [ans, art, vals, fbv, x, hasOther]);
 
-  if (!x || (!qs.length && !arts.length && !fields.length)) return null;
+  if (!x || (!qs.length && !arts.length && !fields.length && !fbs.length && !x.loose)) return null;
   return (
     <View>
+      {x.loose ? (
+        <View style={[s.q, {marginTop: 10, flexDirection: 'row', gap: 10, alignItems: 'center'}]}>
+          <Bi n="exclamation-triangle-fill" size={16} color={C.accentInk} />
+          <Text style={[s.hint, {flex: 1, color: C.dim}]}>{x.loose === 'force' ? 'Kontoret vill ha lösa artiklar (t.ex. pallar in/ut) vid den här statusen. Det finns inte i RUTT än – säg till så bygger vi det.' : 'Kontoret har lösa artiklar påslaget. Det finns inte i RUTT än.'}</Text>
+        </View>
+      ) : null}
+      {fbs.length ? (
+        <>
+          <View style={s.secHead}><Text style={s.sec}>Fraktsedel</Text><View style={s.req}><Text style={s.reqT}>KRÄVS</Text></View></View>
+          {fbs.map(f => {
+            const o = fbOf(f), err = (P as any).freightBillError(o.v, f);
+            return (
+              <View key={f.cid} style={s.q}>
+                <Text style={s.qT}>{f.force ? 'Skriv fraktsedelsnumret' : 'Stämmer fraktsedelsnumret?'}</Text>
+                {many && f.who ? <Text style={s.qW}>{f.who}</Text> : null}
+                <View style={{flexDirection: 'row', gap: 8, alignItems: 'center'}}>
+                  <TextInput testID={'fb-' + f.cid} style={[s.in, {flex: 1, fontFamily: FONT.mono}]} value={o.v} autoCapitalize="characters"
+                    keyboardType={f.cdc === 1 ? 'number-pad' : 'default'} placeholder={f.len ? `${f.len} tecken` : 'Fraktsedel'} placeholderTextColor={C.faint}
+                    onChangeText={t => setFbv(m => ({...m, [f.cid]: {v: t.trim(), ok: false}}))} />
+                  <Pressable disabled={!!err} style={[s.okB, o.ok && s.segY, !!err && {opacity: 0.4}]} onPress={() => setFbv(m => ({...m, [f.cid]: {v: o.v, ok: !o.ok}}))}>
+                    <Text style={[s.segT, o.ok && {color: '#000000'}]}>{o.ok ? 'Stämmer ✓' : 'Stämmer'}</Text>
+                  </Pressable>
+                </View>
+                {err && o.v ? <Text style={s.err}>{err}</Text> : null}
+              </View>
+            );
+          })}
+        </>
+      ) : null}
       {qs.length ? (
         <>
           <View style={s.secHead}><Text style={s.sec}>Frågor från kontoret</Text><View style={s.req}><Text style={s.reqT}>KRÄVS</Text></View></View>
@@ -116,7 +159,7 @@ export default function StatusExtras({x, onChange, many = false}: {x: Extras | n
         </Pressable>
       ) : (
         <>
-          <View style={s.secHead}><Text style={s.sec}>Ändringar</Text>{x.requireChanges ? <Text style={s.hint}>kontoret vill att du kollar dem</Text> : <Text style={s.hint}>ändra bara det som inte stämmer</Text>}</View>
+          <View style={s.secHead}><Text style={s.sec}>Ändringar</Text>{x.requireChanges ? <Text style={[s.hint, {color: C.accentInk}]}>kontoret kräver minst en ändring</Text> : <Text style={s.hint}>ändra bara det som inte stämmer</Text>}</View>
           {fields.map((f: any) => (
             <View key={f.col} style={s.fRow}>
               <Text style={s.fL}>{String(f.label)}</Text>
@@ -145,8 +188,14 @@ export function extrasFor(sts: any[], kind: 'load' | 'unload', opts: any): Extra
   }
   const articles = perm.articles !== false ? ((first.edit && first.edit.articles) || []) : [];
   const requireChanges = !!stOf(first).changes;
-  const fields = perm.changes !== false && (requireChanges || kind === 'unload') ? ((opts && opts.fields) || []).filter((f: any) => f.cetName !== 'SHI_TimeMinutes') : [];
-  return {queries, articles, fields, values: (first.edit && first.edit.values) || {}, requireChanges};
+  const fb: FB[] = [];
+  for (const x of opter) {
+    const c = kind === 'load' ? x.live.fbLoad : x.live.fbUnload;
+    if (c) fb.push({cid: String(x.drop || x.pickup), who: x.who, current: x.live.freightBill || '', force: !!c.force, len: Number(c.len) || 0, cdc: Number(c.cdc) || 0});
+  }
+  const fields = perm.changes !== false && (requireChanges || kind === 'unload') ? ((opts && opts.fields) || []).filter((f: any) => f.cetName !== 'SHI_TimeMinutes' && !(fb.length && f.cet === (P as any).CET.SHI_FreightBill)) : []; // fraktsedeln har egen kontroll ovan
+  const loose = perm.looseItems ? (perm.looseForce ? 'force' : 'opt') : null;
+  return {queries, articles, fields, values: (first.edit && first.edit.values) || {}, requireChanges, fb, loose};
 }
 
 const s = themed(() => StyleSheet.create({
@@ -174,4 +223,6 @@ const s = themed(() => StyleSheet.create({
   optS: {color: C.faint, fontSize: 12.5},
   fRow: {flexDirection: 'row', alignItems: 'center', gap: 10},
   fL: {color: C.dim, fontSize: 14, width: 110, marginTop: 6},
+  okB: {height: 42, paddingHorizontal: 14, borderRadius: R, backgroundColor: C.panel2, alignItems: 'center', justifyContent: 'center', marginTop: 6},
+  err: {color: C.bad, fontSize: 13, marginTop: 4},
 }));

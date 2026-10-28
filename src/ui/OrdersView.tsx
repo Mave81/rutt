@@ -33,7 +33,9 @@ export function navigate(st: any, app: NavApp | 'map' = NAV) {
   // finns Opters egna koordinater på adressen → navigera dit. Annars adressen som text.
   // Koordinater som RUTT själv slagit upp (geo: true, kartans gissning) används ALDRIG för navigering –
   // det var de som gav Morabergsvägen 7 i stället för 25. Döbelnsgatan 44 blev 73 när adresstexten användes (28 okt).
-  const opterLL = st.lat != null && st.lng != null && Number(st.lat) !== 0 && Number(st.lng) !== 0 && !st.geo && !st.geoApprox;
+  // Bara koordinater som bevisligen kommer från Opters adress (opterLL sätts i protocol.js) – inga andra, oavsett väg in.
+  // Paradistorget 4 blev 2 (28 okt): kartans träff var gatan, inte huset. Opter skickade texten.
+  const opterLL = st.opterLL === true && !st.geo && !st.geoApprox && Number(st.lat) !== 0 && Number(st.lng) !== 0 && st.lat != null && st.lng != null;
   const geo = opterLL;
   const ll = geo ? `${st.lat},${st.lng}` : '';
   // Adresstexten exakt som Opters Address.toStringForGoogleMaps(): "Gata Nr, Postnr Ort".

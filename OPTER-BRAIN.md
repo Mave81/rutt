@@ -4,6 +4,10 @@ Läs den här filen **innan** något i RUTT ändras som rör Opter. Varje regel 
 (dekompilerad APK, `com.opter.driver.*`) eller sedd i Kentas skärmdumpar/dumpar. Står det **[OVERIFIERAT]** har det
 inte setts fungera mot servern ännu – då får det aldrig sägas till Kenta att det fungerar.
 
+Regel nr 0 (Kenta 28 okt): **RUTT gör exakt som Opter – fast bättre att använda.** Allt som når Opter eller styr arbetet
+(GPS, kvittens/signering, statusar, frågor, fraktsedel, inställningar, vad som skickas och i vilken ordning) ska bete sig
+som i Opter Driver. Det enda RUTT gör på eget sätt är knappar, utseende och hur lätt det går. Hittar vi en skillnad: rätta den,
+skriv in den här och lägg ett test mot Opters regel.
 Regel nr 1: **Säg aldrig att något funkar förrän det är verifierat.** Säg alltid vad som är verifierat och vad som inte är.
 Regel nr 2: Gör allt själv – lämna aldrig manuella steg till Kenta.
 Regel nr 3: Gör det som Opter gör. Avvik bara när Kenta bett om det, och skriv då in avvikelsen här.
@@ -197,3 +201,19 @@ Fält: 1 RES_Id, 2 VHC_Id, **3 SHI_Id (meddelandet kan höra till en order!)**, 
 ## 21. 3.53 (27 okt)
 - Imorgon-planen (PlanDay): varje rad går att trycka på → samma orderblad som idag (OrdersView sheetOnly + openReq).
 - "1 stopp hittas inte på kartan" = Lyckås måleri, "klockelundsvägen" (utan nummer, nybyggt område) 12363 Farsta. Nominatim-reserv: gata+postnr+ort → fritext → gata+ort → postnr → ort; ungefärlig plats markeras (geoApprox) och PlanDay säger vilket stopp. Gamla "hittades inte" provas om.
+
+## 22. 3.56 (28 okt) – lika som Opter, punkt för punkt
+| Opter-regel | Källa | RUTT | Test |
+|---|---|---|---|
+| Inställningar: SISTA aktiva raden med exakt namn; bool bara "true" (valfria versaler); int via parseInt med standard | syncdata/Setting.java | `settingRow/setting/settingBool/settingInt` | installningar.test.js |
+| Ändringar krävs (SHS_Changes) → minst ett ändrat fält innan statusen | ChangesList | StatusExtras `requireChanges` | app-fragor, installningar |
+| Kvittens vid hämtning: Lastad med SHS_Pod → kvittens först, bara typer med AllowBeforePickup, går med statusen | ShipmentDetailViewPager ~985 | `stop.pod` på hämtstoppet, App `pickSign` | pod.test.js, app-hamtkvitto |
+| Fraktsedelskontroll: kundens CUS_FreightBillCheck*/Force* (20–23), ordertyp via ADR_HUB_Id, CheckFreightBillAtAllPickUpAndDelivery; längd (26), Modulus10 (24); Force = tomt fält; ändrat nummer → CET 30 | ShipmentDetailViewPager ~1013, shipment/FreightbillCheck | `freightBillCheckFor/freightBillError`, StatusExtras "Fraktsedel" | fraktsedel.test.js, app-fraktsedel |
+| Nästa status = lägsta SHS_Order över nuvarande, UserOption, ej Rejected; utan SetArbitraryStatus går RUTT stegvis | Shipment.calculateNextStatus | `nextStatusOf/statusChain` | installningar.test.js |
+| GPS: ADR-koordinater om ≠ 0, annars "Gata Nr, Postnr Ort". Koordinaterna används bara om de är märkta `opterLL` (sätts i protocol.js från Opters adress) – Paradistorget 4 blev 2 när andra koordinater läckte in | XmlParser.getLayout (jadx --show-bad-code: `ADDRESSTOLATITUDE.equals("0") ? ADDRESSTOSTRING : lat,lng(text)`), Address.toStringForGoogleMaps | OrdersView `navigate` | nav.test.js |
+| Lösa artiklar (LooseItemsPermission, av som standard) | ShipmentDetailViewPager ~1100 | **Inte byggt** – RUTT visar en rad om kontoret har det påslaget | – |
+
+Kartuppslag (Nominatim) som svarar med GATAN fast adressen har husnummer räknas som ungefärliga (`gata`) – påverkar bara körordning/tider, aldrig navigering.
+
+[OVERIFIERAT mot servern]: kvittens vid hämtning och fraktsedels-ändringen har inte setts gå igenom hos Opter ännu.
+

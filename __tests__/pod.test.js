@@ -75,3 +75,18 @@ test('signatur: aldrig över Opters gräns (Int16-längd), streckstarter kvar, i
   const small = P.signatureString([[{x: 0, y: 0}, {x: 1, y: 0}, {x: 2, y: 0}, {x: 10, y: 0}]], 1);
   expect(small).toBe('-1,-1,0,0,10,0');
 });
+
+test('kvittens vid hämtning: Lastad med SHS_Pod → krävs, bara typer med "tillåt före hämtning" (som Opter)', () => {
+  const ship = row('Shipment', 100, {orderId: 555, adrFrom: 1, adrTo: 2, shsId: 12});
+  const rows = [row('Address', 1, {company: 'A'}), row('Address', 2, {company: 'B'}), ship,
+    row('ShipmentStatus', 12, {name: 'Bekräftad', accepted: true, order: 1}, ship),
+    row('ShipmentStatus', 14, {name: 'Lastad', pickup: true, pod: true, order: 2}, ship),
+    row('ShipmentStatus', 13, {name: 'Lossad', delivery: true, pod: true, order: 3}, ship),
+    row('DefaultPodType', 3, {name: 'Signatur', isDefault: true, allowBeforePickup: false}),
+    row('DefaultPodType', 5, {name: 'Hämtkvitto', allowAfterPickup: false})];
+  const s = P.toRutt({rows}).stops;
+  const pick = s.find(x => x.pickup && !x.drop), drop = s.find(x => x.drop);
+  expect(pick.live.loadSt.pod).toBe(true);
+  expect(pick.pod.types.map(t => t.name)).toEqual(['Hämtkvitto']);
+  expect(drop.pod.types.map(t => t.name)).toEqual(['Signatur']);
+});

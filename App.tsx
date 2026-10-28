@@ -53,7 +53,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '28 okt · 3.55 · GPS exakt som Opter';
+const BUILD = '28 okt · 3.56 · GPS bara Opters koordinater, kvittens vid hämtning, fraktsedel';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -562,7 +562,7 @@ function AppInner(): React.JSX.Element {
     const sub = AppState.addEventListener('change', (st: string) => { if (st !== 'active') flushSends(); });
     return () => sub.remove();
   }, []);
-  function sendLoad(st: any, xx: {answers?: any[]; changes?: any[]} = {}) {
+  function sendLoad(st: any, xx: {answers?: any[]; changes?: any[]; pod?: any} = {}) {
     const L = st.live;
     if (!live || !L || !L.loadSt) return;
     const pre: any = {};
@@ -571,7 +571,11 @@ function AppInner(): React.JSX.Element {
     queueSend(st.pickup, 'load', async () => {
       // Som Opter: svar på frågor och ändringar läggs på ordern, sen Lastad.
       if (pre.answers || pre.changes) { try { const e: any = await client.editShipment(L, pre); dlog('före lastad ' + st.pickup + ' ' + JSON.stringify(e && {ok: e.confirmed}).slice(0, 60)); } catch (e: any) { dlog('före lastad fel ' + String(e?.message || e)); } }
-      return client.setStatus(L, L.loadSt.id, null);
+      // Har kontoret stängt av "Välj status" (SetArbitraryStatus) får man inte hoppa över statusar – som Opter: nästa, nästa …
+      if (orders.opts && orders.opts.perm && orders.opts.perm.status === false) for (const mid of P.statusChain(L, L.loadSt.id)) { try { await client.setStatus(L, mid.id, null); } catch (e) {} }
+      // Kvittens vid hämtning går med statusen, precis som vid lämning (registerPod + status i samma synk).
+      const pd = xx.pod ? await podPayload(L, {...xx.pod, typeId: xx.pod.typeId || (st.pod && st.pod.defaultId) || 0}) : null;
+      return client.setStatus(L, L.loadSt.id, pd);
     });
   }
   // Lossad → Opter, byte för byte som Opter Driver (registerPod + setShipmentStatus i samma synk).
@@ -627,6 +631,7 @@ function AppInner(): React.JSX.Element {
           }
         } catch (e: any) { dlog('ändring före lossad fel ' + String(e?.message || e)); if (tidLabel) flash(`${tidLabel}: kunde inte nå Opter`, null); }
       }
+      if (orders.opts && orders.opts.perm && orders.opts.perm.status === false) for (const mid of P.statusChain(L, L.unloadSt.id)) { try { await client.setStatus(L, mid.id, null); } catch (e) {} }
       const r = await client.setStatus(L, L.unloadSt.id, podData); return (!podData && hadPod && r.confirmed) ? {...r, noPod: true} : r; });
   }
   // Kvittensen som sparades vid lossningen (signatur + namn) skickas till Opter igen, utan ny signatur.
@@ -743,15 +748,22 @@ function AppInner(): React.JSX.Element {
   const [loadAskV, setLoadAskV] = useState<any>(null);
   function onLoaded(st: any, more: any[] = [], xx: any = null) {
     if (!xx && live) {
-      const x = extrasFor(family([st, ...more]), 'load', orders.opts);
-      if (x && (x.queries.length || x.requireChanges)) { setLoadAskV(null); setLoadAsk({st, more, x}); return; }
+      const fam = family([st, ...more]);
+      // Kräver kontoret kvittens vid hämtning (Lastad-statusen har SHS_Pod) → kvittensen först, som Opter (isPodRequiredForStatus).
+      if (fam.some((x: any) => x.live && !x.own && x.live.loadSt && x.live.loadSt.pod && (!orders.opts || !orders.opts.perm || orders.opts.perm.pod !== false))) {
+        const first = fam.find((x: any) => x.live && !x.own && x.live.loadSt && x.live.loadSt.pod);
+        setSignStop({...first, pickSign: {st, more}, group: fam.length > 1 ? fam : undefined});
+        return;
+      }
+      const x = extrasFor(fam, 'load', orders.opts);
+      if (x && (x.queries.length || x.requireChanges || (x.fb && x.fb.length))) { setLoadAskV(null); setLoadAsk({st, more, x}); return; }
     }
     const list = family([st, ...more]);
     const prev: Record<string, any> = {};
     for (const x of list) prev[x.pickup] = ost[x.pickup];
     const at = Date.now();
     setOst(o => { const n = {...o}; for (const x of list) n[x.pickup] = {...(o[x.pickup] || {}), loadedAt: at}; return n; });
-    list.forEach(x => sendLoad(x, xx ? {answers: (xx.answers || []).filter((a: any) => a.cid === String(x.pickup)), changes: x === list.find((y: any) => y.live && !y.own) ? xx.changes : []} : {}));
+    list.forEach(x => sendLoad(x, xx ? {answers: (xx.answers || []).filter((a: any) => a.cid === String(x.pickup)), changes: chgFor(xx.changes, x, list.find((y: any) => y.live && !y.own), String(x.pickup)), pod: xx.pod || null} : {}));
     smsLater(list.map(x => ({st: x, cid: String(x.pickup)})), 'load', at, '');
     markEgen(list.map(x => String(x.pickup)), {loadedAt: at});
     if (!demo) for (const x of list) { const cid = String(x.pickup); const d = dayOrderOf(cid); DB.logEvent({t: at, kind: 'load', cid, who: x.who, lat: x.lat, lng: x.lng, pal: d.pal}); DB.saveOrder(DB.ymdOf(at), {...d, loadedAt: at}); }
@@ -804,6 +816,8 @@ function AppInner(): React.JSX.Element {
       } catch (e) { setEditState(cid, id, 'failed'); flash(`Kunde inte nå Opter · ${label}`, null); }
     });
   }
+  // Ändringar från statusbladet: med cid (t.ex. fraktsedel) → bara den ordern, utan cid → första Opter-ordern.
+  const chgFor = (all: any[] | undefined, x: any, first: any, cid: string) => (all || []).filter((c: any) => (c.cid ? String(c.cid) === cid : x === first)).map(({cid: _c, ...c}: any) => c);
   // Kvittensen som Opter vill ha den (samma som vid Lossad).
   async function podPayload(L: any, pod: any) {
     const scale = PixelRatio.get();
@@ -859,6 +873,12 @@ function AppInner(): React.JSX.Element {
     setSignStop(all.length > 1 ? {...st, group: all} : st);
   }
   async function onSigned(st0: any, pod0: any) {
+    if (st0.pickSign) {
+      // Kvittens vid hämtning klar → Lastad med kvittensen (och svar/ändringar från samma blad).
+      setSignStop(null);
+      onLoaded(st0.pickSign.st, st0.pickSign.more, {pod: pod0, answers: pod0.answers || [], changes: pod0.xChanges || []});
+      return;
+    }
     if (st0.ownSign) { setSignStop(null); ownSigned(st0.ownSign, pod0); return; }
     // Ny kvittens på en order som redan är lossad: bara kvittensen, statusen rörs inte (som Opter).
     if (st0.repod) {
@@ -892,7 +912,7 @@ function AppInner(): React.JSX.Element {
       podMem.current[st.drop] = pod;
       // Tid och tillägg gäller hela stoppet → på första Opter-ordern (en väntetid debiteras en gång), i samma sändning som Lossad.
       sendUnload(st, pod, pod0.timeMin && st === firstLive ? pod0.timeMin : null, st === firstLive ? (pod0.adds || []).filter((a: any) => a.satId) : [],
-        {answers: (pod0.answers || []).filter((a: any) => a.cid === String(st.drop)), changes: st === firstLive ? pod0.xChanges || [] : [], labels: st === firstLive ? pod0.xLabels || [] : []});
+        {answers: (pod0.answers || []).filter((a: any) => a.cid === String(st.drop)), changes: chgFor(pod0.xChanges, st, firstLive, String(st.drop)), labels: st === firstLive ? pod0.xLabels || [] : []});
       if (!demo) { const cid = String(st.drop); const d = dayOrderOf(cid); DB.logEvent({t: doneT, kind: 'unload', cid, who: st.who, lat: st.lat, lng: st.lng, pal: d.pal}); DB.saveOrder(DB.ymdOf(doneT), {...d, doneAt: doneT, podName: pod.name || '', kolli: pod.kolli != null ? pod.kolli : null}); }
     }
     smsLater(list.map((x: any) => ({st: x, cid: String(x.drop)})), 'unload', doneT, pod0.name || '');
@@ -1273,7 +1293,7 @@ function AppInner(): React.JSX.Element {
   }
   // ---- Skanna: turleveranslista → stopp kopplade till Opter-ordern ----
   // Kvittensen: Opters frågor vid lämning, artiklar och ändringar för ordern/orderna som lossas.
-  const signExtras = useMemo(() => (signStop && live && !signStop.repod && !signStop.ownSign ? extrasFor(signStop.group || [signStop], 'unload', orders.opts) : null), [signStop, orders.opts, live]);
+  const signExtras = useMemo(() => (signStop && live && !signStop.repod && !signStop.ownSign ? extrasFor(signStop.group || [signStop], signStop.pickSign ? 'load' : 'unload', orders.opts) : null), [signStop, orders.opts, live]);
   const openStops = useMemo(() => (fullSrc ? fullSrc.stops.filter((x: any) => cls[String(x.pickup || x.drop)] === 'todo' || cls[String(x.pickup || x.drop)] === 'new') : []), [fullSrc, cls]);
   const turPar: TurParent[] = useMemo(() => {
     const m = new Map<string, any>(); for (const k of ['bevego-tur', 'bdx-frakt']) for (const p of turParents(openStops, k)) if (!m.has(p.cid)) m.set(p.cid, p);
@@ -1287,7 +1307,7 @@ function AppInner(): React.JSX.Element {
     const day = DB.ymdOf();
     const pp = par ? par.pick : null;
     const bdx = stops.some(x => x.kind === 'bdx-frakt');
-    const pick = pp ? {name: pp.who || '', adr: pp.adr || '', zip: pp.zip || '', area: pp.area || '', tel: '', contact: pp.contact || '', sure: true, lat: pp.lat ?? null, lng: pp.lng ?? null}
+    const pick = pp ? {name: pp.who || '', adr: pp.adr || '', zip: pp.zip || '', area: pp.area || '', tel: '', contact: pp.contact || '', sure: true, ...(pp.opterLL ? {lat: pp.lat, lng: pp.lng, opterLL: true} : {})}
       : bdx ? {name: 'BDX (lastat)', adr: '', zip: '', area: '', tel: '', contact: '', sure: true} : {...BEVEGO_ALVSJO};
     // Utan Opter-order är BDX-godset redan i bilen (du fotar sedlarna när du lastar).
     const loaded = par ? ((ost[par.cid] || {}).loadedAt || (serverLoaded(par.pick) ? Date.now() : null)) : bdx ? Date.now() : null;
@@ -1670,8 +1690,8 @@ function AppInner(): React.JSX.Element {
           timeOk={!signStop.ownSign && (signStop.group || [signStop]).some((x: any) => !x.own) && (demo || !!(orders.opts && orders.opts.perm && orders.opts.perm.changes !== false && (orders.opts.fields || []).some((f: any) => f.cetName === 'SHI_TimeMinutes')))}
           start={(() => { const g = signStop.group || [signStop]; const t = Math.min(...g.map((x: any) => timOf(x).start || (ost[String(x.drop)] || {}).loadedAt || (x.parent && (ost[String(x.parent)] || {}).loadedAt) || Infinity)); return Number.isFinite(t) ? t : null; })()}
           end={(() => { const g = signStop.group || [signStop]; const e = g.map((x: any) => timOf(x).end).filter(Boolean); return e.length ? Math.max(...e) : null; })()}
-          timjobb={(signStop.group || [signStop]).some((x: any) => timOf(x).on)}
-          delay={delayFor(signStop)}
+          timjobb={!signStop.pickSign && (signStop.group || [signStop]).some((x: any) => timOf(x).on)}
+          delay={signStop.pickSign ? null : delayFor(signStop)}
           extras={signExtras}
           onCancel={() => setSignStop(null)}
           onDone={(pod: any) => onSigned(signStop, pod)}
@@ -1679,7 +1699,7 @@ function AppInner(): React.JSX.Element {
       )}
 
       {loadAsk ? (
-        <Sheet open onClose={() => setLoadAsk(null)} title="Innan du lastar" sub={loadAsk.x.queries.length ? 'Kontoret vill ha svar vid hämtningen – som i Opter' : 'Kontoret vill att du kollar ändringarna'} scroll>
+        <Sheet open onClose={() => setLoadAsk(null)} title="Innan du lastar" sub={loadAsk.x.queries.length ? 'Kontoret vill ha svar vid hämtningen – som i Opter' : loadAsk.x.fb && loadAsk.x.fb.length ? 'Kunden vill att fraktsedeln kontrolleras – som i Opter' : 'Kontoret vill att du kollar ändringarna'} scroll>
           <StatusExtras x={loadAsk.x} onChange={v => setLoadAskV((o: any) => (JSON.stringify(o) === JSON.stringify(v) ? o : v))} many={(loadAsk.more || []).length > 0} />
           {loadAskV && loadAskV.missing.length ? <Text style={{color: C.bad, fontSize: 13, marginTop: 10, textAlign: 'center'}}>Saknas: {loadAskV.missing.join(', ')}</Text> : null}
           <Pressable disabled={!loadAskV || loadAskV.missing.length > 0} style={{backgroundColor: C.accent, borderRadius: 6, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 12, opacity: !loadAskV || loadAskV.missing.length ? 0.4 : 1}}

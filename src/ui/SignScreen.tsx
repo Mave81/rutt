@@ -347,7 +347,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
             </>
           ))}
 
-          {!stop.repod ? <StatusExtras x={extras} onChange={v => setExV(o => (JSON.stringify(o) === JSON.stringify(v) ? o : v))} many={group.length > 1} /> : null}
+          {!stop.repod ? <StatusExtras x={extras} onChange={v => setExV(o => (JSON.stringify(o) === JSON.stringify(v) ? o : v))} many={group.length > 1} hasOther={!!(tidOpen && tid)} /> : null}
 
           {!stop.repod && timeOk && (!tidOpen ? (
             <Pressable style={st.devToggle} onPress={() => setTidOpen(true)}>
@@ -380,7 +380,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
         <View style={[st.bottom, {paddingBottom: kb > 0 ? 10 : 12 + insets.bottom}]}>
           {!ok && <Text style={st.missing}>Saknas: {missing.join(', ')}</Text>}
           <Pressable style={[st.doneBtn, !ok && {opacity: 0.4}]} disabled={!ok} onPress={done}>
-            <Text style={st.doneTxt}>{stop.repod ? 'Skicka kvittens' : 'Klar – Lossad ✓'}</Text>
+            <Text style={st.doneTxt}>{stop.repod ? 'Skicka kvittens' : stop.pickSign ? 'Klar – Lastad ✓' : 'Klar – Lossad ✓'}</Text>
           </Pressable>
         </View>
       </View>

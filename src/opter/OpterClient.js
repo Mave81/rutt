@@ -405,7 +405,7 @@ export default class OpterClient {
     return true;
   }
   positionInterval() {
-    const v = parseInt(P.setting(this.lastDecoded, 'PositionUpdateInterval', 60), 10);
+    const v = P.settingInt(this.lastDecoded, 'PositionUpdateInterval', 60);
     return isFinite(v) && v >= 5 ? v : 60;
   }
 

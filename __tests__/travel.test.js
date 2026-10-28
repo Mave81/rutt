@@ -66,3 +66,10 @@ test('husnumret saknas på kartan (Höganäshuset, Harpsundsvägen 211) → gata
   expect(calls.length).toBe(4);
   expect(T.withGeo(stops)[0]).toMatchObject({lat: 59.2697, geoApprox: 'gata'});
 }, 15000);
+
+test('Paradistorget 4: kartan svarar med gatan (inte huset) → räknas som ungefärlig, aldrig som exakt', async () => {
+  const fake = async () => ({json: async () => [{lat: '59.2343342', lon: '17.9808972', category: 'highway', type: 'residential', addresstype: 'residential', name: 'Paradistorget'}]});
+  const stops = [{drop: 'P', who: 'Sjödalsgymnasiet', adr: 'Paradistorget 4', zip: '14147', area: 'Huddinge'}];
+  expect(await T.geocode(stops, fake)).toBe(1);
+  expect(T.withGeo(stops)[0]).toMatchObject({lat: 59.2343342, geo: true, geoApprox: 'gata'});
+}, 15000);

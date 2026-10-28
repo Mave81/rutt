@@ -3,7 +3,7 @@
  * De finns inte i Opter: RUTT sparar dem i telefonen, räknar in dem i rutten och lastplanen,
  * och skickar Lastat ✅ / Lossat ✅ till Joel som SMS om du vill.
  */
-export type Place = {name: string; adr: string; zip: string; area: string; tel: string; tel2?: string; contact: string; code?: string; note?: string; sure?: boolean; lat?: number | null; lng?: number | null};
+export type Place = {name: string; adr: string; zip: string; area: string; tel: string; tel2?: string; contact: string; code?: string; note?: string; sure?: boolean; lat?: number | null; lng?: number | null; opterLL?: boolean};
 export type Signed = {name: string; sig: any; at: number; image?: string};
 export type Egen = {
   id: string; day: string; createdAt: number;
@@ -36,9 +36,9 @@ export function toStops(e: Egen) {
     : {own: e, orderNo: e.ref || null, freightBill: e.orderNo || null, customer: e.from, service: ['Eget jobb', e.from].filter(Boolean).join(' · '), info, kg: 0, pal: e.pal, kolli: 0, goods: e.goods.join(', ')};
   const t = {date: e.day, hhmm: null};
   const tp = e.tidspass && e.tidspass.time ? e.tidspass : null;
-  const pick = {...base, parent: e.parent || null, verb: 'Hämta', pickup: e.id, who: e.pick.name || e.pick.adr, adr: e.pick.adr, zip: e.pick.zip, area: e.pick.area, lat: e.pick.lat ?? null, lng: e.pick.lng ?? null,
+  const pick = {...base, parent: e.parent || null, verb: 'Hämta', pickup: e.id, who: e.pick.name || e.pick.adr, adr: e.pick.adr, zip: e.pick.zip, area: e.pick.area, lat: e.pick.lat ?? null, lng: e.pick.lng ?? null, opterLL: !!e.pick.opterLL,
     tel: tel(e.pick), contact: e.pick.contact, code: e.pick.code || '', adrMsg: e.pick.note || '', tEarliest: t, tLatest: null, deadline: null, earliest: null};
-  const drop = {...base, parent: e.parent || null, verb: 'Lämna', drop: e.id, who: e.drop.name || e.drop.adr, adr: e.drop.adr, zip: e.drop.zip, area: e.drop.area, lat: e.drop.lat ?? null, lng: e.drop.lng ?? null,
+  const drop = {...base, parent: e.parent || null, verb: 'Lämna', drop: e.id, who: e.drop.name || e.drop.adr, adr: e.drop.adr, zip: e.drop.zip, area: e.drop.area, lat: e.drop.lat ?? null, lng: e.drop.lng ?? null, opterLL: !!e.drop.opterLL,
     tel: tel(e.drop), contact: e.drop.contact, code: e.drop.code || '', adrMsg: e.drop.note || '', tEarliest: t, tLatest: tp ? {date: e.day, hhmm: tp.time} : null,
     tidspass: e.tidspass || null, deadline: tp ? tp.time : null, dlDate: tp ? e.day : null, req: {}, suggest: e.signed && e.signed.name ? [e.signed.name] : []};
   return [pick, drop];
