@@ -93,6 +93,20 @@ test('3.58: två synkar samtidigt slår inte upp samma adress två gånger', asy
   let n = 0;
   const f = async () => { n++; return {ok: true, json: async () => [{lat: '59.29', lon: '17.81'}]}; };
   const [a, b] = await Promise.all([T.geocode(s, f), T.geocode(s, f)]);
-  expect(a + b).toBe(1);
+  expect([a, b]).toEqual([1, 1]); // samma körning (ihopslagen kö)
   expect(n).toBe(1);
+}, 20000);
+
+test('3.60: ett anrop som aldrig svarar stoppar inte kön för alltid', async () => {
+  T._reset();
+  jest.useFakeTimers();
+  const s = [{drop: 'X', who: 'Hagman & Hübinette', adr: 'Ulvsundavägen 181', zip: '16733', area: 'Bromma'}];
+  const never = () => new Promise(() => {});
+  const p = T.geocode(s, never);
+  for (let i = 0; i < 40; i++) { await Promise.resolve(); jest.advanceTimersByTime(1000); }
+  await expect(p).resolves.toBe(0);
+  expect(T.geoState(s[0])).toBe('pending');
+  jest.useRealTimers();
+  const ok = async () => ({ok: true, json: async () => [{lat: '59.337', lon: '17.966'}]});
+  expect(await T.geocode(s, ok)).toBe(1);
 }, 20000);

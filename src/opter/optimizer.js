@@ -28,11 +28,22 @@ const driveMin = d => d / SPEED_KMH * 60;
 const T = require('./travel');
 // Körtid: riktig längs vägarna (OpenStreetMap) när den finns, annars uppskattning. Båda × din inlärda faktor.
 function baseDrive(a, b) {
-  if (!a || !b || a.lat == null || b.lat == null) return {km: 0, min: 0, est: true};
+  if (!a || !b || a.lat == null || b.lat == null) return {km: 0, min: roughMin(a, b), est: true, rough: true};
   const t = T.travel(a, b);
   if (t) return {km: t.km != null ? t.km : km(a, b), min: t.min, est: false};
   const d = km(a, b);
   return {km: d, min: driveMin(d), est: true};
+}
+// 3.60: adress som inte hittats på kartan än → grov körtid ur postnummer och ort i stället för 0 min.
+// Annars kör "smart ordning" kors och tvärs (Västberga → Bromma → Västberga) när kartan inte svarat.
+function roughMin(a, b) {
+  if (!a || !b) return 20;
+  if (sameSpot(a, b)) return 0;
+  const z = x => String((x && x.zip) || '').replace(/\D/g, ''), ar = x => nAdr(x && x.area);
+  const za = z(a), zb = z(b);
+  if ((za.length >= 3 && za.slice(0, 3) === zb.slice(0, 3)) || (ar(a) && ar(a) === ar(b))) return 8;
+  if (za.length >= 2 && za.slice(0, 2) === zb.slice(0, 2)) return 18;
+  return 25;
 }
 const driveInfo = (a, b) => { const x = baseDrive(a, b); const f = T.getFactor(); return f === 1 ? x : {...x, min: x.min * f}; };
 
@@ -85,7 +96,7 @@ function restIndex(order, s0) {
     t = new Date(t.getTime() + driveInfo(pos, s).min * 60000);
     if (s.open) { const op = stopTime(s.open, s.openDate || s.dlDate, s0.t0); if (t < op) t = new Date(Math.min(op.getTime(), t.getTime() + MAX_WAIT * 60000)); }
     t = new Date(t.getTime() + servOf(s, order[i - 1]) * 60000);
-    if (s.lat != null) pos = s;
+    pos = s;
   }
   if (t.getTime() + REST_MIN * 60000 <= by.getTime()) best = order.length;
   return best;
@@ -119,7 +130,7 @@ function plan(order) {
     const arrive = eta, at = new Date(t);
     const sv = servOf(s, order[idx - 1]);
     t = new Date(t.getTime() + sv * 60000);
-    if (!nogeo) pos = s;
+    pos = s;
     return {s, eta: at, arrive, late, early, waitCap, nogeo, leg, rest: idx === restAt, serv: sv, same: !!(idx && sameSpot(order[idx - 1], s))};
   });
   if (order.length && (restAt < 0 || restAt >= order.length)) { restTime = new Date(t); t = new Date(t.getTime() + REST_MIN * 60000); }
@@ -149,7 +160,7 @@ function scoreOrder(order, ctx) {
   let t = 0, pos = ctx.startPos, drive = 0, broken = 0, late = 0, nick = 0, tight = 0, wait = 0;
   for (let i = 0; i < order.length; i++) {
     const s = order[i];
-    if (s.lat != null) { const m = driveInfo(pos, s).min; drive += m; t += m; pos = s; }
+    { const m = driveInfo(pos, s).min; drive += m; t += m; pos = s; }
     const d = ctx.dl.get(s);
     if (d != null) { const marg = d - t; if (marg < -GRACE_MIN) { broken++; late -= marg; } else if (marg < 0) nick -= marg; else if (marg < TIGHT_MIN) tight += TIGHT_MIN - marg; }
     const o = ctx.op != null ? ctx.op.get(s) : null;
@@ -246,7 +257,7 @@ function seedGreedy(list, ctx, urgency) {
       const s = left[i];
       if (s.drop && !seen.has(s.drop)) continue;
       if (s.pickup && pal + ((CARGO[s.pickup] && CARGO[s.pickup].pal) || 0) > CAP_SLOTS) continue;
-      const d = s.lat != null ? driveInfo(pos, s).min : 0;
+      const d = driveInfo(pos, s).min;
       let v = d; const dl = ctx.dl.get(s);
       if (out.length && sameSpot(out[out.length - 1], s)) v -= 6; // samma ställe som nyss: ta det direkt
       if (urgency && dl != null) { const slack = dl - (t + d); if (slack < 60) v -= (60 - Math.max(slack, -60)) * urgency; }
@@ -254,7 +265,7 @@ function seedGreedy(list, ctx, urgency) {
     }
     if (bi === -1) bi = 0;
     const s = left.splice(bi, 1)[0];
-    if (s.lat != null) { t += driveInfo(pos, s).min; pos = s; }
+    t += driveInfo(pos, s).min; pos = s;
     t += servOf(s, out[out.length - 1]);
     if (s.pickup) { seen.add(s.pickup); pal += (CARGO[s.pickup] && CARGO[s.pickup].pal) || 0; }
     if (s.drop) pal -= (CARGO[s.drop] && CARGO[s.drop].pal) || 0;

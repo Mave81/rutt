@@ -124,11 +124,18 @@ function retryLater(stops, fetchImpl) {
 const geoBlocked = () => blockedAt > 0;
 let onFound = null;
 function setOnFound(f) { onFound = f; }
+// Högst en körning väntar i kön: nya anrop slår ihop sina adresser med den som väntar (förut kunde varje synk lägga en till).
+let queued = null;
 function geocode(stops, fetchImpl) {
-  const run = chain.then(() => geocodeRun(stops, fetchImpl), () => geocodeRun(stops, fetchImpl));
-  chain = run.catch(() => 0);
-  return run;
+  if (queued) { queued.stops.push(...(stops || [])); return queued.p; }
+  const q = {stops: [...(stops || [])], p: null};
+  queued = q;
+  q.p = chain.then(() => { queued = null; return geocodeRun(q.stops, fetchImpl); }, () => { queued = null; return geocodeRun(q.stops, fetchImpl); });
+  chain = q.p.catch(() => 0);
+  return q.p;
 }
+// Ett anrop som aldrig svarar (byte av nät, tunnel) fick hela kön att stå still för alltid. Nu: högst 12 s per anrop.
+const withTimeout = (p, ms) => new Promise((res, rej) => { const t = setTimeout(() => rej(new Error('timeout')), ms); p.then(v => { clearTimeout(t); res(v); }, e => { clearTimeout(t); rej(e); }); });
 async function geocodeRun(stops, fetchImpl) {
   const f = fetchImpl || fetch;
   let found = 0;
@@ -161,9 +168,9 @@ async function geocodeRun(stops, fetchImpl) {
         if (wait > 0) await new Promise(r => setTimeout(r, wait));
         lastGeo = Date.now();
         try {
-          const r = await f(`${NOMI}?format=jsonv2&limit=1&countrycodes=se&${qs}`, {headers: {'User-Agent': 'RUTT/1 (forre.nu)', 'Accept-Language': 'sv'}});
+          const r = await withTimeout(f(`${NOMI}?format=jsonv2&limit=1&countrycodes=se&${qs}`, {headers: {'User-Agent': 'RUTT/1 (forre.nu)', 'Accept-Language': 'sv'}}), 12000);
           if (r && r.ok === false) throw new Error('http ' + r.status); // spärrad/överbelastad – inte "finns inte"
-          const v = await r.json();
+          const v = await withTimeout(r.json(), 12000);
           j = Array.isArray(v) ? v : [];
         } catch (e) { j = null; }
       }
@@ -173,7 +180,7 @@ async function geocodeRun(stops, fetchImpl) {
       const ap = approx || (streetOnly ? 'gata' : null);
       if (j[0] && j[0].lat) { hit = {lat: Number(j[0].lat), lng: Number(j[0].lon), v: 4, ...(ap ? {approx: ap} : {})}; break; }
     }
-    if (broken) { blockedAt = Date.now(); retryLater(stops, fetchImpl); break; }
+    if (broken) { const was = blockedAt; blockedAt = Date.now(); retryLater(stops, fetchImpl); if (!was && onFound) try { onFound(); } catch (e) {} break; }
     blockedAt = 0;
     geo.set(geoKey(s), hit || {miss: true, at: Date.now(), v3: true});
     if (hit) { found++; if (onFound) try { onFound(); } catch (e) {} }
@@ -196,4 +203,4 @@ async function initGeo() { if (!store) return; try { const v = await store.load(
 // Stoppen med koordinater ifyllda där Opter saknade dem. geo:true = uppslagen adress.
 const withGeo = stops => (stops || []).map(s => { if (!s || (s.lat != null && s.lng != null)) return s; const g = geoOf(s); return g ? {...s, lat: g.lat, lng: g.lng, geo: true, ...(g.approx ? {geoApprox: g.approx} : {})} : s; });
 
-module.exports = {travel, ensure, init, learn, getFactor, learned, geocode, initGeo, withGeo, geoState, setOnFound, geoBlocked, _reset: () => { _reset0(); geo.clear(); lastGeo = 0; chain = Promise.resolve(0); blockedAt = 0; if (retryT) clearTimeout(retryT); retryT = null; }};
+module.exports = {travel, ensure, init, learn, getFactor, learned, geocode, initGeo, withGeo, geoState, setOnFound, geoBlocked, _reset: () => { _reset0(); geo.clear(); lastGeo = 0; chain = Promise.resolve(0); queued = null; blockedAt = 0; if (retryT) clearTimeout(retryT); retryT = null; }};

@@ -25,3 +25,14 @@ test('lämningarna hos Timblads hamnar efter varandra och andra kostar bara gods
   const gap = (new Date(r.plan.rows[second].eta).getTime() - new Date(r.plan.rows[second - 1].eta).getTime()) / 60000;
   expect(gap).toBe(r.plan.rows[second - 1].serv); // ingen körtid emellan, bara godset på första
 });
+
+test('3.60: utan kartan (inga koordinater) grupperas ändå Västberga, Bromma och Ekerö', () => {
+  const bare = stops.map(({lat, lng, ...x}) => x);
+  const z = {A: '12600', B: '12630', H: '16867'};
+  bare.forEach(x => { if (x.pickup) x.zip = z[x.pickup]; else if (x.drop === 'H') x.zip = '16733'; else x.zip = '17837'; });
+  const r = computeRoute(bare, cargo, {lat: 59.2437, lng: 18.2280}, new Date(2026, 9, 29, 6, 0).getTime());
+  const area = r.order.map(s => s.area);
+  // Inga hopp fram och tillbaka: varje ort kommer i ett enda block
+  const blocks = area.filter((a, i) => i === 0 || a !== area[i - 1]);
+  expect(new Set(blocks).size).toBe(blocks.length);
+});

@@ -82,8 +82,8 @@ android {
         applicationId "com.ruttapp"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 80
-        versionName "3.59"
+        versionCode 81
+        versionName "3.60"
     }
     // Bygg bara arm64 (det moderna telefoner kör) -> mindre APK, under GitHubs 100 MB
     splits {
