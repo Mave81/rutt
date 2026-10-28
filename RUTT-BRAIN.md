@@ -26,6 +26,21 @@ Det enda RUTT gör på eget sätt är knappar och utseende. Appen är ett verkty
    - Röd: bara "Opter fick det inte".
    - Blå: människor (ring, sms).
 
+## 0b. Utseende 3.57 (28 okt)
+
+- **Färger:** skarpa, mättade (theme.ts): orange #FF8A1F, grönt #22D48A, himmelsblått #2AA8FF, guld #FFC933. Djup = ljus kant
+  upptill + hård skugga nertill (borderBottom), aldrig glöd. Signaturpapperet är vitt i båda lägena, bläcket mörkt.
+- **Inställningar → Utseende:** Planen A (kort per stopp, standard) / B (nästa stort med Navigera+Ring, resten två rader, ingen
+  NÄSTA-rad nere) / C (en rad per stopp). Dra för Lossad A (Cel 3D, standard) / B (fartlinjer) / C (smäll + skak + splitter).
+  Sparas i `rutt.look` (src/ui/look.ts). Minska rörelse i telefonen stänger av rörelserna. Vibrerar 30 ms när det går igenom.
+- **Statusord i Plan:** LASTAD (grön text), INTE LASTAD (orange ram), INSCANNAD (grå), sen = guld "55 min sen". Rött bara när
+  Opter inte bekräftat. Godset grupperas: "2 BUNT · 1 PALL".
+- **Signera:** kunden signerar alltid i helskärm (SignFullscreen, står still). Efter Klar frågas namnet i ett eget blad
+  (NameAsk) med förslag från Opter och tidigare här. Hoppa över finns bara om kontoret inte kräver namn.
+- **Text i ordern:** tryck → helskärm med stor text, A−/A+.
+- **Klart:** KLART (helgrön) först när Opter bekräftat, annars SKICKAS… (guld), INTE I OPTER (röd). Inscannat i egen grupp,
+  Rensa inscannade (Ångra 8 s).
+
 ## 1. Skärmar
 
 | Var | Vad |
@@ -157,4 +172,4 @@ Acceptera och Neka går direkt.
 11. **Död kod:** `src/ui/OrderExtras.tsx`, `NavButton` i OrdersView, `addTimers` i App.
 12. **Hämta-före-lämna på samma adress slås ihop till ett stopp** (OrdersView.tsx rad 262). BDX-sedeln hamnade
     under stopp 4 fast den hämtas på stopp 6.
-13. **Inscannade order har ingen tydlig märkning** och kan inte rensas på en gång.
+13. ~~Inscannade order har ingen tydlig märkning~~ – lagat 3.57 (INSCANNAD + Rensa inscannade).

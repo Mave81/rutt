@@ -54,7 +54,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '28 okt · 3.56 · GPS bara Opters koordinater, kvittens vid hämtning, fraktsedel';
+const BUILD = '28 okt · 3.57 · skarpa färger, 3D-reglage, signering i helskärm, Plan A/B/C';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -1534,7 +1534,7 @@ function AppInner(): React.JSX.Element {
           )}
           {tab === 'klart' && klartView === 'aterkallade' && <RevokedView list={revLog} onConfirm={confirmRevoked} />}
           {tab === 'klart' && klartView === 'dagbok' && <DagbokView me={driverName || 'RUTT'} onSms={chefC ? (text: string) => { jobbet.send(chefC, text); flash(`Dagrapport till ${chefC.name.split(' ')[0]}`, null); } : undefined} />}
-          {tab === 'klart' && klartView === 'idag' && <DoneView done={doneOrders} onRetry={retrySync} onOpen={(d: any) => (isEgen(d.cid) ? openOwn(d.cid) : setEditFor({cid: d.cid, st: d.st, done: true, start: (ost[d.cid] || {}).loadedAt || null}))} />}
+          {tab === 'klart' && klartView === 'idag' && <DoneView done={doneOrders} scanned={egna} onClearScanned={() => { const was = egna; saveEgna(() => []); flash(`${was.length} inscannade rensade`, () => saveEgna(() => was)); }} onRetry={retrySync} onOpen={(d: any) => (isEgen(d.cid) ? openOwn(d.cid) : setEditFor({cid: d.cid, st: d.st, done: true, start: (ost[d.cid] || {}).loadedAt || null}))} />}
           {tab === 'nytt' && <NewOrdersView orders={newOrders} cargo={fullSrc ? fullSrc.cargo : {}} onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={(o: any) => setOrderStatus(o, 'reject')} onForward={(orders.perm && orders.perm.giveAway === false) ? undefined : setForwardFor} />}
           <RejectSheet o={rejectFor} onClose={() => setRejectFor(null)} onReject={(o: any) => setOrderStatus(o, 'reject')} />
           <ForwardSheet o={forwardFor} drivers={team.drivers} onClose={() => setForwardFor(null)} onForward={forwardOrder} />

@@ -10,10 +10,12 @@
  *    kontorets behörighet (SetMultipleStatusPermission), som Opter Driver.
  */
 import React, {useMemo, useState} from 'react';
-import {FlatList, Linking, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View} from 'react-native';
+import {Linking, Modal, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, themed, hhmm, prettyPhone, whenText, FONT, R} from './theme';
 import {Sheet, BigText} from './parts';
+import {useLook} from './look';
+import {isEgen as isEgenCid} from '../egna';
 import {Bi, BiName} from './Bi';
 import Slider from './Slider';
 import ReorderSheet from './Reorder';
@@ -243,6 +245,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   const [shop, setShop] = useState<JRow[] | null>(null);
   const [addNum, setAddNum] = useState<{cid: string; label: string; num: string} | null>(null);
   const [planned, setPlanned] = useState<any>(null);
+  const look = useLook();
   const now = Date.now();
   const insets = useSafeAreaInsets();
 
@@ -292,6 +295,15 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   const qty = (r: Row) => { const c = cargo[r.cid] || {}; const kli = Number(r.st.kolli) || 0; return kli ? {n: kli, u: 'kli'} : c.pal ? {n: Number(c.pal), u: 'pall'} : null; };
   // Godset = kollitexten i Opter ("2 pall", "Kartonger"). Inte kundnamnet/tjänsten ("Bud BDX"), det är inget gods.
   const goodsOf = (r: Row) => { const c = cargo[r.cid] || {}; const g = String(c.goods || ''); return /^order\b/i.test(g) ? '' : g; };
+  // "1 st BUNT, 1 st BUNT, 1 st PALL" → "2 BUNT · 1 PALL" (3.57: mindre gröt). Tre sorter, sen "+n".
+  const goodsShort = (r: Row) => {
+    const g = goodsOf(r); if (!g) return '';
+    const parts = g.split(/\s*,\s*/).filter(Boolean); const m: Record<string, number> = {}; const ord: string[] = []; let odd = false;
+    for (const x of parts) { const mm = x.match(/^(\d+)\s*(?:st\.?\s*)?(.+)$/i); if (!mm) { odd = true; break; } const t = mm[2].trim().toUpperCase(); if (!(t in m)) ord.push(t); m[t] = (m[t] || 0) + Number(mm[1]); }
+    if (odd || !ord.length) return g;
+    const shown = ord.slice(0, 3).map(t => `${m[t]} ${t}`), rest = ord.slice(3).reduce((n, t) => n + m[t], 0);
+    return shown.join(' · ') + (rest ? ` · +${rest}` : '');
+  };
   const syncBad = (r: Row) => { const sy = (ost[r.cid] || {}).sync || {}; const v = r.kind === 'pickup' ? sy.load : sy.unload; return v === 'failed' || v === 'unconfirmed'; };
   const nextPl = places.find(pl => pl.rows.some(r => r.state === 'act')) || null;
   // Rubriken på ett stopp: företaget när alla order gäller samma, annars gatan (t.ex. Birger Jarlsgatan 18 med fyra mottagare).
@@ -353,62 +365,114 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   })();
   const when = (st: any) => (st ? whenText(st.tEarliest || st.tLatest) : '');
 
-  // ---- En rad ----
-  const orderRow = (r: JRow) => {
-    const on = !!sel[k(r)], other = otherOf(r), q = qty(r), act = r.state === 'act';
-    const pick = r.kind === 'pickup', bad = syncBad(r);
-    const t1 = pick ? (other ? placeName(other) : goodsOf(r) || 'Order') : (r.st.who || goodsOf(r) || 'Order');
-    const dest = other ? [other.adr, other.area].filter(Boolean).join(', ') : '';
-    const sub: React.ReactNode[] = [];
-    if (r.st.tidspass) sub.push(<Text key="tp" style={o.tp}>{r.st.tidspass.time ? `Tidspass ${r.st.tidspass.time}` : 'Tidspassning'}  </Text>);
-    if (r.st.own) sub.push(<Text key="own" style={o.ownTag}>{(r.st.own.from || 'EGET').toUpperCase()}  </Text>);
-    if (r.st.orderNo) sub.push(<Text key="no" style={o.mono}>{r.st.orderNo}</Text>);
-    const rest = !act ? `väntar på lastning${other ? ` · hämtas hos ${placeName(other)}` : ''}`
-      : pick ? (dest ? `→ ${dest}` : 'mottagarens adress saknas i ordern')
-      : [goodsOf(r), other ? `från ${placeName(other)}` : ''].filter(Boolean).join(' · ');
-    if (rest) sub.push(<Text key="r">{sub.length ? (pick && act ? ' ' : ' · ') : ''}{rest}</Text>);
+  // ---- 3.57: statusord i stället för prickar ----
+  const isScan = (r: Row) => !!r.st.own;
+  const word = (r: JRow, small = false) => {
+    if (r.state === 'act' && r.kind === 'drop') return <Text style={[o.okW, small && {fontSize: 12.5}]}>LASTAD</Text>;
+    return <View style={o.nlW}><Text style={o.nlWT}>INTE LASTAD</Text></View>;
+  };
+  const scanW = <View style={o.scW}><Text style={o.scWT}>INSCANNAD</Text></View>;
+  const lateW = (pl: JPlace) => (pl.late ? <Text style={o.lateW}>  ·  {pl.late} min sen</Text> : null);
+  const metaOf = (pl: JPlace) => { const st = pl.st; const same = titleOf(pl) === st.adr; return [same ? st.area : [st.adr, st.area].filter(Boolean).join(', '), st.code ? `Portkod ${st.code}` : ''].filter(Boolean).join('  ·  '); };
+  const hasP = (pl: JPlace) => pl.rows.some(r => r.state === 'act' && r.kind === 'pickup');
+  const longPlace = (pl: JPlace) => { if (!selMode && multi && pl.rows.some(canAct)) { setSelMode(true); const n: Record<string, boolean> = {}; pl.rows.filter(canAct).forEach(r => { n[k(r)] = true; }); setSel(n); } };
+  const checkOrMark = (r: JRow) => (selMode && canAct(r) ? <View style={[o.jck, sel[k(r)] && o.jckOn]}>{sel[k(r)] ? <Bi n="check2" size={14} color="#000000" /> : null}</View> : null);
+
+  // A: ett kort per stopp. Rubrik + gata + tid, sen varje order med sitt statusord.
+  const placeA = (pl: JPlace, i: number) => {
+    const isNext = nextPl === pl, act = pl.rows.filter(r => r.state === 'act');
+    const pick = hasP(pl) && !act.some(r => r.kind === 'drop');
+    const one = pl.rows.length === 1 && String(pl.rows[0].st.who || '') === titleOf(pl) ? pl.rows[0] : null;
     return (
-      <Pressable key={k(r)} style={[o.jr, on && o.jrOn]} android_ripple={{color: C.edge}}
-        onPress={() => (selMode ? toggle(r) : setOpenRow(r))} onLongPress={() => (selMode ? toggle(r) : startSel(r))} delayLongPress={350}>
-        {selMode && canAct(r)
-          ? <View style={[o.jck, on && o.jckOn]}>{on ? <Bi n="check2" size={14} color="#000000" /> : null}</View>
-          : <View style={[o.mk, act ? (pick ? o.mkP : o.mkD) : null, bad && {backgroundColor: C.bad}]} />}
-        <View style={{flex: 1, minWidth: 0}}>
-          <Text style={[o.jt1, !act && {color: C.faint}]} numberOfLines={1}>{t1}</Text>
-          {bad
-            ? <Text style={[o.jt2, {color: C.bad}]} numberOfLines={1} onPress={() => onRetry(r.cid)}>Inte bekräftad i Opter – tryck för att skicka igen</Text>
-            : <Text style={o.jt2} numberOfLines={1}>{sub}</Text>}
+      <View key={pl.key} style={[o.card, isNext && o.cardNext]}>
+        <Pressable onPress={() => (selMode ? togglePlace(pl) : openPlace(pl))} onLongPress={() => longPlace(pl)} delayLongPress={350} android_ripple={{color: C.edge}}>
+          <View style={o.cRow}>
+            <Text style={[o.cNum, isNext && {color: C.accentInk}]}>{i + 1}</Text>
+            <Text style={[o.vb, {color: pick ? C.accentInk : act.length ? C.okText : C.faint}]}>{pick ? 'HÄMTA' : 'LÄMNA'}</Text>
+            <Text style={o.cName} numberOfLines={1}>{titleOf(pl)}</Text>
+            {selMode && pl.rows.some(canAct) ? <Pressable hitSlop={10} onPress={() => togglePlace(pl)} style={o.allBtn}><Text style={o.allTxt}>Alla</Text></Pressable> : <Text style={o.cQty}>{qtyTxt(sumQty(act.length ? act : pl.rows))}</Text>}
+          </View>
+          <Text style={o.cMeta} numberOfLines={1}>{metaOf(pl)}{pl.eta ? <Text style={o.cEta}>  ·  ca {hhmm(pl.eta)}</Text> : null}{lateW(pl)}</Text>
+          {one ? (
+            <Pressable style={o.cOne} onPress={() => (selMode ? toggle(one) : setOpenRow(one))} onLongPress={() => (selMode ? toggle(one) : startSel(one))} delayLongPress={350}>
+              {checkOrMark(one)}
+              {syncBad(one) ? <Text style={[o.jt2, {color: C.bad, flex: 1}]} numberOfLines={1} onPress={() => onRetry(one.cid)}>Inte bekräftad i Opter – tryck för att skicka igen</Text>
+                : <Text style={o.cSub} numberOfLines={1}>{word(one)}{isScan(one) ? '  ' : ''}{isScan(one) ? <Text style={o.scInline}> INSCANNAD </Text> : null}  {goodsShort(one)}{one.st.orderNo ? <Text style={o.mono}>  {one.st.orderNo}</Text> : null}</Text>}
+            </Pressable>
+          ) : null}
+        </Pressable>
+        {!one ? <View style={o.cList}>{pl.rows.map(r => {
+          const q = qty(r);
+          return (
+            <Pressable key={k(r)} style={o.cItem} onPress={() => (selMode ? toggle(r) : setOpenRow(r))} onLongPress={() => (selMode ? toggle(r) : startSel(r))} delayLongPress={350}>
+              {checkOrMark(r)}
+              <View style={{flex: 1, minWidth: 0}}>
+                <Text style={[o.cIName, r.state !== 'act' && {color: C.dim}]} numberOfLines={1}>{r.kind === 'pickup' ? (otherOf(r) ? placeName(otherOf(r)) : goodsShort(r) || 'Order') : (r.st.who || goodsShort(r) || 'Order')}</Text>
+                {syncBad(r) ? <Text style={[o.jt2, {color: C.bad}]} numberOfLines={1} onPress={() => onRetry(r.cid)}>Inte bekräftad i Opter – tryck för att skicka igen</Text>
+                  : <Text style={o.cISub} numberOfLines={1}>{r.state !== 'act' && otherOf(r) ? `hämtas hos ${placeName(otherOf(r))}` : [goodsShort(r), r.st.orderNo].filter(Boolean).join(' · ')}</Text>}
+              </View>
+              <View style={{alignItems: 'flex-end', gap: 4}}>
+                {q ? <Text style={o.cIQ}>{q.n} <Text style={o.cIU}>{q.u}</Text></Text> : null}
+                <View style={{flexDirection: 'row', gap: 4}}>{isScan(r) ? scanW : null}{word(r, true)}</View>
+              </View>
+            </Pressable>
+          );
+        })}</View> : null}
+      </View>
+    );
+  };
+  // B: nästa stopp stort med Navigera och Ring, resten två rader med tid först.
+  const heroB = (pl: JPlace) => {
+    const st = pl.st, tel = st.tel || [], act = pl.rows.filter(r => r.state === 'act');
+    const pick = hasP(pl) && !act.some(r => r.kind === 'drop');
+    const r0 = act[0] || pl.rows[0];
+    return (
+      <Pressable key={pl.key} style={[o.card, o.cardNext, {padding: 14}]} onPress={() => openPlace(pl)} onLongPress={() => longPlace(pl)} delayLongPress={350}>
+        <Text style={[o.vb, {color: C.accentInk}]}>NÄSTA · {pick ? 'HÄMTA' : 'LÄMNA'}{pl.eta ? ` · CA ${hhmm(pl.eta)}` : ''}{pl.late ? <Text style={o.lateW}>  ·  {pl.late} MIN SEN</Text> : null}</Text>
+        <Text style={o.hName} numberOfLines={2}>{titleOf(pl)}</Text>
+        <Text style={o.hAdr} numberOfLines={1}>{[st.adr, st.area].filter(Boolean).join(', ')}</Text>
+        <View style={o.hGoods}>
+          <Text style={o.hQ}>{qtyTxt(sumQty(act.length ? act : pl.rows))}</Text>
+          <Text style={o.hG} numberOfLines={1}>{pl.rows.length === 1 ? goodsShort(r0) : `${pl.rows.length} order`}</Text>
+          {r0 ? word(r0) : null}
         </View>
-        {q ? <View style={o.jq}><Text style={[o.jqN, !act && {color: C.faint}]}>{q.n}</Text><Text style={o.jqU}>{q.u.toUpperCase()}</Text></View> : null}
+        <View style={o.hBtns}>
+          <Pressable style={[o.b3, o.b3o]} onPress={() => navigate(st)} onLongPress={() => setNavFor(st)}><Bi n="cursor-fill" size={17} color="#000000" /><Text style={[o.b3T, {color: '#000000'}]}>Navigera</Text></Pressable>
+          <Pressable disabled={!tel.length} style={[o.b3, o.b3b, !tel.length && {opacity: 0.4}]} onPress={() => (tel.length === 1 ? dial(tel[0].num) : setCallStop(st))}><Bi n="telephone-fill" size={16} color={C.people} /><Text style={[o.b3T, {color: C.people}]}>Ring</Text></Pressable>
+        </View>
       </Pressable>
     );
   };
-  const placeBlock = (pl: JPlace, i: number) => {
-    const act = pl.rows.filter(r => r.state === 'act');
-    const hasP = act.some(r => r.kind === 'pickup'), hasD = act.some(r => r.kind === 'drop');
-    const isNext = nextPl === pl;
-    const st = pl.st;
-    const sameTitle = titleOf(pl) === st.adr;
-    const meta = [sameTitle ? st.area : [st.adr, st.area].filter(Boolean).join(', '), pl.eta ? `ca ${hhmm(pl.eta)}` : '', st.code ? `Portkod ${st.code}` : ''].filter(Boolean).join('  ·  ');
-    const selAble = selMode && pl.rows.some(canAct);
+  const rowB = (pl: JPlace) => {
+    const act = pl.rows.filter(r => r.state === 'act'), waits = pl.rows.filter(r => r.state !== 'act');
+    const lead = act[0] || pl.rows[0];
     return (
-      <View key={pl.key} style={{marginTop: i === 0 ? 4 : 14}}>
-        <Pressable style={o.sh} onPress={() => (selMode ? togglePlace(pl) : openPlace(pl))} onLongPress={() => { if (!selMode && multi && pl.rows.some(canAct)) { setSelMode(true); const n: Record<string, boolean> = {}; pl.rows.filter(canAct).forEach(r => { n[k(r)] = true; }); setSel(n); } }} delayLongPress={350} android_ripple={{color: C.edge}}>
-          <View style={[o.ix, isNext && o.ixNext]}><Text style={[o.ixT, isNext && {color: '#000000'}]}>{i + 1}</Text></View>
-          <View style={{flex: 1, minWidth: 0}}>
-            <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
-              {hasD || !act.length ? <Text style={[o.vb, {color: act.length ? C.accent2 : C.faint}]}>LÄMNA</Text> : null}
-              {hasP ? <Text style={[o.vb, {color: C.accentInk}]}>HÄMTA</Text> : null}
-              <Text style={o.shName} numberOfLines={1}>{titleOf(pl)}</Text>
-            </View>
-            {meta ? <Text style={[o.shMeta, pl.late ? {color: C.bad} : null]} numberOfLines={1}>{meta}{pl.late ? `  ·  ${pl.late} min sen` : ''}</Text> : null}
-          </View>
-          {selAble
-            ? <Pressable hitSlop={10} onPress={() => togglePlace(pl)} style={o.allBtn}><Text style={o.allTxt}>Alla</Text></Pressable>
-            : <Text style={o.shQty}>{qtyTxt(sumQty(act.length ? act : pl.rows))}</Text>}
-        </Pressable>
-        <View style={o.jg}>{pl.rows.map(orderRow)}</View>
-      </View>
+      <Pressable key={pl.key} style={o.card} onPress={() => openPlace(pl)} onLongPress={() => longPlace(pl)} delayLongPress={350}>
+        <View style={o.cRow}>
+          <Text style={o.bT}>{pl.eta ? hhmm(pl.eta) : '–'}</Text>
+          <Text style={o.cName} numberOfLines={1}>{titleOf(pl)}</Text>
+          <Text style={o.cQty}>{qtyTxt(sumQty(act.length ? act : pl.rows))}</Text>
+        </View>
+        <Text style={[o.cMeta, {paddingLeft: 56}]} numberOfLines={1}>{lead ? word(lead, true) : null}{pl.rows.some(isScan) ? <Text style={o.scInline}>  INSCANNAD </Text> : null}  {act.length && waits.length ? `+${waits.length} inte lastad  ·  ` : ''}{metaOf(pl)}{lateW(pl)}</Text>
+      </Pressable>
+    );
+  };
+  // C: alla stopp i ett kort, en rad var: namn + gata/tid, mängd och statusord till höger.
+  const rowC = (pl: JPlace, i: number) => {
+    const act = pl.rows.filter(r => r.state === 'act'), isNext = nextPl === pl;
+    const allWait = !act.length || act.every(r => r.kind === 'pickup');
+    return (
+      <Pressable key={pl.key} style={[o.lRow, i > 0 && o.kvLine]} onPress={() => openPlace(pl)} onLongPress={() => longPlace(pl)} delayLongPress={350}>
+        <Text style={[o.cNum, isNext && {color: C.accentInk}]}>{i + 1}</Text>
+        <View style={{flex: 1, minWidth: 0}}>
+          <Text style={o.lName} numberOfLines={1}>{titleOf(pl)}</Text>
+          <Text style={o.lSub} numberOfLines={1}>{pl.rows.some(isScan) ? <Text style={o.scInline}>INSCANNAD </Text> : null}{metaOf(pl)}{pl.eta ? `  ·  ca ${hhmm(pl.eta)}` : ''}{lateW(pl)}</Text>
+        </View>
+        <View style={{alignItems: 'flex-end', gap: 3}}>
+          <Text style={o.cIQ}>{qtyTxt(sumQty(act.length ? act : pl.rows))}</Text>
+          {allWait ? <View style={o.nlW}><Text style={o.nlWT}>INTE LASTAD</Text></View> : <Text style={[o.okW, {fontSize: 12.5}]}>LASTAD</Text>}
+        </View>
+      </Pressable>
     );
   };
 
@@ -715,13 +779,13 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     const dr = pl.rows.filter(r => r.kind === 'drop' && canAct(r)), pk = pl.rows.filter(r => r.kind === 'pickup' && canAct(r));
     return (
       <View style={[o.dock2, {paddingBottom: 10}]}>
-        <View style={o.dockHead}>
+        {look.plan !== 'B' ? <View style={o.dockHead}>
           <Pressable style={{flex: 1, minWidth: 0}} hitSlop={8} onPress={() => openPlace(pl)}>
             <Text style={o.dockL} numberOfLines={1}>NÄSTA  <Text style={o.dockN}>{titleOf(pl)}</Text>  <Text style={o.dockMore}>visa ›</Text></Text>
           </Pressable>
           <Pressable style={o.sqSm} onPress={() => navigate(st)} onLongPress={() => setNavFor(st)}><Bi n="cursor-fill" size={16} color="#000000" /></Pressable>
           <Pressable disabled={!tel.length} style={[o.sqSm, {backgroundColor: C.peopleSoft}, !tel.length && {opacity: 0.35}]} onPress={() => (tel.length === 1 ? dial(tel[0].num) : setCallStop(st))}><Bi n="telephone-fill" size={16} color={C.people} /></Pressable>
-        </View>
+        </View> : null}
         {/* På timme nere vid reglaget bara när det berör stoppet (valt Ja, eller ordern nämner timmar) – annars i ordern */}
         {(() => { const sts = (dr.length ? dr : pk).filter(r => !r.st.own || r.st.parent).map(r => r.st); return timOf && sts.some(x => timOf(x).on || timOf(x).auto) ? timSeg(sts) : null; })()}
         {dr.length ? <Slider key={'d' + pl.key + dr.length} label={`Dra för Lossad${dr.length > 1 ? ` · ${dr.length}` : ''}`} tone="ok" onDone={() => doPlace(pl, 'drop')} /> : null}
@@ -742,7 +806,9 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
       {!sheetOnly ? <>
       {selMode ? selBar : (places.length ? strip : null)}
       <ScrollView style={{flex: 1}} contentContainerStyle={{paddingHorizontal: 12, paddingBottom: 18}} keyboardShouldPersistTaps="handled">
-        {places.length ? places.map(placeBlock) : (
+        {places.length ? (selMode || look.plan === 'A' ? places.map(placeA)
+          : look.plan === 'B' ? <>{nextPl ? heroB(nextPl) : null}{places.some(p2 => p2 !== nextPl) ? <Text style={o.secB}>SEN</Text> : null}{places.filter(p2 => p2 !== nextPl).map(rowB)}</>
+          : <View style={o.card0}>{places.map(rowC)}</View>) : (
           <View style={o.allDoneBox}>
             <Bi n="check2-all" size={40} color={C.accent2} />
             <Text style={o.allDoneBig}>Allt klart</Text>
@@ -833,6 +899,45 @@ function CallSheet({st, onClose}: {st: any; onClose: () => void}) {
 const o = themed(() => StyleSheet.create({
 
   // ---- Jobblistan (A) ----
+  card: {backgroundColor: C.panel, borderRadius: 12, borderWidth: 1, borderColor: C.edge, borderBottomWidth: 2, borderBottomColor: C.trkA, paddingVertical: 11, paddingHorizontal: 12, marginTop: 8, overflow: 'hidden'},
+  cardNext: {backgroundColor: C.accentSoft, borderColor: C.accent, borderBottomColor: C.accentLo},
+  card0: {backgroundColor: C.panel, borderRadius: 12, borderWidth: 1, borderColor: C.edge, borderBottomWidth: 2, borderBottomColor: C.trkA, paddingHorizontal: 12, marginTop: 6},
+  cRow: {flexDirection: 'row', alignItems: 'center', gap: 9},
+  cNum: {width: 16, textAlign: 'center', color: C.faint, fontFamily: FONT.cond, fontSize: 15, fontWeight: '700'},
+  cName: {flex: 1, color: C.ink, fontFamily: FONT.cond, fontSize: 18, fontWeight: '600'},
+  cQty: {color: C.ink, fontFamily: FONT.cond, fontSize: 16, fontWeight: '700'},
+  cMeta: {color: C.dim, fontSize: 13.5, marginTop: 3, paddingLeft: 25},
+  cEta: {color: C.ink, fontWeight: '700'},
+  cOne: {flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 5, paddingLeft: 25},
+  cSub: {flex: 1, color: C.dim, fontSize: 13.5},
+  cList: {marginTop: 8, marginLeft: 25, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.edge},
+  cItem: {flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.edge},
+  cIName: {color: C.ink, fontSize: 15, fontWeight: '600'},
+  cISub: {color: C.dim, fontSize: 12.5, marginTop: 1},
+  cIQ: {color: C.ink, fontFamily: FONT.cond, fontSize: 16, fontWeight: '700'},
+  cIU: {color: C.dim, fontSize: 12.5, fontWeight: '600'},
+  okW: {color: C.okText, fontFamily: FONT.cond, fontSize: 13.5, fontWeight: '700', letterSpacing: 0.6},
+  nlW: {borderWidth: 1.5, borderColor: C.accent, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1},
+  nlWT: {color: C.accentInk, fontFamily: FONT.cond, fontSize: 12, fontWeight: '700', letterSpacing: 0.6},
+  scW: {backgroundColor: C.panel2, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2},
+  scWT: {color: C.dim, fontFamily: FONT.cond, fontSize: 12, fontWeight: '700', letterSpacing: 0.6},
+  scInline: {color: C.dim, fontFamily: FONT.cond, fontSize: 12.5, fontWeight: '700', letterSpacing: 0.6, backgroundColor: C.panel2},
+  lateW: {color: C.warn, fontWeight: '700'},
+  hName: {color: C.ink, fontFamily: FONT.cond, fontSize: 24, fontWeight: '700', lineHeight: 27, marginTop: 4},
+  hAdr: {color: C.dim, fontSize: 15, marginTop: 2},
+  hGoods: {flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8},
+  hQ: {color: C.ink, fontFamily: FONT.cond, fontSize: 22, fontWeight: '700'},
+  hG: {color: C.dim, fontSize: 14, flexShrink: 1},
+  hBtns: {flexDirection: 'row', gap: 8, marginTop: 12},
+  b3: {flex: 1, height: 50, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8},
+  b3o: {backgroundColor: C.accent, borderBottomWidth: 3, borderBottomColor: C.accentLo},
+  b3b: {backgroundColor: C.peopleSoft},
+  b3T: {fontFamily: FONT.cond, fontSize: 17, fontWeight: '700'},
+  bT: {width: 47, color: C.ink, fontFamily: FONT.cond, fontSize: 17, fontWeight: '700'},
+  secB: {color: C.faint, fontFamily: FONT.cond, fontSize: 13, fontWeight: '700', letterSpacing: 1.1, marginTop: 12, marginLeft: 4},
+  lRow: {flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 56, paddingVertical: 7},
+  lName: {color: C.ink, fontFamily: FONT.cond, fontSize: 17, fontWeight: '600'},
+  lSub: {color: C.dim, fontSize: 13, marginTop: 1},
   mono: {fontFamily: FONT.mono, fontSize: 12.5, color: C.faint},
   tp: {color: C.accentInk, fontWeight: '700'},
   strip: {flexDirection: 'row', alignItems: 'center', marginHorizontal: 12, marginBottom: 6, backgroundColor: C.panel, borderRadius: R},
@@ -918,8 +1023,8 @@ const o = themed(() => StyleSheet.create({
   addNumT: {color: C.accentInk, fontFamily: FONT.cond, fontSize: 14.5, fontWeight: '700'},
   rsBtns: {flexDirection: 'row', gap: 6, marginTop: 12},
   sqBtn: {width: 50, height: 50, borderRadius: R, backgroundColor: C.panel2, alignItems: 'center', justifyContent: 'center'},
-  sqSm: {width: 44, height: 44, borderRadius: R, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center'},
-  bigBtn: {flex: 1, height: 50, borderRadius: R, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 10},
+  sqSm: {width: 46, height: 46, borderRadius: 12, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center', borderBottomWidth: 3, borderBottomColor: 'rgba(0,0,0,0.28)'},
+  bigBtn: {flex: 1, height: 52, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 10, borderBottomWidth: 3, borderBottomColor: 'rgba(0,0,0,0.28)'},
   bigBtnT: {color: C.ink, fontFamily: FONT.cond, fontSize: 17, fontWeight: '700'},
   moreRow: {flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12, marginTop: 4},
   moreRowT: {color: C.dim, fontSize: 13.5, fontWeight: '600'},
@@ -1112,7 +1217,7 @@ const o = themed(() => StyleSheet.create({
   driveBtnGhost: {backgroundColor: C.panel, borderColor: C.edge, borderWidth: 1},
   driveBtnTxt: {color: C.ink, fontSize: 21, fontWeight: '800', flexShrink: 1},
   // Klart
-  doneCard: {backgroundColor: C.panel, borderRadius: 12, padding: 14, marginBottom: 8},
+  doneCard: {backgroundColor: C.panel, borderRadius: 12, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: C.edge, borderBottomWidth: 2, borderBottomColor: C.trkA},
   doneTop: {flexDirection: 'row', alignItems: 'center', gap: 8},
   doneTag: {fontSize: 11.5, fontWeight: '900', letterSpacing: 1.2},
   doneTime: {color: C.dim, fontSize: 14, fontWeight: '800'},
@@ -1121,42 +1226,60 @@ const o = themed(() => StyleSheet.create({
   doneHint: {color: C.faint, fontSize: 12.5, lineHeight: 18, marginBottom: 10, marginTop: 2},
   doneEdit: {flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.panel2, borderRadius: 14, paddingHorizontal: 10, height: 28},
   doneEditTxt: {color: C.ink, fontSize: 12.5, fontWeight: '800'},
+  dPill: {flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 7, paddingHorizontal: 8, height: 24},
+  dPillT: {fontFamily: FONT.cond, fontSize: 13, fontWeight: '700', letterSpacing: 0.7},
+  rensa: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 50, borderRadius: 12, backgroundColor: C.panel2, borderWidth: 1, borderColor: C.edge, borderBottomWidth: 3, borderBottomColor: C.trkA, marginTop: 4},
+  rensaT: {color: C.ink, fontSize: 15, fontWeight: '800'},
 }));
 
 
 /* ---- Klart: allt som är lossat (i RUTT eller i Opter). Tryck på en order = ändra i efterhand (som Opter). ---- */
-export function DoneView({done, onRetry, onOpen}: {done: any[]; onRetry: (cid: string) => void; onOpen: (d: any) => void}) {
+export function DoneView({done, onRetry, onOpen, scanned = [], onClearScanned}: {done: any[]; onRetry: (cid: string) => void; onOpen: (d: any) => void; scanned?: any[]; onClearScanned?: () => void}) {
   const bottom = useSafeAreaInsets().bottom + 24;
+  // 3.57: KLART (helgrön) bara när Opter bekräftat. Innan dess SKICKAS… i guld. Röd bara när Opter inte fick det.
+  // Inscannat (finns bara i telefonen) i en egen grupp som rensas med en knapp (Ångra i 8 s).
+  const tagOf = (d: any) => {
+    if (d.rejected) return <View style={[o.dPill, {backgroundColor: C.panel2}]}><Text style={[o.dPillT, {color: C.faint}]}>NEKAD</Text></View>;
+    if (isEgenCid(d.cid)) return <View style={[o.dPill, {backgroundColor: C.panel2}]}><Text style={[o.dPillT, {color: C.dim}]}>INSCANNAD</Text></View>;
+    const s = d.sync;
+    if (!s && d.byOpter || s === 'ok' || s === 'ok-noimg') return <View style={[o.dPill, {backgroundColor: C.accent2, borderBottomWidth: 2, borderBottomColor: C.okLo}]}><Bi n="check-circle-fill" size={12} color="#04261A" /><Text style={[o.dPillT, {color: '#04261A'}]}>KLART</Text></View>;
+    if (s === 'waiting' || s === 'sending' || !s) return <View style={[o.dPill, {backgroundColor: C.warnSoft}]}><Bi n="arrow-repeat" size={12} color={C.warn} /><Text style={[o.dPillT, {color: C.warn}]}>SKICKAS…</Text></View>;
+    return <View style={[o.dPill, {backgroundColor: C.badSoft}]}><Text style={[o.dPillT, {color: C.bad}]}>INTE I OPTER</Text></View>;
+  };
+  const opter = done.filter(d => !isEgenCid(d.cid));
+  const egnaDone = done.filter(d => isEgenCid(d.cid));
+  const card = (d: any) => {
+    const last = (d.edits || [])[d.edits.length - 1];
+    return (
+      <Pressable key={d.cid} style={o.doneCard} onPress={() => onOpen(d)} android_ripple={{color: C.edge}}>
+        <View style={o.doneTop}>
+          {tagOf(d)}
+          <Text style={o.doneTime}>{d.doneAt ? hhmm(new Date(d.doneAt)) : ''}</Text>
+          <View style={{flex: 1}} />
+          {d.locked ? <Bi n="lock-fill" size={14} color={C.faint} /> : <View style={o.doneEdit}><Bi n="pencil-square" size={13} color={C.ink} /><Text style={o.doneEditTxt}>Ändra</Text></View>}
+        </View>
+        <Text style={o.doneWho2} numberOfLines={1}>{d.who || '—'}</Text>
+        <Text style={o.doneMeta} numberOfLines={1}>{[d.adr, d.area].filter(Boolean).join(', ')}{d.orderNo ? `  ·  ${d.orderNo}` : ''}{d.pod && d.pod.name ? `  ·  ${d.pod.name}` : ''}{d.pod && d.pod.photos && d.pod.photos.length ? `  ·  ${d.pod.photos.length} foto` : ''}</Text>
+        {last ? <Text style={[o.doneMeta, {color: last.state === 'ok' ? C.okText : last.state === 'failed' || last.state === 'unconfirmed' ? C.bad : C.dim}]} numberOfLines={1}>{last.state === 'ok' ? '✓ ' : ''}{last.label}{d.edits.length > 1 ? `  +${d.edits.length - 1}` : ''}</Text> : null}
+        {d.locked ? <Text style={o.doneMeta}>Klarmarkerad av kontoret – låst</Text> : d.byOpter ? <Text style={o.doneMeta}>Lossad i Opter</Text> : null}
+        {!isEgenCid(d.cid) ? <SyncLine state={d.sync} label="Lossad" onRetry={() => onRetry(d.cid)} /> : null}
+      </Pressable>
+    );
+  };
+  const nScan = scanned.length;
   return (
-    <FlatList
-      data={done}
-      style={{flex: 1}}
-      keyExtractor={d => String(d.cid)}
-      contentContainerStyle={{paddingHorizontal: 14, paddingBottom: bottom}}
-      ListHeaderComponent={done.length ? <Text style={o.doneHint}>Tryck på en order för att ändra status, lägga till bild, tillägg, ändring eller avvikelse.</Text> : undefined}
-      ListEmptyComponent={<View style={o.allDoneBox}><Bi n="inbox-fill" size={30} color={C.faint} /><Text style={o.allDone}>Inget klart än idag.</Text></View>}
-      renderItem={({item: d}) => {
-        const last = (d.edits || [])[d.edits.length - 1];
-        return (
-          <Pressable style={o.doneCard} onPress={() => onOpen(d)} android_ripple={{color: C.edge}}>
-            <View style={o.doneTop}>
-              <Bi n={d.rejected ? 'x-circle-fill' : 'check-circle-fill'} size={16} color={d.rejected ? C.bad : C.accent2} />
-              <Text style={[o.doneTag, {color: d.rejected ? C.bad : C.accent2}]}>{d.rejected ? 'NEKAD' : 'LOSSAD'}</Text>
-              <Text style={o.doneTime}>{d.doneAt ? hhmm(new Date(d.doneAt)) : ''}</Text>
-              <View style={{flex: 1}} />
-              {d.locked ? <Bi n="lock-fill" size={14} color={C.faint} /> : <View style={o.doneEdit}><Bi n="pencil-square" size={13} color={C.ink} /><Text style={o.doneEditTxt}>Ändra</Text></View>}
-            </View>
-            <Text style={o.doneWho2} numberOfLines={1}>{d.who || '—'}</Text>
-            <Text style={o.doneMeta} numberOfLines={1}>{[d.adr, d.area].filter(Boolean).join(', ')}{d.orderNo ? `  ·  Order ${d.orderNo}` : ''}</Text>
-            {(d.pod && (d.pod.name || (d.pod.photos && d.pod.photos.length))) ? (
-              <Text style={o.doneMeta}>{d.pod.name ? `Mottagare: ${d.pod.name}` : ''}{d.pod.photos && d.pod.photos.length ? `  ·  ${d.pod.photos.length} foto` : ''}</Text>
-            ) : null}
-            {last ? <Text style={[o.doneMeta, {color: last.state === 'ok' ? C.accent2 : last.state === 'failed' || last.state === 'unconfirmed' ? C.bad : C.dim}]} numberOfLines={1}>{last.state === 'ok' ? '✓ ' : ''}{last.label}{d.edits.length > 1 ? `  +${d.edits.length - 1}` : ''}</Text> : null}
-            {d.locked ? <Text style={o.doneMeta}>Klarmarkerad av kontoret – låst</Text> : d.byOpter ? <Text style={o.doneMeta}>Lossad i Opter</Text> : null}
-            <SyncLine state={d.sync} label="Lossad" onRetry={() => onRetry(d.cid)} />
-          </Pressable>
-        );
-      }}
-    />
+    <ScrollView style={{flex: 1}} contentContainerStyle={{paddingHorizontal: 14, paddingBottom: bottom}}>
+      {done.length ? <Text style={o.doneHint}>Tryck på en order för att ändra status, lägga till bild, tillägg, ändring eller avvikelse.</Text> : null}
+      {!done.length && !nScan ? <View style={o.allDoneBox}><Bi n="inbox-fill" size={30} color={C.faint} /><Text style={o.allDone}>Inget klart än idag.</Text></View> : null}
+      {opter.map(card)}
+      {egnaDone.length || nScan ? <Text style={o.secB}>INSCANNAT · BARA I TELEFONEN</Text> : null}
+      {egnaDone.map(card)}
+      {nScan && onClearScanned ? (
+        <Pressable style={o.rensa} onPress={onClearScanned}>
+          <Bi n="x-circle-fill" size={16} color={C.dim} />
+          <Text style={o.rensaT}>Rensa inscannade ({nScan})</Text>
+        </Pressable>
+      ) : null}
+    </ScrollView>
   );
 }
