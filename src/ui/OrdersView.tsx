@@ -591,6 +591,11 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         <Text style={o.rsAdr}>{[st.adr, [st.zip, st.area].filter(Boolean).join(' ')].filter(Boolean).join(', ')}</Text>
         {st.tidspass ? <View style={o.tpBox}><Bi n="alarm-fill" size={15} color="#000000" /><Text style={o.tpBoxT}>{st.tidspass.time ? `Tidspassning kl ${st.tidspass.time}` : 'Tidspassning – tiden står inte i ordern'}</Text></View> : null}
         {st.code ? <View style={o.codeRow}><Bi n="key-fill" size={15} color={C.accentInk} /><Text style={o.codeV}>{st.code}</Text><Text style={o.codeL}>PORTKOD</Text></View> : null}
+        <View style={o.rsBtns}>
+          <Pressable style={o.sqBtn} onPress={() => navigate(st)} onLongPress={() => { close(); setNavFor(st); }}><Bi n="cursor-fill" size={18} color={C.ink} /></Pressable>
+          {pick ? <Pressable style={[o.bigBtn, {backgroundColor: C.panel2, flex: 1.25}]} onPress={() => { const rs = rows.filter(x => x.kind === 'pickup' && x.state === 'act' && samePlace(x.st, st)); close(); setShop(rs.length ? rs : [r]); }}><Text style={o.bigBtnT} numberOfLines={1}>Visa för butiken</Text></Pressable> : null}
+          {act && canAct(r) ? <Pressable style={[o.bigBtn, {backgroundColor: pick ? C.accent : C.accent2}]} onPress={() => { close(); if (pick) onLoaded(st); else onUnload(st); }}><Text style={[o.bigBtnT, {color: pick ? '#000000' : '#FFFFFF'}]}>{pick ? 'Lastad' : 'Lossad'}</Text></Pressable> : null}
+        </View>
         <Text style={[o.vb, {color: C.faint, marginTop: 12}]}>KÖRNINGEN</Text>
         <View style={o.lgs}>
           {pk ? legRow('HÄMTA', pk, pick, 0) : null}
@@ -622,11 +627,6 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         </View>
         {peopleRows(st)}
         {onAddNum ? <Pressable hitSlop={6} style={o.addNum} onPress={() => setAddNum({cid: String(r.cid), label: '', num: ''})}><Bi n="plus-lg" size={13} color={C.accentInk} /><Text style={o.addNumT}>Lägg till nummer på jobbet</Text></Pressable> : null}
-        <View style={o.rsBtns}>
-          <Pressable style={o.sqBtn} onPress={() => navigate(st)} onLongPress={() => { close(); setNavFor(st); }}><Bi n="cursor-fill" size={18} color={C.ink} /></Pressable>
-          {pick ? <Pressable style={[o.bigBtn, {backgroundColor: C.panel2, flex: 1.25}]} onPress={() => { const rs = rows.filter(x => x.kind === 'pickup' && x.state === 'act' && samePlace(x.st, st)); close(); setShop(rs.length ? rs : [r]); }}><Text style={o.bigBtnT} numberOfLines={1}>Visa för butiken</Text></Pressable> : null}
-          {act && canAct(r) ? <Pressable style={[o.bigBtn, {backgroundColor: pick ? C.accent : C.accent2}]} onPress={() => { close(); if (pick) onLoaded(st); else onUnload(st); }}><Text style={[o.bigBtnT, {color: pick ? '#000000' : '#FFFFFF'}]}>{pick ? 'Lastad' : 'Lossad'}</Text></Pressable> : null}
-        </View>
         <Pressable style={o.moreRow} onPress={() => { close(); onEdit(st.parent && st.own ? String(st.parent) : r.cid, st); }}>
           <Bi n="three-dots" size={16} color={C.dim} /><Text style={o.moreRowT}>Mer: artiklar, tid, ändring, bild, avvikelse, status</Text>
         </Pressable>
@@ -899,25 +899,25 @@ function CallSheet({st, onClose}: {st: any; onClose: () => void}) {
 const o = themed(() => StyleSheet.create({
 
   // ---- Jobblistan (A) ----
-  card: {backgroundColor: C.panel, borderRadius: 12, borderWidth: 1, borderColor: C.edge, borderBottomWidth: 2, borderBottomColor: C.trkA, paddingVertical: 11, paddingHorizontal: 12, marginTop: 8, overflow: 'hidden'},
-  cardNext: {backgroundColor: C.accentSoft, borderColor: C.accent, borderBottomColor: C.accentLo},
-  card0: {backgroundColor: C.panel, borderRadius: 12, borderWidth: 1, borderColor: C.edge, borderBottomWidth: 2, borderBottomColor: C.trkA, paddingHorizontal: 12, marginTop: 6},
+  card: {backgroundColor: C.panel, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, borderColor: C.edge, paddingVertical: 8, paddingHorizontal: 11, marginTop: 6, overflow: 'hidden'},
+  cardNext: {backgroundColor: C.accentSoft, borderColor: C.accent},
+  card0: {backgroundColor: C.panel, borderRadius: 10, borderWidth: StyleSheet.hairlineWidth, borderColor: C.edge, paddingHorizontal: 11, marginTop: 5},
   cRow: {flexDirection: 'row', alignItems: 'center', gap: 9},
   cNum: {width: 16, textAlign: 'center', color: C.faint, fontFamily: FONT.cond, fontSize: 15, fontWeight: '700'},
-  cName: {flex: 1, color: C.ink, fontFamily: FONT.cond, fontSize: 18, fontWeight: '600'},
-  cQty: {color: C.ink, fontFamily: FONT.cond, fontSize: 16, fontWeight: '700'},
-  cMeta: {color: C.dim, fontSize: 13.5, marginTop: 3, paddingLeft: 25},
+  cName: {flex: 1, color: C.ink, fontFamily: FONT.cond, fontSize: 16.5, fontWeight: '600'},
+  cQty: {color: C.ink, fontFamily: FONT.cond, fontSize: 15, fontWeight: '700'},
+  cMeta: {color: C.dim, fontSize: 13, marginTop: 2, paddingLeft: 25},
   cEta: {color: C.ink, fontWeight: '700'},
-  cOne: {flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 5, paddingLeft: 25},
-  cSub: {flex: 1, color: C.dim, fontSize: 13.5},
-  cList: {marginTop: 8, marginLeft: 25, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.edge},
-  cItem: {flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.edge},
+  cOne: {flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3, paddingLeft: 25},
+  cSub: {flex: 1, color: C.dim, fontSize: 13},
+  cList: {marginTop: 6, marginLeft: 25, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: C.edge},
+  cItem: {flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.edge},
   cIName: {color: C.ink, fontSize: 15, fontWeight: '600'},
   cISub: {color: C.dim, fontSize: 12.5, marginTop: 1},
   cIQ: {color: C.ink, fontFamily: FONT.cond, fontSize: 16, fontWeight: '700'},
   cIU: {color: C.dim, fontSize: 12.5, fontWeight: '600'},
   okW: {color: C.okText, fontFamily: FONT.cond, fontSize: 13.5, fontWeight: '700', letterSpacing: 0.6},
-  nlW: {borderWidth: 1.5, borderColor: C.accent, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1},
+  nlW: {borderWidth: 1, borderColor: C.accent, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1},
   nlWT: {color: C.accentInk, fontFamily: FONT.cond, fontSize: 12, fontWeight: '700', letterSpacing: 0.6},
   scW: {backgroundColor: C.panel2, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2},
   scWT: {color: C.dim, fontFamily: FONT.cond, fontSize: 12, fontWeight: '700', letterSpacing: 0.6},
@@ -930,7 +930,7 @@ const o = themed(() => StyleSheet.create({
   hG: {color: C.dim, fontSize: 14, flexShrink: 1},
   hBtns: {flexDirection: 'row', gap: 8, marginTop: 12},
   b3: {flex: 1, height: 50, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8},
-  b3o: {backgroundColor: C.accent, borderBottomWidth: 3, borderBottomColor: C.accentLo},
+  b3o: {backgroundColor: C.accent},
   b3b: {backgroundColor: C.peopleSoft},
   b3T: {fontFamily: FONT.cond, fontSize: 17, fontWeight: '700'},
   bT: {width: 47, color: C.ink, fontFamily: FONT.cond, fontSize: 17, fontWeight: '700'},
@@ -965,7 +965,7 @@ const o = themed(() => StyleSheet.create({
   mk: {width: 8, height: 8, borderRadius: 2, backgroundColor: C.edge},
   mkP: {backgroundColor: C.accent},
   mkD: {backgroundColor: C.accent2},
-  jck: {width: 22, height: 22, borderRadius: 4, borderWidth: 2, borderColor: C.faint, alignItems: 'center', justifyContent: 'center'},
+  jck: {width: 22, height: 22, borderRadius: 4, borderWidth: 1.5, borderColor: C.faint, alignItems: 'center', justifyContent: 'center'},
   jckOn: {backgroundColor: C.accent, borderColor: C.accent},
   jt1: {color: C.ink, fontFamily: FONT.cond, fontSize: 16.5, fontWeight: '600'},
   jt2: {color: C.dim, fontSize: 13, marginTop: 1},
@@ -1022,9 +1022,9 @@ const o = themed(() => StyleSheet.create({
   addNum: {flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingVertical: 8},
   addNumT: {color: C.accentInk, fontFamily: FONT.cond, fontSize: 14.5, fontWeight: '700'},
   rsBtns: {flexDirection: 'row', gap: 6, marginTop: 12},
-  sqBtn: {width: 50, height: 50, borderRadius: R, backgroundColor: C.panel2, alignItems: 'center', justifyContent: 'center'},
-  sqSm: {width: 46, height: 46, borderRadius: 12, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center', borderBottomWidth: 3, borderBottomColor: 'rgba(0,0,0,0.28)'},
-  bigBtn: {flex: 1, height: 52, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 10, borderBottomWidth: 3, borderBottomColor: 'rgba(0,0,0,0.28)'},
+  sqBtn: {width: 48, height: 48, borderRadius: R, backgroundColor: C.panel2, alignItems: 'center', justifyContent: 'center'},
+  sqSm: {width: 40, height: 40, borderRadius: 10, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center'},
+  bigBtn: {flex: 1, height: 48, borderRadius: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 10},
   bigBtnT: {color: C.ink, fontFamily: FONT.cond, fontSize: 17, fontWeight: '700'},
   moreRow: {flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12, marginTop: 4},
   moreRowT: {color: C.dim, fontSize: 13.5, fontWeight: '600'},

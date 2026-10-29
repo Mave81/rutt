@@ -10,7 +10,7 @@ import {C, FONT, themed} from './theme';
 import {Bi} from './Bi';
 import {useLook} from './look';
 
-const KNOB = 60, PAD = 6, H = KNOB + PAD * 2 + 4, EDGE = 4;
+const KNOB = 46, PAD = 4, H = KNOB + PAD * 2 + 2, EDGE = 2;
 
 function useReduceMotion() {
   const [r, setR] = useState(false);
@@ -140,7 +140,7 @@ export default function Slider({label, tone, onDone, style}: {label: string; ton
   for (let i = 0; i < 14; i++) stripes.push(<View key={i} style={[sl.stripe, {left: i * 44 - 60}]} />);
 
   return (
-    <Animated.View style={[{marginTop: 12, transform: [{translateX: shakeX}]}, style]}>
+    <Animated.View style={[{marginTop: 8, transform: [{translateX: shakeX}]}, style]}>
       <View style={sl.track} onLayout={e => setW(e.nativeEvent.layout.width)}>
         <View style={sl.inset} />
         {/* Grön/orange fyllning med rullande ränder */}
@@ -172,15 +172,15 @@ export default function Slider({label, tone, onDone, style}: {label: string; ton
             <View style={[sl.faceTop, {backgroundColor: face.mid}]} />
             <View style={[sl.faceHi, {backgroundColor: face.hi}]} />
             <View style={sl.gloss} />
-            <Bi n="chevron-double-right" size={26} color={face.ink} />
+            <Bi n="chevron-double-right" size={21} color={face.ink} />
           </Animated.View>
         </Animated.View>
         {/* Klart: ord med kontur */}
         {isDone ? (
           <Animated.View pointerEvents="none" style={[sl.done, {opacity: done, transform: [{scale: doneScale}]}]}>
-            <Bi n="check-circle-fill" size={28} color={ok ? '#FFFFFF' : '#000000'} />
+            <Bi n="check-circle-fill" size={22} color={ok ? '#FFFFFF' : '#000000'} />
             <View>
-              {[[-2, 0], [2, 0], [0, -2], [0, 2], [2, 2], [-2, 2]].map(([dx, dy], i) => <Text key={i} style={[sl.word, {position: 'absolute', left: dx, top: dy, color: face.line}]}>{word}</Text>)}
+              {[[-1, 0], [1, 0], [0, -1], [0, 1], [1, 1], [-1, 1]].map(([dx, dy], i) => <Text key={i} style={[sl.word, {position: 'absolute', left: dx, top: dy, color: face.line}]}>{word}</Text>)}
               <Text style={[sl.word, {color: ok ? '#FFFFFF' : '#000000'}]}>{word}</Text>
             </View>
           </Animated.View>
@@ -199,29 +199,29 @@ export default function Slider({label, tone, onDone, style}: {label: string; ton
 const b = StyleSheet.create({
   burst: {position: 'absolute', left: 0, top: 0, width: 0, height: 0},
   hub: {position: 'absolute', left: 0, top: 0, width: 0, height: 0},
-  ray: {position: 'absolute', borderRadius: 3, borderWidth: 2, borderColor: '#1A1206'},
-  core: {position: 'absolute', left: 0, top: 0, backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#1A1206'},
+  ray: {position: 'absolute', borderRadius: 3, borderWidth: 1, borderColor: '#1A1206'},
+  core: {position: 'absolute', left: 0, top: 0, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#1A1206'},
 });
 
 const sl = themed(() => StyleSheet.create({
-  track: {height: H, borderRadius: 20, backgroundColor: C.trkB, borderColor: C.edge, borderWidth: 1, overflow: 'hidden', justifyContent: 'center'},
-  inset: {position: 'absolute', left: 0, right: 0, top: 0, height: 3, backgroundColor: C.mode === 'dark' ? 'rgba(0,0,0,0.55)' : 'rgba(11,18,32,0.12)'},
-  fill: {position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 19, overflow: 'hidden'},
-  fillHi: {position: 'absolute', left: 0, right: 0, top: 0, height: 3, opacity: 0.8},
+  track: {height: H, borderRadius: 14, backgroundColor: C.trkB, borderColor: C.edge, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden', justifyContent: 'center'},
+  inset: {position: 'absolute', left: 0, right: 0, top: 0, height: 1, backgroundColor: C.mode === 'dark' ? 'rgba(0,0,0,0.55)' : 'rgba(11,18,32,0.12)'},
+  fill: {position: 'absolute', left: 0, top: 0, bottom: 0, borderRadius: 13, overflow: 'hidden'},
+  fillHi: {position: 'absolute', left: 0, right: 0, top: 0, height: 1, opacity: 0.8},
   fillLo: {position: 'absolute', left: 0, right: 0, bottom: 0, height: '45%', opacity: 0.35},
-  stripe: {position: 'absolute', top: -20, bottom: -20, width: 12, backgroundColor: 'rgba(255,255,255,0.16)', transform: [{rotate: '28deg'}]},
+  stripe: {position: 'absolute', top: -20, bottom: -20, width: 8, backgroundColor: 'rgba(255,255,255,0.16)', transform: [{rotate: '28deg'}]},
   streak: {position: 'absolute', height: 2, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.75)'},
-  label: {position: 'absolute', left: 0, right: 0, color: C.ink, fontFamily: FONT.cond, fontSize: 21, fontWeight: '700', textAlign: 'center', paddingLeft: KNOB + 10, letterSpacing: 0.4},
+  label: {position: 'absolute', left: 0, right: 0, color: C.ink, fontFamily: FONT.cond, fontSize: 17, fontWeight: '700', textAlign: 'center', paddingLeft: KNOB + 10, letterSpacing: 0.4},
   chevs: {position: 'absolute', left: KNOB + PAD + 16, flexDirection: 'row', gap: 1},
-  ghost: {position: 'absolute', left: PAD + 1, top: PAD, width: KNOB, height: KNOB, borderRadius: 16},
+  ghost: {position: 'absolute', left: PAD + 1, top: PAD, width: KNOB, height: KNOB, borderRadius: 11},
   knobWrap: {position: 'absolute', left: PAD + 1, top: PAD - 1, width: KNOB, height: KNOB + EDGE},
-  edge: {position: 'absolute', left: 0, right: 0, top: EDGE, bottom: 0, borderRadius: 16},
-  face: {position: 'absolute', left: 0, right: 0, top: 0, height: KNOB, borderRadius: 16, borderWidth: 2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center'},
+  edge: {position: 'absolute', left: 0, right: 0, top: EDGE, bottom: 0, borderRadius: 11},
+  face: {position: 'absolute', left: 0, right: 0, top: 0, height: KNOB, borderRadius: 11, borderWidth: 1, overflow: 'hidden', alignItems: 'center', justifyContent: 'center'},
   faceTop: {position: 'absolute', left: 0, right: 0, top: 0, height: '50%'},
-  faceHi: {position: 'absolute', left: 0, right: 0, top: 0, height: 3, opacity: 0.9},
-  gloss: {position: 'absolute', left: 9, top: 6, width: 20, height: 9, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.55)', transform: [{rotate: '-12deg'}]},
+  faceHi: {position: 'absolute', left: 0, right: 0, top: 0, height: 1, opacity: 0.9},
+  gloss: {position: 'absolute', left: 7, top: 5, width: 15, height: 7, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.55)', transform: [{rotate: '-12deg'}]},
   done: {position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10},
-  word: {fontFamily: FONT.cond, fontSize: 28, fontWeight: '700', fontStyle: 'italic', letterSpacing: 1},
+  word: {fontFamily: FONT.cond, fontSize: 22, fontWeight: '700', fontStyle: 'italic', letterSpacing: 1},
   burstAt: {position: 'absolute', right: 10, top: H / 2, width: 0, height: 0},
   shard: {position: 'absolute', right: 40, top: H / 2, width: 10, height: 10, borderRadius: 2},
 }));
