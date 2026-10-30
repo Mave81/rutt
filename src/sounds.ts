@@ -51,6 +51,11 @@ export function notifyWith(e: SoundEvent, id: number, title: string, text: strin
   if (RL && RL.notify) return RL.notify(id, title, text);
   return Promise.resolve(false);
 }
+/** Ta bort en visad notis. */
+export function cancelNotif(id: number): Promise<boolean> {
+  const T: any = NativeModules.RuttTools;
+  return T && T.cancel ? T.cancel(id).catch(() => false) : Promise.resolve(false);
+}
 export function copyText(t: string): Promise<boolean> {
   const T: any = NativeModules.RuttTools;
   return T && T.copy ? T.copy(t) : Promise.resolve(false);

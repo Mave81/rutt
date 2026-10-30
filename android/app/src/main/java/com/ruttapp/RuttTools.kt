@@ -116,6 +116,12 @@ class RuttToolsModule(private val rc: ReactApplicationContext) : ReactContextBas
     } catch (e: Throwable) { promise.reject("notify", e.message ?: "kunde inte visa notis") }
   }
 
+  /** Ta bort en notis (uppdraget är besvarat – i RUTT eller i Opter). */
+  @ReactMethod fun cancel(id: Int, promise: Promise) {
+    try { NotificationManagerCompat.from(rc).cancel(id); promise.resolve(true) }
+    catch (e: Throwable) { promise.reject("cancel", e.message ?: "kunde inte ta bort notisen") }
+  }
+
   @ReactMethod fun playSound(key: String, promise: Promise) {
     try {
       playing?.stop()

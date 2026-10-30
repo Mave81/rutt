@@ -54,7 +54,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '30 okt · 3.62 · GPS som Opter: Opters punkt + adresstexten i kartan (Herrestavägen 24 blev 20)';
+const BUILD = '30 okt · 3.63 · notisen om nytt uppdrag försvinner när du svarat (här eller i Opter)';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -1064,13 +1064,21 @@ function AppInner(): React.JSX.Element {
   // Anropas direkt från hämtningen (fungerar även när appen ligger i bakgrunden) och från listan när den ändras.
   // cid → senaste notis. Står uppdraget kvar som nytt (inte bekräftat) påminner RUTT var 15:e minut, som Opter.
   const notified = useRef<Record<string, number> | null>(null);
+  const shown = useRef<Record<string, string[]> | null>(null);  // notis-id → order den gäller
   const ostRef = useRef<any>({}); ostRef.current = ost;
   async function announce(list: {cid: string; pick: any; drop: any}[]) {
     if (demo) return;
     const RL: any = NativeModules.RuttLocation;
     if (!notified.current) { const v: any = await loadJSON('rutt.notified.v2', {}); notified.current = v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
     const now = Date.now(), N = notified.current!;
-    const fresh = list.filter(o => !((ostRef.current[o.cid] || {}).acceptedAt) && (!N[o.cid] || now - N[o.cid] > 15 * 60000));
+    // 30 okt: notisen ska bort så fort uppdraget är besvarat (accepterat/nekat/vidareskickat här eller i Opter).
+    // Varje visad notis minns vilka order den gäller; finns ingen av dem kvar som ny tas notisen bort.
+    if (!shown.current) { const v: any = await loadJSON('rutt.notifshown.v1', {}); shown.current = v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
+    const open = new Set(list.filter(o => { const x = ostRef.current[o.cid] || {}; return !x.acceptedAt && !x.rejectedAt && !x.givenAt; }).map(o => String(o.cid)));
+    const S = shown.current!; let gone = false;
+    for (const id of Object.keys(S)) if (!(S[id] || []).some(c => open.has(String(c)))) { SND.cancelNotif(Number(id)); delete S[id]; gone = true; dlog('notis borttagen: ' + id); }
+    if (gone) saveJSON('rutt.notifshown.v1', S);
+    const fresh = list.filter(o => open.has(String(o.cid)) && (!N[o.cid] || now - N[o.cid] > 15 * 60000));
     if (!fresh.length) return;
     const again = fresh.every(o => N[o.cid]);
     fresh.forEach(o => { N[o.cid] = now; });
@@ -1079,7 +1087,9 @@ function AppInner(): React.JSX.Element {
     const line = (o: any) => { const p = o.pick || {}, d = o.drop || {}; const t = p.tEarliest && p.tEarliest.hhmm ? ` ${p.tEarliest.hhmm}` : ''; return `Hämta ${p.who || p.adr || '—'}${p.area ? ', ' + p.area : ''}${t} → ${d.who || d.adr || '—'}${d.area ? ', ' + d.area : ''}`; };
     const title = (fresh.length === 1 ? 'Nytt uppdrag' : `${fresh.length} nya uppdrag`) + (again ? ' – väntar på svar' : '');
     dlog((again ? 'påminnelse: ' : 'nya uppdrag: ') + fresh.map(o => o.cid).join(',') + ' · ' + AppState.currentState);
-    SND.notifyWith(again ? 'reminder' : 'order', 4800 + (Number(String(fresh[0].cid).replace(/\D/g, '').slice(-4)) || 0), title, fresh.map(line).join('\n')).then((v: any) => dlog('notis visad: ' + v)).catch((e: any) => dlog('notis fel: ' + String(e?.message || e)));
+    const nid = 4800 + (Number(String(fresh[0].cid).replace(/\D/g, '').slice(-4)) || 0);
+    S[nid] = [...new Set([...(S[nid] || []), ...fresh.map(o => String(o.cid))])]; saveJSON('rutt.notifshown.v1', S);
+    SND.notifyWith(again ? 'reminder' : 'order', nid, title, fresh.map(line).join('\n')).then((v: any) => dlog('notis visad: ' + v)).catch((e: any) => dlog('notis fel: ' + String(e?.message || e)));
   }
   // ---- Nytt chattmeddelande från kontoret → notis med chattljudet (en gång per meddelande) ----
   const chatSeen = useRef<Record<string, number> | null>(null);
