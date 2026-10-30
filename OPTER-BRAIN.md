@@ -122,7 +122,7 @@ Fält: 1 RES_Id, 2 VHC_Id, **3 SHI_Id (meddelandet kan höra till en order!)**, 
 
 ## 10. Kända fel att aldrig göra om
 
-- **GPS exakt som Opter** (XmlParser.getLayout + Address.toStringForGoogleMaps): Opters egna ADR-koordinater om de finns (≠ 0), annars texten "Gata Nr, Postnr Ort". RUTT:s egna uppslagna koordinater (geo:true, Nominatim) används ALDRIG för navigering. Fel som hänt: Morabergsvägen 7 i stället för 25 (uppslagna koordinater), Döbelnsgatan 73 i stället för 44 (3.34–3.54 tog adresstexten före Opters koordinater, 28 okt).
+- **GPS exakt som Opter** (XmlParser.getLayout + Address.toStringForGoogleMaps): Opters egna ADR-koordinater om de finns (≠ 0), annars texten "Gata Nr, Postnr Ort". RUTT:s egna uppslagna koordinater (geo:true, Nominatim) används ALDRIG för navigering. Fel som hänt: Morabergsvägen 7 i stället för 25 (uppslagna koordinater), Döbelnsgatan 73 i stället för 44 (3.34–3.54 tog adresstexten före Opters koordinater, 28 okt). Herrestavägen 20 i stället för 24 (≤3.61 skickade bara `google.navigation:q=lat,lng`; Opter öppnar kartan med `lat,lng(Gata Nr, Postnr Ort)` – punkt + text som namn. 3.62: `geo:0,0?q=lat,lng(text)`, utan koordinater `geo:0,0?q=text`, 30 okt).
 - Gissa aldrig: tidspassning finns ofta bara i lila raden (Products/DeliveryOptionNames) eller i fritext "tidspasning 06;50".
 - Visa aldrig en återkallad order som ny eller som att-göra. Bugg i RUTT ≤3.42 (`classOf` lade 'revoked' som 'new'/att-göra) – rättad i 3.43: egen klass 'revoked', röd rad + Kvittera, lista under Klart → Återkallade (test: `__tests__/app-aterkallad.test.tsx`).
 - Lastplanen: en ruta = en pall, 18 platser (3 × 6), visa namn, inte siffror.

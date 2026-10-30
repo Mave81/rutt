@@ -12,17 +12,17 @@ const load = () => {
 test('Döbelnsgatan 44 (order 234723): Opters koordinater används, som i Opter – inte adresstexten (blev 73)', () => {
   const {Linking, navigate} = load();
   navigate({who: 'EMB plattsättning', adr: 'Döbelnsgatan 44', zip: '11352', area: 'Stockholm', lat: 59.3439, lng: 18.0512, opterLL: true});
-  expect(Linking.openURL.mock.calls[0][0]).toBe('google.navigation:q=59.3439,18.0512');
+  expect(Linking.openURL.mock.calls[0][0]).toBe('geo:0,0?q=59.3439,18.0512(' + encodeURIComponent('Döbelnsgatan 44, 11352 Stockholm') + ')');
 });
 test('Morabergsvägen 25: koordinater som RUTT slagit upp själv (kartans gissning) används inte – adressen gäller', () => {
   const {Linking, navigate} = load();
   Linking.openURL.mockClear();
   navigate({adr: 'Morabergsvägen 25', zip: '15242', area: 'Södertälje', lat: 59.2, lng: 17.6, geo: true});
-  expect(Linking.openURL.mock.calls[0][0]).toBe('google.navigation:q=' + encodeURIComponent('Morabergsvägen 25, 15242 Södertälje'));
+  expect(Linking.openURL.mock.calls[0][0]).toBe('geo:0,0?q=' + encodeURIComponent('Morabergsvägen 25, 15242 Södertälje'));
   navigate({adr: 'klockelundsvägen', zip: '12363', area: 'Farsta', lat: 59.24, lng: 18.1, geo: true, geoApprox: 'postnr'});
-  expect(Linking.openURL.mock.calls[1][0]).toBe('google.navigation:q=' + encodeURIComponent('klockelundsvägen, 12363 Farsta'));
+  expect(Linking.openURL.mock.calls[1][0]).toBe('geo:0,0?q=' + encodeURIComponent('klockelundsvägen, 12363 Farsta'));
   navigate({adr: 'Distribution', lat: 59.3, lng: 18.2, opterLL: true});
-  expect(Linking.openURL.mock.calls[2][0]).toBe('google.navigation:q=59.3,18.2');
+  expect(Linking.openURL.mock.calls[2][0]).toBe('geo:0,0?q=59.3,18.2(Distribution)');
 });
 
 test('Paradistorget 4 (28 okt): koordinater utan Opter-märkning används aldrig – Opter skickade texten, RUTT gick till nr 2', () => {
@@ -30,7 +30,7 @@ test('Paradistorget 4 (28 okt): koordinater utan Opter-märkning används aldrig
   Linking.openURL.mockClear();
   // Kartans träff för "Paradistorget 4" var gatan (mitten = nr 2). Oavsett var koordinaterna kom ifrån: inte från Opter → texten.
   navigate({who: 'Sjödalsgymnasiet', adr: 'Paradistorget 4', zip: '14147', area: 'Huddinge', lat: 59.2343342, lng: 17.9808972});
-  expect(Linking.openURL.mock.calls[0][0]).toBe('google.navigation:q=' + encodeURIComponent('Paradistorget 4, 14147 Huddinge'));
+  expect(Linking.openURL.mock.calls[0][0]).toBe('geo:0,0?q=' + encodeURIComponent('Paradistorget 4, 14147 Huddinge'));
 });
 test('protocol: opterLL bara när Opters adress har koordinater (≠ 0), som Opters "0"-koll', () => {
   const P = require('../src/opter/protocol.js');
@@ -41,4 +41,13 @@ test('protocol: opterLL bara när Opters adress har koordinater (≠ 0), som Opt
   const s = P.toRutt({rows}).stops;
   expect(s.find(x => x.pickup && !x.drop).opterLL).toBe(true);
   expect(s.find(x => x.drop).opterLL).toBe(false);
+});
+
+test('Herrestavägen 24 (30 okt): som Opter – Opters punkt med adresstexten som namn, inte bara siffror (blev nr 20)', () => {
+  const {Linking, navigate} = load();
+  Linking.openURL.mockClear();
+  navigate({who: 'Flügger färg', adr: 'Herrestavägen 24', zip: '17738', area: 'Järfälla', lat: 59.4241, lng: 17.8642, opterLL: true});
+  const u = Linking.openURL.mock.calls[0][0];
+  expect(u).toBe('geo:0,0?q=59.4241,17.8642(' + encodeURIComponent('Herrestavägen 24, 17738 Järfälla') + ')');
+  expect(u).not.toContain('google.navigation');
 });

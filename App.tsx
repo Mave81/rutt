@@ -54,7 +54,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '29 okt · 3.61 · kompaktare plan och reglage, tunna linjer, Lastad högt upp i ordern';
+const BUILD = '30 okt · 3.62 · GPS som Opter: Opters punkt + adresstexten i kartan (Herrestavägen 24 blev 20)';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 

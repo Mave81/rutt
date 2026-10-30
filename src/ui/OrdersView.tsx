@@ -42,10 +42,13 @@ export function navigate(st: any, app: NavApp | 'map' = NAV) {
   const ll = geo ? `${st.lat},${st.lng}` : '';
   // Adresstexten exakt som Opters Address.toStringForGoogleMaps(): "Gata Nr, Postnr Ort".
   const q = encodeURIComponent([st.adr, [st.zip, st.area].filter(Boolean).join(' ')].filter(Boolean).join(', '));
-  const web = `https://www.google.com/maps/dir/?api=1&destination=${geo ? ll : q}`;
+  // 30 okt (Herrestavägen 24 blev 20): Opter skickar ALDRIG bara siffrorna till navigeringen. Opter öppnar kartan med
+  // "lat,lng(Gata Nr, Postnr Ort)" – punkten från Opter och adresstexten som namn – så Maps visar rätt hus med
+  // Vägbeskr./Starta. RUTT skickade google.navigation:q=lat,lng och då gissade Google ett eget husnummer.
+  const opterQ = geo ? `${ll}(${q})` : q;
+  const web = `https://www.google.com/maps/search/?api=1&query=${geo ? ll : q}`;
   if (app === 'waze') { Linking.openURL(geo ? `https://waze.com/ul?ll=${ll}&navigate=yes` : `https://waze.com/ul?q=${q}&navigate=yes`).catch(() => Linking.openURL(web).catch(() => {})); return; }
-  if (app === 'map') { Linking.openURL(geo ? `geo:${ll}?q=${ll}(${encodeURIComponent(st.who || 'Stopp')})` : `geo:0,0?q=${q}`).catch(() => Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${geo ? ll : q}`).catch(() => {})); return; }
-  Linking.openURL(`google.navigation:q=${geo ? ll : q}`).catch(() => Linking.openURL(web).catch(() => {}));
+  Linking.openURL(`geo:0,0?q=${opterQ}`).catch(() => Linking.openURL(web).catch(() => {}));
 }
 export const dial = (num: string) => Linking.openURL(`tel:${num}`).catch(() => {});
 // Bara mobilnummer kan ta emot SMS (07x / +467x / 00467x).
