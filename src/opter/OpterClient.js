@@ -112,6 +112,16 @@ export default class OpterClient {
       if (this.resId) {
         const sw = await this._rawSend(P.MessageType.Synchronize, P.encodeStartWork({offId: this.logon.acdOffId, resId: this.resId, vhcId: this.logon.vhcId}));
         this._take(P.decodeSync(sw.payload));
+        // 3.65: ny inloggning + StartWork gör dig "i tjänst" hos Opter. Hade du rast, lunch eller avslutat dagen skickas
+        // det läget igen direkt, så kontoret inte ser dig som i tjänst. (Opter Driver återupptar sessionen i stället –
+        // VerifyLogon, typ 4 – men den kan inte provas härifrån; det här ger samma läge hos kontoret.)
+        if (this.workRst) {
+          try {
+            const ws = await this._rawSend(P.MessageType.Synchronize, P.encodeWorkStatus({offId: this.logon.acdOffId, rstType: this.workRst, resId: this.resId, vhcId: this.logon.vhcId}));
+            this._take(P.decodeSync(ws.payload));
+            this._log({kind: 'arbetstid igen efter återinloggning', rst: this.workRst});
+          } catch (e) {}
+        }
       }
     })();
     try { await this._relogin; } finally { this._relogin = null; }
@@ -190,6 +200,8 @@ export default class OpterClient {
     const payload = P.encodeWorkStatus({offId: this.logon.acdOffId, rstType, resId: this.resId, vhcId: this.logon.vhcId});
     const res = await this.send(P.MessageType.Synchronize, payload);
     this._take(P.decodeSync(res.payload));
+    // Kom ihåg läget: rast (5), lunch (3), avslutad (2) – återställs efter en återinloggning. Slut på rast/lunch (6/4) = i tjänst.
+    this.workRst = rstType === 5 || rstType === 3 || rstType === 2 ? rstType : 0;
     return true;
   }
 
@@ -385,7 +397,7 @@ export default class OpterClient {
   // sen kollas mot servern att ordern inte längre ligger hos dig.
   async giveAway(live, to) {
     if (!this.logon) throw new Error('inte inloggad');
-    const vhcOffId = this.logon.vhcId ? this.logon.acdOffId : 0;
+    const vhcOffId = this.logon.acdOffId || 0; // som Opter (Resources.java): inloggade bilens kontor även när bil-id är 0
     const payload = P.encodeGiveAway({offId: live.key.offId, shiId: live.shiId, toOffId: to.offId || this.logon.acdOffId, toResId: to.resId, vhcOffId});
     const entry = {kind: 'skicka vidare', shiId: live.shiId, to: to.resId};
     let answer = '';
@@ -410,7 +422,7 @@ export default class OpterClient {
   }
   positionInterval() {
     const v = P.settingInt(this.lastDecoded, 'PositionUpdateInterval', 60);
-    return isFinite(v) && v >= 5 ? v : 60;
+    return isFinite(v) ? Math.max(5, v) : 60; // som Opter (CommunicationService): under 5 s blir 5 s
   }
 
   // Felsökning: färsk full synk, allt utom förarlista/loggar, som JSON-vänligt objekt.

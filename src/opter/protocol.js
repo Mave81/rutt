@@ -156,7 +156,7 @@ function readTableHeader(b, pos) {
   const table = Table[b[i]] || ('Table' + b[i]);
   const headerLen = b[i + 1];
   const row = { table, key: { identityId: i32(b, i + 2), offId: i32(b, i + 6), xxxId: i32(b, i + 10) }, columns: {}, raw: {},
-    // extra/bekräftad-byten i huvudet – skickas tillbaka oförändrade vid uppdatering
+    // extra/bekräftad-byten i huvudet – läses bara. Opter Driver skickar alltid 0/0 (3.65, rättat: ekades förut)
     hdr: { extra: headerLen > 12 ? b[i + 14] : 0, conf: headerLen > 13 ? b[i + 15] : 0 }, parent: null };
   pos.i += headerLen + 2;
   return row;
@@ -266,7 +266,7 @@ function encodeShipmentStatus({ live, statusId, pod }) {
   const k = live.key;
   wB(w, DT.StartTable); wB(w, TableOrd.Shipment); wB(w, 14);
   wI32(w, k.identityId || 0); wI32(w, k.offId || 0); wI32(w, k.xxxId || 0);
-  wB(w, (live.hdr && live.hdr.extra) || 0); wB(w, (live.hdr && live.hdr.conf) || 0);
+  wB(w, 0); wB(w, 0);                                     // extra/conf: alltid 0 som Opter Driver (SyncBase.serializeV2StartTable), ekas inte
   wInt(w, 11, statusId);                                  // SHI_SHS_Id
   if (pod) { const ext = String(live.externalId || ''); wB(w, DT.String); wB(w, 56); const b = Buffer.from(ext, CHARSET); wI16(w, b.length); if (b.length) w.push(b); }
   wNewRow(w, 'ShipmentStatusLog', 0);
@@ -357,7 +357,7 @@ function encodeShipmentEdit({ live, statusId, pod, addServices, damages, changes
   const k = live.key;
   wB(w, DT.StartTable); wB(w, TableOrd.Shipment); wB(w, 14);
   wI32(w, k.identityId || 0); wI32(w, k.offId || 0); wI32(w, k.xxxId || 0);
-  wB(w, (live.hdr && live.hdr.extra) || 0); wB(w, (live.hdr && live.hdr.conf) || 0);
+  wB(w, 0); wB(w, 0);                                     // extra/conf: alltid 0 som Opter Driver (SyncBase.serializeV2StartTable), ekas inte
   if (statusId) wInt(w, 11, statusId);                                   // SHI_SHS_Id
   if (pod) wStrAlways(w, 56, live.externalId || '');                    // SHI_ExternalId (följer med en kvittens)
   if (revokedConfirmed) wBool(w, 67, true);                              // SAS_RevokedConfirmed – kvittera återkallad (Opter: ServerProxy.setRevokedConfirmed)
@@ -388,20 +388,6 @@ function encodeShipmentEdit({ live, statusId, pod, addServices, damages, changes
     wInt(w, 2, statusId);
     wDate(w, 4, new Date());
     wEndTable(w, 'ShipmentStatusLog');
-  }
-  // Svar på frågor: frågeraden (befintlig, egen nyckel) med ett nytt ShipmentAnswer under – som Opter (QueryList.addShipmentAnswer).
-  for (const a of answers || []) {
-    const qk = a.key || {}, qh = a.hdr || {};
-    wB(w, DT.StartTable); wB(w, TableOrd.ShipmentQuery); wB(w, 14);
-    wI32(w, qk.identityId || 0); wI32(w, qk.offId || 0); wI32(w, qk.xxxId || 0); wB(w, qh.extra || 0); wB(w, qh.conf || 0);
-    wNewRow(w, 'ShipmentAnswer', qk.offId || 0);
-    wInt(w, 1, live.shiId);                                              // SHR_SHI_Id
-    wInt(w, 2, qk.xxxId);                                                // SHR_SHQ_Id
-    if (a.text != null && a.text !== '') wStr(w, 5, String(a.text));     // SHR_StringAnswer
-    if (a.bool != null) wBool(w, 6, !!a.bool);                           // SHR_BooleanAnswer
-    if (a.lat != null && a.lng != null) { wDecExact(w, 7, Number(a.lat).toFixed(6)); wDecExact(w, 8, Number(a.lng).toFixed(6)); }
-    wEndTable(w, 'ShipmentAnswer');
-    wEndTable(w, 'ShipmentQuery');
   }
   if (changes && changes.length) {
     wNewRow(w, 'ShipmentChange', 0);
@@ -434,6 +420,20 @@ function encodeShipmentEdit({ live, statusId, pod, addServices, damages, changes
     if (pod.lat != null) wDec(w, 12, pod.lat);
     if (pod.image) wBytes(w, 15, pod.image);
     wEndTable(w, 'ShipmentPod');
+  }
+  // Svar på frågor (efter kvittensen, före bilagorna – samma ordning som Opter Driver, Shipment.java): frågeraden (befintlig, egen nyckel) med ett nytt ShipmentAnswer under – som Opter (QueryList.addShipmentAnswer).
+  for (const a of answers || []) {
+    const qk = a.key || {};
+    wB(w, DT.StartTable); wB(w, TableOrd.ShipmentQuery); wB(w, 14);
+    wI32(w, qk.identityId || 0); wI32(w, qk.offId || 0); wI32(w, qk.xxxId || 0); wB(w, 0); wB(w, 0);
+    wNewRow(w, 'ShipmentAnswer', qk.offId || 0);
+    wInt(w, 1, live.shiId);                                              // SHR_SHI_Id
+    wInt(w, 2, qk.xxxId);                                                // SHR_SHQ_Id
+    if (a.text != null && a.text !== '') wStr(w, 5, String(a.text));     // SHR_StringAnswer
+    if (a.bool != null) wBool(w, 6, !!a.bool);                           // SHR_BooleanAnswer
+    if (a.lat != null && a.lng != null) { wDecExact(w, 7, Number(a.lat).toFixed(6)); wDecExact(w, 8, Number(a.lng).toFixed(6)); }
+    wEndTable(w, 'ShipmentAnswer');
+    wEndTable(w, 'ShipmentQuery');
   }
   for (const im of images || []) {
     wNewRow(w, 'Attachment', 0);
@@ -468,7 +468,7 @@ function changesSeen(cols, changes) {
 }
 const CHANGE_FIELDS = [
   // [CET-namn, typ, standard när kontoret inte satt några SHI-behörigheter, fältnamn i ordern, svensk etikett]
-  ['SHI_Packages', 'int', 'z', 'packages', 'Kolli'],
+  ['SHI_Packages', 'dec', 'z', 'packages', 'Kolli'],  // decimal som Opter Driver (ChangesList)
   ['SHI_Weight', 'dec', 'z', 'weight', 'Vikt (kg)'],
   ['SHI_Volume', 'dec', 'z', 'volume', 'Volym'],
   ['SHI_LoadMeter', 'dec', 'z', 'loadMeter', 'Flakmeter'],

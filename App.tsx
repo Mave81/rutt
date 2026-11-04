@@ -195,6 +195,8 @@ function AppInner(): React.JSX.Element {
   const [work, setWork] = useState<'igång' | 'rast' | 'lunch' | 'slut'>('igång');
   const [workSince, setWorkSince] = useState<number>(0); // när rasten/lunchen började
   const [nowTick, setNowTick] = useState(Date.now());
+  // Klienten vet läget, så en återinloggning (tappat nät) kan ställa tillbaka rast/lunch/avslutad hos Opter.
+  useEffect(() => { (client as any).workRst = work === 'rast' ? 5 : work === 'lunch' ? 3 : work === 'slut' ? 2 : 0; }, [work]);
   useEffect(() => { loadJSON('rutt.work.v1', null).then((v: any) => { if (v && v.day === new Date().toDateString() && v.state) { setWork(v.state); setWorkSince(v.since || 0); } }); }, []);
   useEffect(() => { if (work === 'igång') return; const t = setInterval(() => setNowTick(Date.now()), work === 'slut' ? 15000 : 1000); return () => clearInterval(t); }, [work]);
   const [workSheet, setWorkSheet] = useState(false);
@@ -705,6 +707,8 @@ function AppInner(): React.JSX.Element {
         setNewState(s => { const n = {...s}; delete n[o.cid]; return n; });
         if (r.rutt && r.rutt.stops) setOrders(r.rutt);
         flash(which === 'accept' ? `Accepterad · ${(o.pick && o.pick.who) || ''}` : 'Nekad', null);
+        // Som Opter Driver (ServerProxy.java 333–343): nekad order → meddelande till kontoret "<status>. Order number: <nr>".
+        if (which === 'reject') { const no = (o.drop && o.drop.orderNo) || (o.pick && o.pick.orderNo) || o.cid; toOffice(`${target.name || 'Nekad'}. Order number: ${no}`); }
         if (which === 'accept') setTab('plan');
       } else setNewState(s => ({...s, [o.cid]: 'failed'}));
     } catch (e) { setNewState(s => ({...s, [o.cid]: 'failed'})); }
@@ -1194,6 +1198,14 @@ function AppInner(): React.JSX.Element {
   async function markOpterRead() {
     const toRead = msgs.filter(m => m.received && !m.confirmed).map(m => m.key);
     if (toRead.length) { try { await client.markRead(toRead); setMsgs(client.messages()); } catch (e) {} }
+  }
+  // Meddelande till kontoret från appen själv (Neka, Fråga kontoret) – samma väg som chatten, syns under Jobbet.
+  function toOffice(text: string) {
+    if (demo || !client.logon || !text) return false;
+    const item = {id: Date.now() + Math.random(), text, created: new Date(), received: false, state: 'sending', local: true};
+    setPending(p => [...p, item]);
+    deliver(item);
+    return true;
   }
   // Skicka: visas direkt som "Skickar…", blir "Skickat" eller "Ej skickat – tryck igen".
   const [pending, setPending] = useState<any[]>([]);
