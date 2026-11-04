@@ -54,7 +54,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '4 nov · 3.64 · olika husnummer = olika stopp, namnet i samma helskärm, kvittera återkallad som Opter';
+const BUILD = '4 nov · 3.65 · texten i ordern frågar om extra hämtställe, varför-rader i planen, fråga kontoret, som Opter';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -1626,13 +1626,13 @@ function AppInner(): React.JSX.Element {
               ))}
             </View>
           )}
-          {tab === 'plan' && planDay === 'imorgon' && later.length > 0 && <PlanDay route={laterRoute} cargo={fullSrc ? fullSrc.cargo : {}} onReorder={saveManualLater} starts={STARTS} startId={startId} onStart={pickStart}
+          {tab === 'plan' && planDay === 'imorgon' && later.length > 0 && <PlanDay route={laterRoute} cargo={fullSrc ? fullSrc.cargo : {}} onReorder={saveManualLater} onAsk={toOffice} starts={STARTS} startId={startId} onStart={pickStart}
             onOpen={(x: any) => setPlanOpen({key: Date.now(), cid: String(x.pickup || x.drop), kind: x.pickup ? 'pickup' : 'drop'})} />}
           {/* Imorgon: tryck på en order → samma blad som idag (hela körningen, texten, navigera, ring, Mer) */}
           {tab === 'plan' && planDay === 'imorgon' && laterRoute && !(laterRoute as any).error ? (
             <OrdersView sheetOnly openReq={planOpen} route={laterRoute} cargo={fullSrc ? fullSrc.cargo : {}} ost={ost} allStops={later} onLoaded={onLoaded} onUnload={openSign}
               onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live}
-              perm={demo ? null : orders.perm} me={driverName} onAddNum={addJobNum} timOf={timOf} onSetTim={setTim} onSetTimes={setTimes} sedelOf={(cid: string) => sedelInfo[cid] || null} onTextAsk={textAsk} onAddExtra={addExtra} />
+              perm={demo ? null : orders.perm} me={driverName} onAddNum={addJobNum} timOf={timOf} onSetTim={setTim} onSetTimes={setTimes} sedelOf={(cid: string) => sedelInfo[cid] || null} onTextAsk={textAsk} onAddExtra={addExtra} onAsk={toOffice} />
           ) : null}
           {tab === 'plan' && <RevokedBar list={revLog} onConfirm={confirmRevoked} onOpen={() => { setTab('klart'); setKlartView('aterkallade'); }} />}
           {tab === 'plan' && (planDay === 'idag' || !later.length) && !orders.stops.length && !demo && (
@@ -1644,7 +1644,7 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && (planDay === 'idag' || !later.length) && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={openSign} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} me={driverName} onAddNum={addJobNum} onScan={() => { setScanPages(null); setScan(null); }} timOf={timOf} onSetTim={setTim} onSetTimes={setTimes} sedelOf={(cid: string) => sedelInfo[cid] || null} onTextAsk={textAsk} onAddExtra={addExtra} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={openSign} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} me={driverName} onAddNum={addJobNum} onScan={() => { setScanPages(null); setScan(null); }} timOf={timOf} onSetTim={setTim} onSetTimes={setTimes} sedelOf={(cid: string) => sedelInfo[cid] || null} onTextAsk={textAsk} onAddExtra={addExtra} onAsk={toOffice} />
           )}
           {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} laterRoute={laterRoute} />}
           {tab === 'chat' && <JobbetView j={jobbet} onMakeJob={(m: any) => setSedelFor({media: m})} live={live} opterUnread={unread} opterLast={chatList[chatList.length - 1]} onOpenOpter={markOpterRead}

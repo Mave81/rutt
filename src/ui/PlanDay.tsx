@@ -15,7 +15,8 @@ const TRAVEL = require('../opter/travel');
 const SHADES = ['#FF9117', '#FFC27A', '#B85F00', '#FFE0B8', '#7A3F00', '#E87A00', '#FFAA45', '#4F2900'];
 const INK = ['#000', '#000', '#FFF', '#000', '#FFF', '#000', '#000', '#FFF'];
 
-export default function PlanDay({route, cargo, onReorder, starts = [], startId, onStart, onOpen}: {route: any; cargo: any; onReorder: (keys: string[] | null) => void; starts?: {id: string; label: string}[]; startId?: string; onStart?: (id: string) => void; onOpen?: (s: any) => void}) {
+export default function PlanDay({route, cargo, onReorder, starts = [], startId, onStart, onOpen, onAsk}: {route: any; cargo: any; onReorder: (keys: string[] | null) => void; starts?: {id: string; label: string}[]; startId?: string; onStart?: (id: string) => void; onOpen?: (s: any) => void; onAsk?: (text: string) => boolean}) {
+  const [asked, setAsked] = useState<Record<string, boolean>>({});
   const bottom = useSafeAreaInsets().bottom + 30;
   const [open, setOpen] = useState(false);
   const order: any[] = (route && route.order) || [];
@@ -46,6 +47,17 @@ export default function PlanDay({route, cargo, onReorder, starts = [], startId, 
     });
     return out;
   }, [route]);
+  // 3.65: varför stoppet ligger här – kort, bara det som styrde.
+  const why = (g: {s: any; r: any}[]) => {
+    const s = g[0].s, r = g[0].r || {}, out: string[] = [];
+    if (r.same) out.push('samma ställe som förra');
+    if (s.deadline) out.push(r.late ? `${r.late} min sen mot senast ${s.deadline}` : `måste vara där senast ${s.deadline}`);
+    if (s.open && r.early) out.push(`öppnar ${s.open}${r.early ? ` – väntar ${Math.min(r.early, 999)} min` : ''}`);
+    else if (s.open) out.push(`öppnar ${s.open}`);
+    if (s.after && s.after.length) out.push('efter extra hämtningen');
+    if (!r.same && r.leg && r.leg.min != null && !r.nogeo) out.push(`${Math.max(1, Math.round(r.leg.min))} min dit${r.leg.est ? ' (uppskattat)' : ''}`);
+    return out.join(' · ');
+  };
   if (!route || !order.length) return <View style={p.empty}><Bi n="calendar-event" size={30} color={C.faint} /><Text style={p.emptyT}>Inga order för imorgon än.</Text></View>;
   const date = route.day ? new Date(route.day + 'T12:00').toLocaleDateString('sv-SE', {weekday: 'long', day: 'numeric', month: 'long'}) : '';
   const num = (cid: string) => info.cids.indexOf(cid);
@@ -73,6 +85,9 @@ export default function PlanDay({route, cargo, onReorder, starts = [], startId, 
             <View key={'tp' + (x.s.pickup || x.s.drop)} style={p.tp}>
               <Bi n="alarm-fill" size={14} color={C.onAccent} />
               <Text style={p.tpT}>Tidspassning {x.s.who || ''}{x.s.tidspass.time ? ` kl ${x.s.tidspass.time}` : ' – tiden står inte i ordern, kolla med kontoret'}{x.s.tidspass.time && x.r && x.r.eta ? ` · du är där ca ${hhmm(new Date(x.r.eta))}` : ''}</Text>
+              {!x.s.tidspass.time && onAsk ? (() => { const id = String(x.s.pickup || x.s.drop); return asked[id]
+                ? <Text style={[p.tpT, {flex: 0}]}>Frågat</Text>
+                : <Pressable hitSlop={8} style={p.ask} onPress={() => { if (onAsk(`Vilken tid gäller tidspassningen för ${x.s.who || ''}${x.s.orderNo ? ` (order ${x.s.orderNo})` : ''}?`)) setAsked(m => ({...m, [id]: true})); }}><Text style={p.askT}>Fråga kontoret</Text></Pressable>; })() : null}
             </View>
           ))}
           {info.approxL.length ? <Text style={p.sumS}>Ungefärlig plats på kartan (körtiden blir ungefärlig, navigeringen går till adressen): {info.approxL.map((x: any) => `${x.who || x.adr} – ${x.geoApprox === 'gata' ? 'husnumret saknas, gatan används' : x.geoApprox === 'postnr' ? 'gatan saknas, postnumret används' : 'bara orten hittades'}`).join('; ')}</Text> : null}
@@ -101,6 +116,7 @@ export default function PlanDay({route, cargo, onReorder, starts = [], startId, 
                   <Text style={p.who} numberOfLines={1}>{s.who || s.adr || '—'}</Text>
                   {g.some(x => x.s.tidspass) ? <Text style={p.tpS} numberOfLines={1}>TIDSPASSNING{s.tidspass && s.tidspass.time ? ` kl ${s.tidspass.time}` : ' – tid saknas'}</Text> : null}
                   <Text style={p.sub} numberOfLines={1}>{sub}</Text>
+                  {why(g) ? <Text style={p.why} numberOfLines={2}>{why(g)}</Text> : null}
                 </View>
                 <Text style={[p.tm, late ? {color: C.bad} : null]}>{r && r.eta ? `ca ${hhmm(new Date(r.eta))}` : ''}</Text>
                 {onOpen && !many ? <Bi n="chevron-right" size={13} color={C.faint} /> : null}
@@ -161,5 +177,8 @@ const p = themed(() => StyleSheet.create({
   tp: {flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.accent, borderRadius: 8, paddingVertical: 7, paddingHorizontal: 10, marginTop: 5},
   tpT: {color: C.onAccent, fontSize: 13, fontWeight: '800', flex: 1},
   tpS: {color: C.accentInk, fontSize: 11.5, fontWeight: '900', letterSpacing: 0.4, marginTop: 1},
+  why: {color: C.faint, fontSize: 11.5, marginTop: 2},
+  ask: {backgroundColor: C.panel, borderRadius: 8, paddingVertical: 5, paddingHorizontal: 9},
+  askT: {color: C.ink, fontSize: 12.5, fontWeight: '900'},
   note: {color: C.faint, fontSize: 12, marginTop: 10, paddingHorizontal: 2},
 }));

@@ -228,7 +228,7 @@ function ClockField({label, value, onSet, placeholder = '--:--'}: {label: string
   );
 }
 
-export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell, me = '', onAddNum, onScan, timOf, onSetTim, onSetTimes, sedelOf, sheetOnly = false, openReq = null, onTextAsk, onAddExtra}: {
+export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell, me = '', onAddNum, onScan, timOf, onSetTim, onSetTimes, sedelOf, sheetOnly = false, openReq = null, onTextAsk, onAddExtra, onAsk}: {
   route: any; cargo: any; ost: Record<string, any>; allStops: any[];
   onLoaded: (st: any, more?: any[]) => void; onUnload: (st: any, more?: any[]) => void;
   onEdit: (cid: string, st: any) => void;
@@ -244,6 +244,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   onSetTimes?: (sts: any[], t: {start?: number | null; end?: number | null}) => void;
   sedelOf?: (cid: string) => any;
   onTextAsk?: (cid: string, place: string, v: 'nej' | 'lagt') => void; // 3.65: svar på "texten nämner X"
+  onAsk?: (text: string) => boolean; // 3.65: fråga kontoret i chatten
   onAddExtra?: (cid: string, st: any, x: {name: string; adr: string; area: string; goods: string}) => void;
   sheetOnly?: boolean; // bara bladen (används av Imorgon-planen: tryck på en order → samma blad som idag)
   openReq?: {key: number; cid: string; kind: 'pickup' | 'drop'} | null;
@@ -258,6 +259,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   const [selMode, setSelMode] = useState(false);
   const [openRow, setOpenRow] = useState<JRow | null>(null);
   const [bigText, setBigText] = useState<string | null>(null);
+  const [asked, setAsked] = useState<Record<string, boolean>>({});
   const [extra, setExtra] = useState<{cid: string; st: any; name: string; adr: string; area: string; goods: string} | null>(null);
   const [shop, setShop] = useState<JRow[] | null>(null);
   const [addNum, setAddNum] = useState<{cid: string; label: string; num: string} | null>(null);
@@ -331,6 +333,15 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     return {asks, two: !asks.length && TC.twoPlaces(t) && !done['två ställen'], house: TC.houseMismatch(t, r.st) || (other ? TC.houseMismatch(t, other) : null)};
   };
   const syncBad = (r: Row) => { const sy = (ost[r.cid] || {}).sync || {}; const v = r.kind === 'pickup' ? sy.load : sy.unload; return v === 'failed' || v === 'unconfirmed'; };
+  // 3.65: Opters egen status mot RUTT:s. RUTT säger Lastad/Lossad men Opter står kvar på ett tidigare steg (mer än 3 min) → säg till.
+  const opterBehind = (r: Row) => {
+    const lv = r.st.live; if (!lv || !Array.isArray(lv.statuses) || !lv.statuses.length) return null;
+    const os = ost[r.cid] || {}, at = r.kind === 'pickup' ? os.loadedAt : os.doneAt;
+    if (!at || Date.now() - at < 180000) return null;
+    const need = lv.statuses.filter((x: any) => (r.kind === 'pickup' ? x.pickup : x.delivery || x.completed) && !x.rejected).map((x: any) => x.order);
+    if (!need.length || (lv.curOrder || 0) >= Math.min(...need)) return null;
+    return {cur: lv.cur || 'inget steg', what: r.kind === 'pickup' ? 'Lastad' : 'Lossad', at};
+  };
   const nextPl = places.find(pl => pl.rows.some(r => r.state === 'act')) || null;
   // Rubriken på ett stopp: företaget när alla order gäller samma, annars gatan (t.ex. Birger Jarlsgatan 18 med fyra mottagare).
   const titleOf = (pl: JPlace) => { const whos = [...new Set(pl.rows.map(r => String(r.st.who || '')))]; return whos.length === 1 && whos[0] ? whos[0] : pl.st.adr || placeName(pl.st); };
@@ -628,6 +639,17 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         <Text style={o.rsTitle}>{st.who || placeName(st)}</Text>
         <Text style={o.rsAdr}>{[st.adr, [st.zip, st.area].filter(Boolean).join(' ')].filter(Boolean).join(', ')}</Text>
         {st.tidspass ? <View style={o.tpBox}><Bi n="alarm-fill" size={15} color="#000000" /><Text style={o.tpBoxT}>{st.tidspass.time ? `Tidspassning kl ${st.tidspass.time}` : 'Tidspassning – tiden står inte i ordern'}</Text></View> : null}
+        {(() => { const b = opterBehind(r); return b ? (
+          <Pressable style={o.tWarn} onPress={() => onRetry(r.cid)}>
+            <Bi n="exclamation-triangle-fill" size={15} color={C.warn} />
+            <View style={{flex: 1}}>
+              <Text style={o.tWarnT}>Opter står på ”{b.cur}” – RUTT har {b.what} kl {hhmm(new Date(b.at))}</Text>
+              <Text style={o.tWarnS}>Tryck för att skicka till Opter igen</Text>
+            </View>
+          </Pressable>) : null; })()}
+        {st.tidspass && !st.tidspass.time && onAsk ? (asked[String(r.cid)]
+          ? <Text style={[o.tWarnS, {marginTop: 6}]}>Frågat kontoret om tiden – svaret kommer i chatten</Text>
+          : <Pressable style={[o.bigBtn, {backgroundColor: C.panel2, height: 42, marginTop: 6}]} onPress={() => { if (onAsk(`Vilken tid gäller tidspassningen för ${st.who || ''}${st.orderNo ? ` (order ${st.orderNo})` : ''}?`)) setAsked(m => ({...m, [String(r.cid)]: true})); }}><Text style={[o.bigBtnT, {fontSize: 15}]}>Fråga kontoret om tiden</Text></Pressable>) : null}
         {st.code ? <View style={o.codeRow}><Bi n="key-fill" size={15} color={C.accentInk} /><Text style={o.codeV}>{st.code}</Text><Text style={o.codeL}>PORTKOD</Text></View> : null}
         <View style={o.rsBtns}>
           <Pressable style={o.sqBtn} onPress={() => navigate(st)} onLongPress={() => { close(); setNavFor(st); }}><Bi n="cursor-fill" size={18} color={C.ink} /></Pressable>
