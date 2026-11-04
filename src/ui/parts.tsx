@@ -135,30 +135,58 @@ export function SigPreview({data, height = 120}: {data: SigData; height?: number
 }
 
 // Helskärm: ge telefonen till kunden – hela skärmen är papper, inget scrollar eller flyttar sig.
-export function SignFullscreen({open, who, onCancel, onDone}: {open: boolean; who?: string; onCancel: () => void; onDone: (d: SigData) => void}) {
+// 3.61: namnet frågas i SAMMA helskärm efter Klar (förut ett eget blad ovanpå – på Android visades det inte alltid
+// när helskärmen stängdes samtidigt, och då gick det inte att komma vidare, t.ex. vid BDX-signering).
+export function SignFullscreen({open, who, onCancel, onDone, askName}: {open: boolean; who?: string; onCancel: () => void; onDone: (d: SigData, name?: string) => void; askName?: {suggestions: string[]; required?: boolean} | null}) {
   const insets = useSafeAreaInsets();
   const [d, setD] = useState<SigData | null>(null);
   const [key, setKey] = useState(0);
-  useEffect(() => { if (open) { setD(null); setKey(k => k + 1); } }, [open]);
+  const [step, setStep] = useState<'sign' | 'name'>('sign');
+  const [nm, setNm] = useState('');
+  useEffect(() => { if (open) { setD(null); setKey(k => k + 1); setStep('sign'); setNm(''); } }, [open]);
+  const {lift} = useKeyboardLift();
   const h = Math.round(Dimensions.get('window').height - insets.top - insets.bottom - 170);
+  const nameOk = nm.trim().length >= 2;
   return (
     <Modal visible={open} animationType="fade" onRequestClose={onCancel} statusBarTranslucent>
-      <View style={[p.fsRoot, {paddingTop: insets.top + 8, paddingBottom: insets.bottom + 12}]}>
+      <View style={[p.fsRoot, {paddingTop: insets.top + 8, paddingBottom: (step === 'name' && lift ? lift : insets.bottom) + 12}]}>
         <View style={p.fsHead}>
-          <Pressable hitSlop={10} onPress={onCancel} style={p.fsX} accessibilityLabel="Avbryt"><Text style={p.fsXT}>✕</Text></Pressable>
+          <Pressable hitSlop={10} onPress={step === 'name' ? () => setStep('sign') : onCancel} style={p.fsX} accessibilityLabel={step === 'name' ? 'Tillbaka' : 'Avbryt'}><Text style={p.fsXT}>{step === 'name' ? '‹' : '✕'}</Text></Pressable>
           <View style={{flex: 1, minWidth: 0}}>
-            <Text style={p.fsTitle} numberOfLines={1}>Signera</Text>
-            {who ? <Text style={p.fsSub} numberOfLines={1}>{who}</Text> : null}
+            <Text style={p.fsTitle} numberOfLines={1}>{step === 'name' ? 'Vem skrev under?' : 'Signera'}</Text>
+            <Text style={p.fsSub} numberOfLines={1}>{step === 'name' ? (askName && askName.required ? 'Namnförtydligande · KRÄVS av kontoret' : 'Namnförtydligande, skickas med kvittensen') : who || ''}</Text>
           </View>
         </View>
-        <View style={{flex: 1, marginTop: 10}}>
-          <SignaturePad key={key} height={Math.max(300, h)} onChange={setD} hint="Skriv under här" paper />
-          <View pointerEvents="none" style={p.lockChip}><Text style={p.lockT}>🔒 Skärmen står still</Text></View>
-        </View>
-        <View style={p.fsBtns}>
-          <Pressable style={p.fsCancel} onPress={() => { setD(null); setKey(k => k + 1); }}><Text style={p.fsCancelTxt}>Rensa</Text></Pressable>
-          <Pressable style={[p.fsDone, !d && p.fsDoneOff]} disabled={!d} onPress={() => d && onDone(d)}><Text style={[p.fsDoneTxt, !d && {color: C.faint}]}>Klar</Text></Pressable>
-        </View>
+        {step === 'sign' ? (
+          <>
+            <View style={{flex: 1, marginTop: 10}}>
+              <SignaturePad key={key} height={Math.max(300, h)} onChange={setD} hint="Skriv under här" paper />
+              <View pointerEvents="none" style={p.lockChip}><Text style={p.lockT}>🔒 Skärmen står still</Text></View>
+            </View>
+            <View style={p.fsBtns}>
+              <Pressable style={p.fsCancel} onPress={() => { setD(null); setKey(k => k + 1); }}><Text style={p.fsCancelTxt}>Rensa</Text></Pressable>
+              <Pressable testID="sig-klar" style={[p.fsDone, !d && p.fsDoneOff]} disabled={!d} onPress={() => { if (!d) return; if (askName) setStep('name'); else onDone(d); }}><Text style={[p.fsDoneTxt, !d && {color: C.faint}]}>Klar</Text></Pressable>
+            </View>
+          </>
+        ) : (
+          <ScrollView style={{flex: 1}} contentContainerStyle={{paddingTop: 12}} keyboardShouldPersistTaps="handled">
+            {d ? <SigPreview data={d} height={110} /> : null}
+            {askName && askName.suggestions.length ? <>
+              <Text style={p.naK}>TIDIGARE HÄR</Text>
+              <View style={p.naRow}>
+                {askName.suggestions.slice(0, 6).map(n => (
+                  <Pressable key={n} style={p.naChip} onPress={() => d && onDone(d, n)}><Text style={p.naChipT}>{n}</Text></Pressable>
+                ))}
+              </View>
+            </> : null}
+            <Text style={p.naK}>{askName && askName.suggestions.length ? 'ELLER SKRIV' : 'SKRIV NAMNET'}</Text>
+            <TextInput style={p.naIn} value={nm} onChangeText={setNm} placeholder="Mottagarens namn" placeholderTextColor={C.faint} autoFocus={!(askName && askName.suggestions.length)} autoCapitalize="words" autoCorrect={false} returnKeyType="done" onSubmitEditing={() => d && nameOk && onDone(d, nm.trim())} />
+            <View style={p.naBtns}>
+              {!(askName && askName.required) ? <Pressable style={p.naSkip} onPress={() => d && onDone(d)}><Text style={p.naSkipT}>Hoppa över</Text></Pressable> : null}
+              <Pressable testID="namn-spara" style={[p.naSave, !nameOk && p.fsDoneOff]} disabled={!nameOk} onPress={() => d && onDone(d, nm.trim())}><Text style={[p.naSaveT, !nameOk && {color: C.faint}]}>Spara namn</Text></Pressable>
+            </View>
+          </ScrollView>
+        )}
       </View>
     </Modal>
   );

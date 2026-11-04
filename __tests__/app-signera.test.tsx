@@ -53,7 +53,7 @@ const pressLast = async (r: any, label: RegExp) => {
 const tick = async (ms = 50) => { for (let i = 0; i < 6; i++) await ReactTestRenderer.act(async () => { await Promise.resolve(); jest.advanceTimersByTime(ms); }); };
 
 const {setLook} = require('../src/ui/look');
-const {NameAsk, SignFullscreen} = require('../src/ui/parts');
+const {SignFullscreen} = require('../src/ui/parts');
 const Slider = require('../src/ui/Slider').default;
 
 test('Signera i helskärm, sen namnet i eget blad med förslag', async () => {
@@ -68,14 +68,22 @@ test('Signera i helskärm, sen namnet i eget blad med förslag', async () => {
   const pick = ov.props.route.order.find((s: any) => String(s.pickup) === '234100');
   await ReactTestRenderer.act(async () => { ov.props.onLoaded(pick); });
   expect(texts(r)).toContain('Tryck – kunden signerar');
+  // Kunden trycker på rutan → helskärm. Skriver → Klar → namnet i SAMMA helskärm (inget nytt blad ovanpå).
+  await press(r, /Tryck – kunden signerar/);
   const fs = r.root.findByType(SignFullscreen);
-  expect(r.root.findByType(NameAsk).props.open).toBe(false);
-  await ReactTestRenderer.act(async () => { fs.props.onDone({strokes: [[{x: 1, y: 1}, {x: 20, y: 20}]], w: 300, h: 300}); });
-  const na = r.root.findByType(NameAsk);
-  expect(na.props.open).toBe(true);
+  expect(fs.props.open).toBe(true);
+  expect(fs.props.askName).toBeTruthy();
+  const pad = fs.findByType(require('../src/ui/parts').SignaturePad);
+  await ReactTestRenderer.act(async () => { pad.props.onChange({strokes: [[{x: 1, y: 1}, {x: 20, y: 20}]], w: 300, h: 300}); });
+  const klar = fs.find((n: any) => n.props && n.props.testID === 'sig-klar');
+  await ReactTestRenderer.act(async () => { klar.props.onPress(); });
   expect(texts(r)).toContain('Vem skrev under?');
-  await ReactTestRenderer.act(async () => { na.props.onSave('Anna Berg'); });
-  expect(r.root.findByType(NameAsk).props.open).toBe(false);
+  const nameIn = fs.findAllByType(require('react-native').TextInput).find((x: any) => x.props.placeholder === 'Mottagarens namn');
+  await ReactTestRenderer.act(async () => { nameIn.props.onChangeText('Anna Berg'); });
+  const spara = fs.find((n: any) => n.props && n.props.testID === 'namn-spara');
+  await ReactTestRenderer.act(async () => { spara.props.onPress(); });
+  expect(r.root.findByType(SignFullscreen).props.open).toBe(false);
   expect(r.root.findAllByType(require('react-native').TextInput).some((x: any) => x.props.value === 'Anna Berg')).toBe(true);
+  expect(texts(r)).not.toMatch(/Saknas: signatur/);
   jest.useRealTimers();
 });

@@ -103,8 +103,18 @@ function uniqNotes(list: any[], goods: string) {
 }
 // Samma ställe: inom ~60 m när båda har koordinater, annars samma gatuadress + ort.
 const normAdr = (s: any) => `${String(s.adr || '').toLowerCase().replace(/\s+/g, '')}|${String(s.zip || s.area || '').toLowerCase().replace(/\s+/g, '')}`;
+// Gata + husnummer: "Källängsvägen 10" → {street: 'kallangsvagen', no: '10'}. "1 B" och "1B" är samma.
+const houseOf = (adr: any) => {
+  const m = String(adr || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/^\s*([^\d,]+?)\s*(\d+)\s*([a-z])?\b/);
+  return m ? {street: m[1].replace(/[^a-z]/g, ''), no: m[2] + (m[3] || '')} : null;
+};
 export function samePlace(a: any, b: any) {
-  if (a.lat != null && b.lat != null && a.lng != null && b.lng != null) {
+  // 3.61: samma gata men olika husnummer är ALDRIG samma stopp (One Nordic på Källängsvägen 10 hamnade under nr 5:
+  // husen ligger under 60 m isär, och en ungefärlig kartträff landar mitt på gatan).
+  const ha = houseOf(a.adr), hb = houseOf(b.adr);
+  if (ha && hb && ha.street === hb.street && ha.no !== hb.no) return false;
+  // Koordinater räknas bara när båda är exakta (Opters egna eller exakt kartträff), aldrig ungefärliga.
+  if (a.lat != null && b.lat != null && a.lng != null && b.lng != null && !a.geoApprox && !b.geoApprox) {
     const dx = (a.lng - b.lng) * 111320 * Math.cos((a.lat * Math.PI) / 180), dy = (a.lat - b.lat) * 110540;
     if (Math.hypot(dx, dy) < 60) return true;
   }

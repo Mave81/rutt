@@ -8,7 +8,7 @@ import React, {useEffect, useMemo, useState} from 'react';
 import {Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, themed, R} from './theme';
-import {MAX_PHOTOS, NameAsk, SigData, SigPreview, SignFullscreen, pickPhoto, useKeyboardLift} from './parts';
+import {MAX_PHOTOS, SigData, SigPreview, SignFullscreen, pickPhoto, useKeyboardLift} from './parts';
 import {Bi} from './Bi';
 import TidInput, {fmtMin} from './TidInput';
 import StatusExtras, {Extras, ExtrasValue} from './StatusExtras';
@@ -23,7 +23,6 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
   const [mode, setMode] = useState<'sig' | 'namn' | 'foto'>('sig');
   const [fs, setFs] = useState(false); // helskärm för kunden
   const [, setFsSig] = useState(false); // signaturen kom från helskärm
-  const [askName, setAskName] = useState(false); // namnet efteråt (3.57)
   const [name, setName] = useState('');
   const [photos, setPhotos] = useState<any[]>([]);
   const [extOpen, setExtOpen] = useState(false);
@@ -384,8 +383,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
           </Pressable>
         </View>
       </View>
-      <SignFullscreen open={fs} who={stop.who} onCancel={() => setFs(false)} onDone={d => { setSig(d); setFsSig(true); setFs(false); if (name.trim().length < 2) setAskName(true); }} />
-      <NameAsk open={askName} suggestions={suggestions} required={!!req.name} onSkip={() => setAskName(false)} onSave={n => { setName(n); setAskName(false); }} />
+      <SignFullscreen open={fs} who={stop.who} askName={name.trim().length < 2 ? {suggestions, required: !!req.name} : null} onCancel={() => setFs(false)} onDone={(d, n) => { setSig(d); setFsSig(true); setFs(false); if (n) setName(n); }} />
     </Modal>
   );
 }
