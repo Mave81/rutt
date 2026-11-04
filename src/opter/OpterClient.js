@@ -360,20 +360,24 @@ export default class OpterClient {
     return {confirmed: (sent || confirmed) && ok2, sent, imageDropped, changesSeen: chSeen, error: err ? String(err.message || err) : null, rutt: P.toRutt(this.lastDecoded)};
   }
 
-  // Kvittera en återkallad order – exakt som Opter: bara SAS_RevokedConfirmed = sant (fält 67), sen synk.
-  // Bekräftat när servern visar den som kvitterad, eller när ordern försvunnit ur din lista.
+  // Kvittera en återkallad order – exakt som Opter (ServerProxy.setRevokedConfirmed): bara SAS_RevokedConfirmed = sant (fält 67),
+  // vanlig synk. 3.61: radhuvudets extra/conf-byten skickas som 0/0 som Opter Driver gör (förut ekade RUTT serverns).
+  // Bekräftat BARA när en hel, felfri synk efteråt visar fält 67 = sant, eller ordern fanns före och är borta i samma felfria synk.
+  // (Förut räknades "ordern syns inte" som klart, även när synken misslyckats – då såg det kvitterat ut fast Opter aldrig fått det.)
   async confirmRevoked(live) {
     if (!this.logon) throw new Error('inte inloggad');
-    let sent = false, err = null;
+    const before = (this.lastDecoded && this.lastDecoded.rows || []).some(x => x.table === 'Shipment' && x.key.xxxId === live.shiId);
+    let sent = false, err = null, clean = false;
     try {
-      const res = await this.send(P.MessageType.Synchronize, P.encodeShipmentEdit({live, revokedConfirmed: true}), {once: true});
+      const res = await this.send(P.MessageType.Synchronize, P.encodeShipmentEdit({live: {...live, hdr: {extra: 0, conf: 0}}, revokedConfirmed: true}), {once: true});
       if (res.type === P.MessageType.Corrupt) throw new Error('Opter kunde inte läsa kvittensen');
       this._take(P.decodeSync(res.payload)); sent = true;
     } catch (e) { err = e; try { await this.relogin(); } catch (e2) {} }
-    try { await this._fullSync(); } catch (e) {}
-    const r = (this.lastDecoded && this.lastDecoded.rows || []).find(x => x.table === 'Shipment' && x.key.xxxId === live.shiId);
-    const confirmed = !r || !!r.columns.revokedConfirmed;
-    this._log({kind: 'kvittera återkallad', shiId: live.shiId, sent, confirmed, err: err ? String(err.message || err) : null});
+    let after = null;
+    try { after = await this._fullSync(); clean = !!(this.lastDecoded && !this.lastDecoded.error); } catch (e) { clean = false; }
+    const r = clean ? (this.lastDecoded.rows || []).find(x => x.table === 'Shipment' && x.key.xxxId === live.shiId) : null;
+    const confirmed = sent && clean && (r ? !!r.columns.revokedConfirmed : before);
+    this._log({kind: 'kvittera återkallad', shiId: live.shiId, sent, clean, before, still: !!r, flag: r ? !!r.columns.revokedConfirmed : null, confirmed, err: err ? String(err.message || err) : null});
     return {confirmed, sent, rutt: P.toRutt(this.lastDecoded)};
   }
 

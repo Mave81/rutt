@@ -54,7 +54,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '30 okt · 3.63 · notisen om nytt uppdrag försvinner när du svarat (här eller i Opter)';
+const BUILD = '4 nov · 3.64 · olika husnummer = olika stopp, namnet i samma helskärm, kvittera återkallad som Opter';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -1023,7 +1023,9 @@ function AppInner(): React.JSX.Element {
     const d = drop || pick || {}, p0 = pick || {};
     const m = [...msgs].reverse().find((x: any) => x.received && x.shiId && L.shiId && x.shiId === L.shiId);
     return {cid, orderNo: d.orderNo || null, who: d.who || '', adr: [d.adr, d.area].filter(Boolean).join(', '), from: pick ? p0.who || '' : '', fromAdr: pick ? [p0.adr, p0.area].filter(Boolean).join(', ') : '',
-      inCar: !!(o.loadedAt || (pick && serverLoaded(pick))), open: !L.revokedConfirmed && !o.revokedAckAt, msg: m ? m.text : null};
+      inCar: !!(o.loadedAt || (pick && serverLoaded(pick))), open: !L.revokedConfirmed && !o.revokedAckAt, msg: m ? m.text : null,
+      // 3.61: orderns nyckel sparas, så kvittensen kan skickas även om ordern försvunnit ur listan
+      lv: L.key ? {key: L.key, shiId: L.shiId, externalId: L.externalId || ''} : null};
   }), [cidsAll, cls, ost, msgs]);
   useEffect(() => {
     if (!revLoaded.current || demo) return;
@@ -1031,7 +1033,7 @@ function AppInner(): React.JSX.Element {
       let changed = false; const now = Date.now(); const fresh: any[] = [];
       const next = log.map(e => {
         const cur = revokedNow.find(x => x.cid === e.cid); if (!cur) return e;
-        const upd = {...e, open: cur.open && !e.confirmedAt, inCar: e.inCar || cur.inCar, msg: cur.msg || e.msg, confirmedAt: e.confirmedAt || (!cur.open ? now : null)};
+        const upd = {...e, open: cur.open && !e.confirmedAt, inCar: e.inCar || cur.inCar, msg: cur.msg || e.msg, lv: cur.lv || (e as any).lv || null, confirmedAt: e.confirmedAt || (!cur.open ? now : null)};
         if (JSON.stringify(upd) !== JSON.stringify(e)) changed = true; return upd;
       });
       for (const x of revokedNow) if (!next.some(e => e.cid === x.cid)) { next.push({...x, at: now, confirmedAt: x.open ? null : now}); fresh.push(x); changed = true; }
@@ -1049,15 +1051,20 @@ function AppInner(): React.JSX.Element {
   }, [revokedNow, demo]);
   async function confirmRevoked(cid: string) {
     const {pick, drop} = fullSrc ? legs(cid) : ({} as any);
-    const L = (pick && pick.live) || (drop && drop.live);
+    const ent: any = revLog.find(e => e.cid === cid) || {};
+    const L = (pick && pick.live) || (drop && drop.live) || ent.lv;
     const mark = (patch: any) => setRevLog(log => { const n = log.map(e => (e.cid === cid ? {...e, ...patch} : e)); saveJSON(REVOKED_KEY, n); return n; });
     const done = () => { setOst(o => ({...o, [cid]: {...(o[cid] || {}), revokedAckAt: Date.now()}})); mark({open: false, confirmedAt: Date.now(), sending: false, failed: false}); };
-    if (!live || !L) { done(); flash('Kvitterad (inte skickad – ej inloggad)', null); return; }
+    // 3.61: aldrig "kvitterad" utan att Opter fått det. Förut markerades den klar lokalt när ordern inte fanns kvar i listan.
+    if (demo) { done(); flash('Kvitterad (demo)', null); return; }
+    if (!live || !client) { mark({failed: true, sending: false}); flash('Inte skickad – logga in mot Opter och tryck Kvittera igen', null); return; }
+    if (!L || !L.key) { mark({failed: true, sending: false}); flash('Hittar inte ordern hos Opter – kvittera i Opter-appen', null); dlog('kvittera återkallad: nyckel saknas ' + cid); return; }
     mark({sending: true, failed: false});
     try {
       const r = await withTimeout<any>(client.confirmRevoked(L) as Promise<any>, 30000, 'Opter');
-      if (r.confirmed) { done(); if (r.rutt && r.rutt.stops) setOrders(r.rutt); flash('Återkallad order kvitterad i Opter', null); }
-      else { mark({sending: false, failed: true}); flash('Opter tog inte emot kvittensen – försök igen', null); }
+      dlog('kvittera återkallad ' + cid + ': ' + JSON.stringify({sent: r.sent, confirmed: r.confirmed}));
+      if (r.confirmed) { done(); if (r.rutt && r.rutt.stops) setOrders(r.rutt); flash('Återkallad order kvitterad – Opter visar den som kvitterad', null); }
+      else { mark({sending: false, failed: true}); flash(r.sent ? 'Skickad, men Opter visar den inte som kvitterad än – tryck igen' : 'Opter tog inte emot kvittensen – försök igen', null); }
     } catch (e: any) { mark({sending: false, failed: true}); flash('Kunde inte nå Opter – försök igen', null); }
   }
   // ---- Nytt uppdrag → notis på låsskärmen (som Opter). En gång per order; inte i demo. ----

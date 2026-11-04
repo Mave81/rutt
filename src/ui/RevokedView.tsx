@@ -14,6 +14,7 @@ export const REVOKED_KEY = 'rutt.revoked.v1';
 export type RevEntry = {
   cid: string; orderNo: string | null; who: string; adr: string; from: string; fromAdr: string;
   at: number; inCar: boolean; open: boolean; confirmedAt: number | null; sending?: boolean; failed?: boolean; msg?: string | null;
+  lv?: {key: any; shiId: number; externalId?: string} | null;
 };
 
 export function RevokedBar({list, onConfirm, onOpen}: {list: RevEntry[]; onConfirm: (cid: string) => void; onOpen: () => void}) {
