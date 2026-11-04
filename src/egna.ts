@@ -16,6 +16,8 @@ export type Egen = {
   sent?: {load?: number; unload?: number};
   loadedAt?: number | null; doneAt?: number | null; // sparas på jobbet (inte per dag) så ett lossat jobb inte kommer tillbaka nästa dag
   // Bevego-tur: stoppet hör till en Opter-order (t.ex. 234014 "Distribution"). Hämtningen är Opter-orderns, Lossad på sista stoppet = Lossad i Opter.
+  // 3.65: extra hämtställe ur ordertexten – hör till en Opter-order. Bara hämtningen syns; lämningen är Opter-orderns egen.
+  extraOf?: string | null;
   parent?: string | null; kolli?: {no: string; type: string; mark: string; order: string; kg: number}[]; tour?: string;
 };
 export const EGNA_KEY = 'rutt.egna.v1';

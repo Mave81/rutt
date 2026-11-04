@@ -25,7 +25,7 @@ import DagbokView from './src/ui/DagbokView';
 import PlanDay from './src/ui/PlanDay';
 import MediaViewer from './src/ui/MediaViewer';
 import SedelSheet from './src/ui/SedelSheet';
-import {Egen, EGNA_KEY, isEgen, toStops, cargoOf, statusSms, opterSms} from './src/egna';
+import {Egen, EGNA_KEY, isEgen, toStops, cargoOf, statusSms, opterSms, fromParsed} from './src/egna';
 import * as SND from './src/sounds';
 import RevokedView, {RevokedBar, RevEntry, REVOKED_KEY} from './src/ui/RevokedView';
 import ChatView, {stripEmoji} from './src/ui/ChatView';
@@ -363,10 +363,21 @@ function AppInner(): React.JSX.Element {
         return {...x, kids: k.map((e: Egen) => ({who: e.drop.name, adr: e.drop.adr, zip: e.drop.zip, area: e.drop.area, contact: e.drop.contact, tel: e.drop.tel ? [{label: e.drop.contact || e.drop.name, num: e.drop.tel}] : [], orderNo: e.orderNo, qtyTxt: e.goods[0] || ''}))};
       })};
     }
+    // 3.65: extra hämtställe → Opter-orderns lämning väntar tills det är hämtat (smart ordning lägger hämtningen först).
+    const exBy: Record<string, string[]> = {};
+    for (const e of vis) if (e.extraOf && !e.doneAt && !e.loadedAt) (exBy[String(e.extraOf)] = exBy[String(e.extraOf)] || []).push(e.id);
+    if (base0 && Object.keys(exBy).length) base0 = {...base0, stops: base0.stops.map((x: any) => (x.drop && exBy[String(x.drop)] ? {...x, after: exBy[String(x.drop)]} : x))};
     const pOf = (cid: string) => (baseSrc && baseSrc.stops.find((y: any) => String(y.pickup) === cid)) || null;
-    const st = vis.flatMap(e => toStops(e).map((x: any) => { if (!e.parent) return x; const pp = pOf(e.parent); return {...x, parentNo: pp ? pp.orderNo || e.parent : e.parent, timjobb: isTimjobb(pp)}; })); const cg: any = {}; for (const e of vis) cg[e.id] = cargoOf(e);
+    const st = vis.flatMap(e => toStops(e).filter((x: any) => !(e.extraOf && x.drop)).map((x: any) => { if (!e.parent) return x; const pp = pOf(e.parent); return {...x, parentNo: pp ? pp.orderNo || e.parent : e.parent, timjobb: isTimjobb(pp)}; })); const cg: any = {}; for (const e of vis) cg[e.id] = cargoOf(e);
     return withNums(base0 ? {...base0, stops: [...base0.stops, ...st], cargo: {...base0.cargo, ...cg}} : {stops: st, cargo: cg, perm: null, opts: null});
   }, [baseSrc, egna, jobNums]);
+  // 3.65: extra hämtställe är klart när Opter-ordern det hör till är lossad.
+  useEffect(() => {
+    const left = egna.filter(e => e.extraOf && !e.doneAt && (ost[String(e.extraOf)] || {}).doneAt);
+    if (!left.length) return;
+    const ids = new Set(left.map(e => e.id));
+    saveEgna(l => l.map(e => (ids.has(e.id) ? {...e, doneAt: (ost[String(e.extraOf)] || {}).doneAt, loadedAt: e.loadedAt || (ost[String(e.extraOf)] || {}).doneAt} : e)));
+  }, [egna, ost]);
   // ---- Var hör varje order hemma? Opters regler (live.tab) + dina tryck i RUTT ----
   const cidsAll: string[] = useMemo(() => (fullSrc ? [...new Set(fullSrc.stops.map((s: any) => String(s.pickup || s.drop)))] as string[] : []), [fullSrc]);
   const legs = (cid: string) => ({pick: fullSrc.stops.find((s: any) => String(s.pickup) === cid), drop: fullSrc.stops.find((s: any) => String(s.drop) === cid)});
@@ -1220,6 +1231,24 @@ function AppInner(): React.JSX.Element {
     if (toRead.length) { try { await client.markRead(toRead); setMsgs(client.messages()); } catch (e) {} }
   }
   // Meddelande till kontoret från appen själv (Neka, Fråga kontoret) – samma väg som chatten, syns under Jobbet.
+  // 3.65: texten i ordern nämner en annan ort – Kentas svar sparas så RUTT inte frågar igen.
+  function textAsk(cid: string, place: string, v: 'nej' | 'lagt') {
+    setOst(x => ({...x, [cid]: {...(x[cid] || {}), textAsk: {...(((x[cid] || {}).textAsk) || {}), [place]: v}}}));
+  }
+  // Extra hämtställe ur ordertexten: ett eget stopp i planen till samma lämning. Går aldrig till Opter –
+  // Lastat i Opter görs fortfarande på orderns hämtning.
+  function addExtra(cid: string, st: any, x: {name: string; adr: string; area: string; goods: string}) {
+    const all: any[] = (src && src.stops) || [];
+    const drop = all.find(s => s.drop === cid) || (st && st.drop === cid ? st : null) || {};
+    const e = fromParsed({kind: 'extra-hamt', title: 'Extra hämtning', from: 'ORDERTEXT', ref: st.orderNo || '', orderNo: '',
+      pick: {name: x.name, adr: x.adr, area: x.area},
+      drop: {name: drop.who || '', adr: drop.adr || '', zip: drop.zip || '', area: drop.area || '', tel: (drop.tel || [])[0] || '', contact: drop.contact || ''},
+      goods: x.goods ? [x.goods] : [], note: `Hör till order ${st.orderNo || cid}. Står i ordertexten – lastas också.`}, null, null, DB.ymdOf());
+    e.sms = false; e.pal = 0; e.extraOf = cid; // pallarna räknas redan på Opter-ordern
+    saveEgna(l => [...l, e]);
+    textAsk(cid, x.area, 'lagt');
+    flash(`${x.name || x.area} ligger nu i planen`, null);
+  }
   function toOffice(text: string) {
     if (demo || !client.logon || !text) return false;
     const item = {id: Date.now() + Math.random(), text, created: new Date(), received: false, state: 'sending', local: true};
@@ -1603,7 +1632,7 @@ function AppInner(): React.JSX.Element {
           {tab === 'plan' && planDay === 'imorgon' && laterRoute && !(laterRoute as any).error ? (
             <OrdersView sheetOnly openReq={planOpen} route={laterRoute} cargo={fullSrc ? fullSrc.cargo : {}} ost={ost} allStops={later} onLoaded={onLoaded} onUnload={openSign}
               onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live}
-              perm={demo ? null : orders.perm} me={driverName} onAddNum={addJobNum} timOf={timOf} onSetTim={setTim} onSetTimes={setTimes} sedelOf={(cid: string) => sedelInfo[cid] || null} />
+              perm={demo ? null : orders.perm} me={driverName} onAddNum={addJobNum} timOf={timOf} onSetTim={setTim} onSetTimes={setTimes} sedelOf={(cid: string) => sedelInfo[cid] || null} onTextAsk={textAsk} onAddExtra={addExtra} />
           ) : null}
           {tab === 'plan' && <RevokedBar list={revLog} onConfirm={confirmRevoked} onOpen={() => { setTab('klart'); setKlartView('aterkallade'); }} />}
           {tab === 'plan' && (planDay === 'idag' || !later.length) && !orders.stops.length && !demo && (
@@ -1615,7 +1644,7 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && (planDay === 'idag' || !later.length) && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={openSign} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} me={driverName} onAddNum={addJobNum} onScan={() => { setScanPages(null); setScan(null); }} timOf={timOf} onSetTim={setTim} onSetTimes={setTimes} sedelOf={(cid: string) => sedelInfo[cid] || null} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={openSign} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} me={driverName} onAddNum={addJobNum} onScan={() => { setScanPages(null); setScan(null); }} timOf={timOf} onSetTim={setTim} onSetTimes={setTimes} sedelOf={(cid: string) => sedelInfo[cid] || null} onTextAsk={textAsk} onAddExtra={addExtra} />
           )}
           {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} laterRoute={laterRoute} />}
           {tab === 'chat' && <JobbetView j={jobbet} onMakeJob={(m: any) => setSedelFor({media: m})} live={live} opterUnread={unread} opterLast={chatList[chatList.length - 1]} onOpenOpter={markOpterRead}

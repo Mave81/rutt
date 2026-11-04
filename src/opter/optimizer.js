@@ -227,13 +227,17 @@ function simulateLoad(order, onboardIds, cargo, wantSteps) {
   return {at, peak: peak || [...slots], over, blocks, blockPal, steps};
 }
 
+// 3.65: ett lämningsstopp kan också vänta på andra hämtningar (extra hämtställe ur ordertexten: s.after = [cid]).
+const afterOk = (s, seen, pend) => !s.after || !s.after.length || s.after.every(c => (seen && seen.has(String(c))) || !pend(String(c)));
 function okOrder(order, onboard) {
   let seen = null, pal = 0;
   for (const cid of onboard) if (CARGO[cid]) pal += CARGO[cid].pal || 0;
+  const inOrd = new Set(order.filter(x => x.pickup).map(x => String(x.pickup)));
   for (let i = 0; i < order.length; i++) {
     const s = order[i];
     if (s.drop && !onboard.has(s.drop) && !(seen && seen.has(s.drop))) return false;
-    if (s.pickup) { if (!seen) seen = new Set(); seen.add(s.pickup); pal += (CARGO[s.pickup] && CARGO[s.pickup].pal) || 0; if (pal > CAP_SLOTS) return false; }
+    if (s.drop && !afterOk(s, seen, c => inOrd.has(c))) return false;
+    if (s.pickup) { if (!seen) seen = new Set(); seen.add(s.pickup); seen.add(String(s.pickup)); pal += (CARGO[s.pickup] && CARGO[s.pickup].pal) || 0; if (pal > CAP_SLOTS) return false; }
     if (s.drop) pal -= (CARGO[s.drop] && CARGO[s.drop].pal) || 0;
   }
   return true;
@@ -244,7 +248,8 @@ function rng(seed) { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s >>>
 function seedDeadline(list, ctx) {
   const act = [...list].sort((a, b) => (ctx.dl.get(a) ?? 1e9) - (ctx.dl.get(b) ?? 1e9));
   const seen = new Set(ctx.onboard), out = [], q = [...act];
-  while (q.length) { let i = q.findIndex(s => !s.drop || seen.has(s.drop)); if (i === -1) i = 0; const s = q.splice(i, 1)[0]; if (s.pickup) seen.add(s.pickup); out.push(s); }
+  const pend = c => q.some(x => x.pickup && String(x.pickup) === c);
+  while (q.length) { let i = q.findIndex(s => !s.drop || (seen.has(s.drop) && afterOk(s, seen, pend))); if (i === -1) i = 0; const s = q.splice(i, 1)[0]; if (s.pickup) { seen.add(s.pickup); seen.add(String(s.pickup)); } out.push(s); }
   return out;
 }
 function seedGreedy(list, ctx, urgency) {
@@ -256,6 +261,7 @@ function seedGreedy(list, ctx, urgency) {
     for (let i = 0; i < left.length; i++) {
       const s = left[i];
       if (s.drop && !seen.has(s.drop)) continue;
+      if (s.drop && !afterOk(s, seen, c => left.some(x => x.pickup && String(x.pickup) === c))) continue;
       if (s.pickup && pal + ((CARGO[s.pickup] && CARGO[s.pickup].pal) || 0) > CAP_SLOTS) continue;
       const d = driveInfo(pos, s).min;
       let v = d; const dl = ctx.dl.get(s);
@@ -267,7 +273,7 @@ function seedGreedy(list, ctx, urgency) {
     const s = left.splice(bi, 1)[0];
     t += driveInfo(pos, s).min; pos = s;
     t += servOf(s, out[out.length - 1]);
-    if (s.pickup) { seen.add(s.pickup); pal += (CARGO[s.pickup] && CARGO[s.pickup].pal) || 0; }
+    if (s.pickup) { seen.add(s.pickup); seen.add(String(s.pickup)); pal += (CARGO[s.pickup] && CARGO[s.pickup].pal) || 0; }
     if (s.drop) pal -= (CARGO[s.drop] && CARGO[s.drop].pal) || 0;
     out.push(s);
   }
@@ -340,11 +346,11 @@ function fixedOrder(keys) {
   const order = list.filter(s => idx.has(stopKey(s))).sort((a, b) => idx.get(stopKey(a)) - idx.get(stopKey(b)));
   for (const s of [...order]) {
     if (!s.drop) continue;
-    const di = order.indexOf(s), pi = order.findIndex(x => x.pickup === s.drop);
+    const di = order.indexOf(s), pi = Math.max(order.findIndex(x => x.pickup === s.drop), ...(s.after || []).map(c => order.findIndex(x => x.pickup && String(x.pickup) === String(c))));
     if (pi > di) { order.splice(di, 1); order.splice(pi, 0, s); }
   }
   for (const s of list.filter(x => !idx.has(stopKey(x)))) {
-    const pi = s.drop ? order.findIndex(x => x.pickup === s.drop) : -1;
+    const pi = s.drop ? Math.max(order.findIndex(x => x.pickup === s.drop), ...(s.after || []).map(c => order.findIndex(x => x.pickup && String(x.pickup) === String(c)))) : -1;
     let bj = order.length, bv = Infinity;
     for (let j = pi + 1; j <= order.length; j++) {
       const cand = [...order.slice(0, j), s, ...order.slice(j)];

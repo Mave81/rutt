@@ -15,6 +15,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, themed, hhmm, prettyPhone, whenText, FONT, R} from './theme';
 import {Sheet, BigText} from './parts';
 import {useLook} from './look';
+const TC = require('../opter/textcheck');
 import {isEgen as isEgenCid} from '../egna';
 import {Bi, BiName} from './Bi';
 import Slider from './Slider';
@@ -227,7 +228,7 @@ function ClockField({label, value, onSet, placeholder = '--:--'}: {label: string
   );
 }
 
-export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell, me = '', onAddNum, onScan, timOf, onSetTim, onSetTimes, sedelOf, sheetOnly = false, openReq = null}: {
+export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell, me = '', onAddNum, onScan, timOf, onSetTim, onSetTimes, sedelOf, sheetOnly = false, openReq = null, onTextAsk, onAddExtra}: {
   route: any; cargo: any; ost: Record<string, any>; allStops: any[];
   onLoaded: (st: any, more?: any[]) => void; onUnload: (st: any, more?: any[]) => void;
   onEdit: (cid: string, st: any) => void;
@@ -242,6 +243,8 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   onSetTim?: (sts: any[], on: boolean) => void;
   onSetTimes?: (sts: any[], t: {start?: number | null; end?: number | null}) => void;
   sedelOf?: (cid: string) => any;
+  onTextAsk?: (cid: string, place: string, v: 'nej' | 'lagt') => void; // 3.65: svar på "texten nämner X"
+  onAddExtra?: (cid: string, st: any, x: {name: string; adr: string; area: string; goods: string}) => void;
   sheetOnly?: boolean; // bara bladen (används av Imorgon-planen: tryck på en order → samma blad som idag)
   openReq?: {key: number; cid: string; kind: 'pickup' | 'drop'} | null;
 }) {
@@ -255,6 +258,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   const [selMode, setSelMode] = useState(false);
   const [openRow, setOpenRow] = useState<JRow | null>(null);
   const [bigText, setBigText] = useState<string | null>(null);
+  const [extra, setExtra] = useState<{cid: string; st: any; name: string; adr: string; area: string; goods: string} | null>(null);
   const [shop, setShop] = useState<JRow[] | null>(null);
   const [addNum, setAddNum] = useState<{cid: string; label: string; num: string} | null>(null);
   const [planned, setPlanned] = useState<any>(null);
@@ -316,6 +320,15 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
     if (odd || !ord.length) return g;
     const shown = ord.slice(0, 3).map(t => `${m[t]} ${t}`), rest = ord.slice(3).reduce((n, t) => n + m[t], 0);
     return shown.join(' · ') + (rest ? ` · +${rest}` : '');
+  };
+  // 3.65: texten i ordern mot Opters fält – annan ort (fråga om extra hämtställe) och annat husnummer.
+  const textOf = (r: Row) => uniqNotes([r.st.adrMsg, r.st.info], goodsOf(r)).join('\n');
+  const textFlags = (r: Row) => {
+    const t = textOf(r); if (!t) return {asks: [] as any[], two: false, house: null as any};
+    const other = otherOf(r), pk = r.kind === 'pickup' ? r.st : other, dr = r.kind === 'pickup' ? other : r.st;
+    const done = ((ost[r.cid] || {}).textAsk) || {};
+    const asks = TC.placesIn(t, pk, dr).filter((x: any) => !done[x.place]);
+    return {asks, two: !asks.length && TC.twoPlaces(t) && !done['två ställen'], house: TC.houseMismatch(t, r.st) || (other ? TC.houseMismatch(t, other) : null)};
   };
   const syncBad = (r: Row) => { const sy = (ost[r.cid] || {}).sync || {}; const v = r.kind === 'pickup' ? sy.load : sy.unload; return v === 'failed' || v === 'unconfirmed'; };
   const nextPl = places.find(pl => pl.rows.some(r => r.state === 'act')) || null;
@@ -392,6 +405,17 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   const checkOrMark = (r: JRow) => (selMode && canAct(r) ? <View style={[o.jck, sel[k(r)] && o.jckOn]}>{sel[k(r)] ? <Bi n="check2" size={14} color="#000000" /> : null}</View> : null);
 
   // A: ett kort per stopp. Rubrik + gata + tid, sen varje order med sitt statusord.
+  // 3.65: en guldrad på kortet när texten i ordern säger något som Opters fält inte gör.
+  const flagLine = (pl: JPlace) => {
+    for (const r of pl.rows) {
+      if (r.state !== 'act') continue;
+      const f = textFlags(r);
+      if (f.house) return <Text style={o.tLine} numberOfLines={1}>Texten säger nr {f.house.textNo} – kolla adressen</Text>;
+      if (f.asks.length) return <Text style={o.tLine} numberOfLines={1}>Texten nämner {f.asks[0].place} – öppna och svara</Text>;
+      if (f.two) return <Text style={o.tLine} numberOfLines={1}>Texten säger två ställen – öppna och svara</Text>;
+    }
+    return null;
+  };
   const placeA = (pl: JPlace, i: number) => {
     const isNext = nextPl === pl, act = pl.rows.filter(r => r.state === 'act');
     const pick = hasP(pl) && !act.some(r => r.kind === 'drop');
@@ -406,6 +430,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
             {selMode && pl.rows.some(canAct) ? <Pressable hitSlop={10} onPress={() => togglePlace(pl)} style={o.allBtn}><Text style={o.allTxt}>Alla</Text></Pressable> : <Text style={o.cQty}>{qtyTxt(sumQty(act.length ? act : pl.rows))}</Text>}
           </View>
           <Text style={o.cMeta} numberOfLines={1}>{metaOf(pl)}{pl.eta ? <Text style={o.cEta}>  ·  ca {hhmm(pl.eta)}</Text> : null}{lateW(pl)}</Text>
+          {flagLine(pl)}
           {one ? (
             <Pressable style={o.cOne} onPress={() => (selMode ? toggle(one) : setOpenRow(one))} onLongPress={() => (selMode ? toggle(one) : startSel(one))} delayLongPress={350}>
               {checkOrMark(one)}
@@ -632,6 +657,39 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
             <Text style={o.fullV}>{notes.join('\n\n')}</Text>
           </Pressable>
         )}
+        {(() => {
+          const f = textFlags(r); const pk = pick ? st : other;
+          return (<>
+            {f.house ? (
+              <View style={o.tWarn}>
+                <Bi n="exclamation-triangle-fill" size={15} color={C.warn} />
+                <View style={{flex: 1}}>
+                  <Text style={o.tWarnT}>Texten säger {f.house.street} {f.house.textNo} – Opter säger nr {f.house.opterNo}</Text>
+                  <Text style={o.tWarnS}>Kolla med kontoret eller på plats innan du lossar.</Text>
+                </View>
+              </View>
+            ) : null}
+            {f.asks.map((x: any) => (
+              <View key={x.place} style={o.tAsk}>
+                <Text style={o.tAskT}>Texten nämner {x.place} – hämtas något där?</Text>
+                <Text style={o.tWarnS} numberOfLines={2}>”{x.hint}”</Text>
+                <View style={{flexDirection: 'row', gap: 8, marginTop: 8}}>
+                  {onAddExtra ? <Pressable style={[o.bigBtn, {backgroundColor: C.accent, height: 44}]} onPress={() => setExtra({cid: String(r.cid), st, name: '', adr: '', area: x.place, goods: ''})}><Text style={[o.bigBtnT, {color: '#000000', fontSize: 15.5}]}>Lägg till hämtställe</Text></Pressable> : null}
+                  {onTextAsk ? <Pressable style={[o.bigBtn, {backgroundColor: C.panel2, height: 44, flex: 0.6}]} onPress={() => onTextAsk(String(r.cid), x.place, 'nej')}><Text style={[o.bigBtnT, {fontSize: 15.5}]}>Nej</Text></Pressable> : null}
+                </View>
+              </View>
+            ))}
+            {f.two ? (
+              <View style={o.tAsk}>
+                <Text style={o.tAskT}>Texten säger två ställen – var är det andra?</Text>
+                <View style={{flexDirection: 'row', gap: 8, marginTop: 8}}>
+                  {onAddExtra ? <Pressable style={[o.bigBtn, {backgroundColor: C.accent, height: 44}]} onPress={() => setExtra({cid: String(r.cid), st, name: '', adr: '', area: (pk && pk.area) || '', goods: ''})}><Text style={[o.bigBtnT, {color: '#000000', fontSize: 15.5}]}>Lägg till hämtställe</Text></Pressable> : null}
+                  {onTextAsk ? <Pressable style={[o.bigBtn, {backgroundColor: C.panel2, height: 44, flex: 0.6}]} onPress={() => onTextAsk(String(r.cid), 'två ställen', 'nej')}><Text style={[o.bigBtnT, {fontSize: 15.5}]}>Nej</Text></Pressable> : null}
+                </View>
+              </View>
+            ) : null}
+          </>);
+        })()}
         {!st.own || st.parent ? timSeg([st], true) : null}
         <View style={o.kv}>
           {kv.map(([a, b, mono], i) => (
@@ -852,6 +910,20 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
 
       {rowSheet()}
       <BigText text={bigText} onClose={() => setBigText(null)} />
+      <Sheet open={!!extra} onClose={() => setExtra(null)} title="Extra hämtställe" sub={extra ? `Hör till order ${extra.st.orderNo || extra.cid} · blir ett stopp i planen, skickas inte till Opter` : ''}>
+        {extra ? (
+          <View style={{gap: 8, marginTop: 4}}>
+            <TextInput style={o.numIn} value={extra.name} onChangeText={t => setExtra({...extra, name: t})} placeholder="Företag (t.ex. Beijer Haninge)" placeholderTextColor={C.faint} />
+            <TextInput style={o.numIn} value={extra.adr} onChangeText={t => setExtra({...extra, adr: t})} placeholder="Gata och nummer (kan lämnas tom)" placeholderTextColor={C.faint} />
+            <TextInput style={o.numIn} value={extra.area} onChangeText={t => setExtra({...extra, area: t})} placeholder="Ort" placeholderTextColor={C.faint} />
+            <TextInput style={o.numIn} value={extra.goods} onChangeText={t => setExtra({...extra, goods: t})} placeholder="Gods (t.ex. 1 pall)" placeholderTextColor={C.faint} />
+            <Pressable style={[o.bigBtn, {backgroundColor: C.accent}, !(extra.area.trim() && (extra.name.trim() || extra.adr.trim())) && {opacity: 0.4}]} disabled={!(extra.area.trim() && (extra.name.trim() || extra.adr.trim()))}
+              onPress={() => { const x = extra; setExtra(null); onAddExtra && onAddExtra(x.cid, x.st, {name: x.name.trim(), adr: x.adr.trim(), area: x.area.trim(), goods: x.goods.trim()}); }}>
+              <Text style={[o.bigBtnT, {color: '#000000'}]}>Lägg in i planen</Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </Sheet>
       {shopView()}
       {placeSheetView()}
       <CallSheet st={callStop} onClose={() => setCallStop(null)} />
@@ -929,6 +1001,12 @@ const o = themed(() => StyleSheet.create({
   cISub: {color: C.dim, fontSize: 12.5, marginTop: 1},
   cIQ: {color: C.ink, fontFamily: FONT.cond, fontSize: 16, fontWeight: '700'},
   cIU: {color: C.dim, fontSize: 12.5, fontWeight: '600'},
+  tWarn: {flexDirection: 'row', gap: 10, alignItems: 'flex-start', backgroundColor: C.warnSoft, borderRadius: 10, padding: 12, marginTop: 10},
+  tWarnT: {color: C.ink, fontSize: 15, fontWeight: '700'},
+  tWarnS: {color: C.dim, fontSize: 13, marginTop: 2},
+  tAsk: {backgroundColor: C.warnSoft, borderRadius: 10, padding: 12, marginTop: 10},
+  tAskT: {color: C.ink, fontSize: 15.5, fontWeight: '800'},
+  tLine: {color: C.warn, fontSize: 13, fontWeight: '700', marginTop: 4, paddingLeft: 25},
   okW: {color: C.okText, fontFamily: FONT.cond, fontSize: 13.5, fontWeight: '700', letterSpacing: 0.6},
   nlW: {borderWidth: 1, borderColor: C.accent, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1},
   nlWT: {color: C.accentInk, fontFamily: FONT.cond, fontSize: 12, fontWeight: '700', letterSpacing: 0.6},
