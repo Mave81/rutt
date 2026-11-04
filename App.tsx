@@ -395,6 +395,13 @@ function AppInner(): React.JSX.Element {
     const st = {who: o.who || '', orderNo: cid, drop: cid, verb: 'Lämna', gone: true};
     return {cid, st, who: o.who || '', adr: '', area: '', orderNo: cid, doneAt: o.doneAt, pod: o.pod, edits: o.edits || [], sync: o.sync && o.sync.unload, byOpter: false, rejected: false, locked: true};
   })).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)), [cidsAll, cls, ost, demo]);
+  // 3.65: nekade och bortskickade idag syns i Klart (förut försvann de helt).
+  const declinedToday = useMemo(() => {
+    const day = new Date().toDateString();
+    return Object.keys(ost).map(cid => ({cid, o: ost[cid] || {}})).filter(({o}) => (o.rejectedAt && new Date(o.rejectedAt).toDateString() === day) || (o.givenAt && new Date(o.givenAt).toDateString() === day))
+      .map(({cid, o}) => ({cid, who: o.who || '', to: o.to || '', orderNo: o.orderNo || cid, at: o.rejectedAt || o.givenAt, kind: o.rejectedAt ? 'nekad' : 'skickad', givenTo: o.givenTo || ''}))
+      .sort((a, b) => b.at - a.at);
+  }, [ost]);
   // Dagens plan: "att göra"-ordrar. Steg som ska göras en senare dag läggs under "Senare dagar".
   const {src, later} = useMemo(() => {
     if (!fullSrc) return {src: null as any, later: [] as any[]};
@@ -638,7 +645,19 @@ function AppInner(): React.JSX.Element {
         } catch (e: any) { dlog('ändring före lossad fel ' + String(e?.message || e)); if (tidLabel) flash(`${tidLabel}: kunde inte nå Opter`, null); }
       }
       if (orders.opts && orders.opts.perm && orders.opts.perm.status === false) for (const mid of P.statusChain(L, L.unloadSt.id)) { try { await client.setStatus(L, mid.id, null); } catch (e) {} }
-      const r = await client.setStatus(L, L.unloadSt.id, podData); return (!podData && hadPod && r.confirmed) ? {...r, noPod: true} : r; });
+      const r = await client.setStatus(L, L.unloadSt.id, podData);
+      // 3.65: foto 2–6. Opter Driver lägger ett foto i kvittensen och resten som bilagor på ordern (Attachment, typ Bild).
+      // Förut kastades de. Nu skickas de direkt efter Lossad, samma väg som "Lägg till bild".
+      const more = ((pod && pod.photos) || []).slice(1).filter((ph: any) => ph && ph.b64);
+      if (r.confirmed && more.length) {
+        try {
+          const e: any = await client.editShipment(L, {images: more.map((ph: any) => ({orderId: st.orderNo || '', comment: '', bytes: Buffer.from(ph.b64, 'base64')}))});
+          const id = 'img' + Date.now();
+          setOst(o => { const cur = {...(o[st.drop] || {})}; cur.edits = [...(cur.edits || []), {id, label: `${more.length} foto till`, at: Date.now(), state: e && e.confirmed ? 'ok' : 'unconfirmed'}]; return {...o, [st.drop]: cur}; });
+          dlog('foto 2+ ' + st.drop + ' ' + more.length + ' ' + JSON.stringify(e && {ok: e.confirmed}));
+        } catch (e: any) { dlog('foto 2+ fel ' + String(e?.message || e)); }
+      }
+      return (!podData && hadPod && r.confirmed) ? {...r, noPod: true} : r; });
   }
   // Kvittensen som sparades vid lossningen (signatur + namn) skickas till Opter igen, utan ny signatur.
   // En order till Claude (från Klart eller planen): serverns rader för ordern + vad RUTT skickat + det RUTT har sparat.
@@ -697,7 +716,8 @@ function AppInner(): React.JSX.Element {
   async function setOrderStatus(o: any, which: 'accept' | 'reject') {
     const L = (o.pick && o.pick.live) || (o.drop && o.drop.live);
     const target = L && (which === 'accept' ? L.acceptSt : L.rejectSt);
-    const mark = () => setOst(x => ({...x, [o.cid]: {...(x[o.cid] || {}), [which === 'accept' ? 'acceptedAt' : 'rejectedAt']: Date.now()}}));
+    const info = {who: (o.pick && o.pick.who) || (o.drop && o.drop.who) || '', to: (o.drop && o.drop.who) || '', orderNo: (o.drop && o.drop.orderNo) || (o.pick && o.pick.orderNo) || ''};
+    const mark = () => setOst(x => ({...x, [o.cid]: {...(x[o.cid] || {}), ...info, [which === 'accept' ? 'acceptedAt' : 'rejectedAt']: Date.now()}}));
     if (!live || !target) { mark(); flash(which === 'accept' ? 'Accepterad' : 'Nekad', null); return; }
     setNewState(s => ({...s, [o.cid]: 'sending'}));
     try {
@@ -718,7 +738,7 @@ function AppInner(): React.JSX.Element {
   async function forwardOrder(o: any, d: any) {
     const L = (o.pick && o.pick.live) || (o.drop && o.drop.live);
     const first = d.name.split(' ')[0];
-    const mark = () => setOst(x => ({...x, [o.cid]: {...(x[o.cid] || {}), givenAt: Date.now(), givenTo: d.name}}));
+    const mark = () => setOst(x => ({...x, [o.cid]: {...(x[o.cid] || {}), who: (o.pick && o.pick.who) || (o.drop && o.drop.who) || '', to: (o.drop && o.drop.who) || '', orderNo: (o.drop && o.drop.orderNo) || (o.pick && o.pick.orderNo) || '', givenAt: Date.now(), givenTo: d.name}}));
     if (!live || !L) { mark(); flash(`Demo · skickad till ${first}`, null); return; }
     setNewState(s => ({...s, [o.cid]: 'forwarding'}));
     try {
@@ -1565,7 +1585,7 @@ function AppInner(): React.JSX.Element {
           )}
           {tab === 'klart' && klartView === 'aterkallade' && <RevokedView list={revLog} onConfirm={confirmRevoked} />}
           {tab === 'klart' && klartView === 'dagbok' && <DagbokView me={driverName || 'RUTT'} onSms={chefC ? (text: string) => { jobbet.send(chefC, text); flash(`Dagrapport till ${chefC.name.split(' ')[0]}`, null); } : undefined} />}
-          {tab === 'klart' && klartView === 'idag' && <DoneView done={doneOrders} scanned={egna} onClearScanned={() => { const was = egna; saveEgna(() => []); flash(`${was.length} inscannade rensade`, () => saveEgna(() => was)); }} onRetry={retrySync} onOpen={(d: any) => (isEgen(d.cid) ? openOwn(d.cid) : setEditFor({cid: d.cid, st: d.st, done: true, start: (ost[d.cid] || {}).loadedAt || null}))} />}
+          {tab === 'klart' && klartView === 'idag' && <DoneView declined={declinedToday} done={doneOrders} scanned={egna} onClearScanned={() => { const was = egna; saveEgna(() => []); flash(`${was.length} inscannade rensade`, () => saveEgna(() => was)); }} onRetry={retrySync} onOpen={(d: any) => (isEgen(d.cid) ? openOwn(d.cid) : setEditFor({cid: d.cid, st: d.st, done: true, start: (ost[d.cid] || {}).loadedAt || null}))} />}
           {tab === 'nytt' && <NewOrdersView orders={newOrders} cargo={fullSrc ? fullSrc.cargo : {}} onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={(o: any) => setOrderStatus(o, 'reject')} onForward={(orders.perm && orders.perm.giveAway === false) ? undefined : setForwardFor} />}
           <RejectSheet o={rejectFor} onClose={() => setRejectFor(null)} onReject={(o: any) => setOrderStatus(o, 'reject')} />
           <ForwardSheet o={forwardFor} drivers={team.drivers} onClose={() => setForwardFor(null)} onForward={forwardOrder} />

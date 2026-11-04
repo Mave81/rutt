@@ -1247,7 +1247,7 @@ const o = themed(() => StyleSheet.create({
 
 
 /* ---- Klart: allt som är lossat (i RUTT eller i Opter). Tryck på en order = ändra i efterhand (som Opter). ---- */
-export function DoneView({done, onRetry, onOpen, scanned = [], onClearScanned}: {done: any[]; onRetry: (cid: string) => void; onOpen: (d: any) => void; scanned?: any[]; onClearScanned?: () => void}) {
+export function DoneView({done, onRetry, onOpen, scanned = [], onClearScanned, declined = []}: {done: any[]; onRetry: (cid: string) => void; onOpen: (d: any) => void; scanned?: any[]; onClearScanned?: () => void; declined?: any[]}) {
   const bottom = useSafeAreaInsets().bottom + 24;
   // 3.57: KLART (helgrön) bara när Opter bekräftat. Innan dess SKICKAS… i guld. Röd bara när Opter inte fick det.
   // Inscannat (finns bara i telefonen) i en egen grupp som rensas med en knapp (Ångra i 8 s).
@@ -1283,7 +1283,7 @@ export function DoneView({done, onRetry, onOpen, scanned = [], onClearScanned}: 
   return (
     <ScrollView style={{flex: 1}} contentContainerStyle={{paddingHorizontal: 14, paddingBottom: bottom}}>
       {done.length ? <Text style={o.doneHint}>Tryck på en order för att ändra status, lägga till bild, tillägg, ändring eller avvikelse.</Text> : null}
-      {!done.length && !nScan ? <View style={o.allDoneBox}><Bi n="inbox-fill" size={30} color={C.faint} /><Text style={o.allDone}>Inget klart än idag.</Text></View> : null}
+      {!done.length && !nScan && !declined.length ? <View style={o.allDoneBox}><Bi n="inbox-fill" size={30} color={C.faint} /><Text style={o.allDone}>Inget klart än idag.</Text></View> : null}
       {opter.map(card)}
       {egnaDone.length || nScan ? <Text style={o.secB}>INSCANNAT · BARA I TELEFONEN</Text> : null}
       {egnaDone.map(card)}
@@ -1293,6 +1293,17 @@ export function DoneView({done, onRetry, onOpen, scanned = [], onClearScanned}: 
           <Text style={o.rensaT}>Rensa inscannade ({nScan})</Text>
         </Pressable>
       ) : null}
+      {declined.length ? <Text style={o.secB}>NEKADE OCH BORTSKICKADE</Text> : null}
+      {declined.map((d: any) => (
+        <View key={'x' + d.cid} style={[o.doneCard, {opacity: 0.85}]}>
+          <View style={o.doneTop}>
+            <View style={[o.dPill, {backgroundColor: C.panel2}]}><Text style={[o.dPillT, {color: C.dim}]}>{d.kind === 'nekad' ? 'NEKAD' : 'SKICKAD VIDARE'}</Text></View>
+            <Text style={o.doneTime}>{d.at ? hhmm(new Date(d.at)) : ''}</Text>
+          </View>
+          <Text style={o.doneWho2} numberOfLines={1}>{d.who || '—'}{d.to && d.to !== d.who ? ` → ${d.to}` : ''}</Text>
+          <Text style={o.doneMeta} numberOfLines={1}>{d.orderNo ? `Order ${d.orderNo}` : ''}{d.givenTo ? `  ·  till ${d.givenTo}` : ''}</Text>
+        </View>
+      ))}
     </ScrollView>
   );
 }
