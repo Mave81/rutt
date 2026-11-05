@@ -13,7 +13,7 @@ import {Bi} from './Bi';
 export const REVOKED_KEY = 'rutt.revoked.v1';
 export type RevEntry = {
   cid: string; orderNo: string | null; who: string; adr: string; from: string; fromAdr: string;
-  at: number; inCar: boolean; open: boolean; confirmedAt: number | null; sending?: boolean; failed?: boolean; msg?: string | null;
+  at: number; inCar: boolean; open: boolean; confirmedAt: number | null; sending?: boolean; failed?: boolean; via?: string; msg?: string | null;
   lv?: {key: any; shiId: number; externalId?: string} | null;
 };
 
@@ -62,7 +62,7 @@ export default function RevokedView({list, onConfirm}: {list: RevEntry[]; onConf
             {newDay ? <Text style={r.day}>{day(e.at).toUpperCase()}</Text> : null}
             <View style={r.card}>
               <View style={r.top}>
-                <Text style={[r.tag, {color: e.open ? C.bad : C.faint}]}>{e.open ? 'ÅTERKALLAD' : 'KVITTERAD'}</Text>
+                <Text style={[r.tag, {color: e.open ? C.bad : C.faint}]}>{e.open ? 'ÅTERKALLAD' : e.via ? 'KVITTERAD I OPTER' : 'KVITTERAD'}</Text>
                 <Text style={r.time}>{hhmm(new Date(e.at))}</Text>
                 <View style={{flex: 1}} />
                 {e.orderNo ? <Text style={r.no}>{e.orderNo}</Text> : null}

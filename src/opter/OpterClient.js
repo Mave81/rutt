@@ -372,6 +372,16 @@ export default class OpterClient {
     return {confirmed: (sent || confirmed) && ok2, sent, imageDropped, changesSeen: chSeen, error: err ? String(err.message || err) : null, rutt: P.toRutt(this.lastDecoded)};
   }
 
+  // 3.66: vad säger Opters senaste felfria synk om en återkallad order? 'kvitterad' (fält 67 sant), 'kvar' (finns, inte kvitterad),
+  // 'borta' (inte i listan, fast listan har andra order), eller null när synken inte går att lita på.
+  revokedState(shiId) {
+    const d = this.lastDecoded; if (!d || d.error || !shiId) return null;
+    const ships = (d.rows || []).filter(x => x.table === 'Shipment');
+    const r = ships.find(x => x.key.xxxId === shiId);
+    if (r) return r.columns.revokedConfirmed ? 'kvitterad' : 'kvar';
+    return ships.length ? 'borta' : null;
+  }
+
   // Kvittera en återkallad order – exakt som Opter (ServerProxy.setRevokedConfirmed): bara SAS_RevokedConfirmed = sant (fält 67),
   // vanlig synk. 3.61: radhuvudets extra/conf-byten skickas som 0/0 som Opter Driver gör (förut ekade RUTT serverns).
   // Bekräftat BARA när en hel, felfri synk efteråt visar fält 67 = sant, eller ordern fanns före och är borta i samma felfria synk.

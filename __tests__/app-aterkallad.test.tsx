@@ -22,11 +22,13 @@ function payload() {
     ship(226825, 600, 11, 12), ship(226815, 601, 13, 14), ship(226188, 604, 13, 14), Buffer.from([3]), Buffer.alloc(16)]);
 }
 const mockRutt = P.toRutt(P.decodeSync(payload()));
+let mockRev: any = null;
 jest.mock('../src/opter/OpterClient', () => jest.fn().mockImplementation(() => ({
+  revokedState: () => mockRev, lastDecoded: {},
   logon: {acdOffId: 7, vhcId: 1, ok: true},
   connect: jest.fn(async () => {}), doLogon: jest.fn(async () => ({ok: true, needChoose: false, resId: 5, name: 'Kenneth Andersson'})),
   syncRef: jest.fn(async () => ({rows: []})), resources: () => [], startWork: jest.fn(async () => ({rutt: mockRutt})),
-  messages: () => [], poll: jest.fn(async () => ({rutt: mockRutt, msgs: []})), markRead: jest.fn(), setStatus: jest.fn(async () => ({confirmed: true, rutt: mockRutt})),
+  messages: () => [], poll: jest.fn(async () => ({rutt: {...mockRutt}, msgs: []})), markRead: jest.fn(), setStatus: jest.fn(async () => ({confirmed: true, rutt: mockRutt})),
   disconnect: jest.fn(), dump: jest.fn(), workStatus: jest.fn(),
 })));
 import App from '../App';
@@ -52,4 +54,12 @@ test('återkallad order (Opter SAS_Revoked) visas aldrig som ny eller i planen �
   expect(t).toContain('Kvittera');
   expect(t.split('Kvittera')[1]).not.toContain('Rudsjöterassen');   // Distribution (226815) ligger inte i planen
   expect(t).toContain('1 ny order');                                // bara 226825 – den återkallade räknas inte som ny
+  // 3.66: kvitterad i Opter-appen → nästa synk visar fält 67 = sant → RUTT stänger raden själv
+  mockRev = 'kvitterad';
+  await ReactTestRenderer.act(async () => { jest.advanceTimersByTime(70000); await Promise.resolve(); });
+  await ReactTestRenderer.act(async () => { await Promise.resolve(); jest.advanceTimersByTime(50); });
+  const t2 = texts(r);
+  expect(t2).toContain('kvitterad i Opter');
+  expect(t2).not.toMatch(/\| Kvittera \|/);
 });
+

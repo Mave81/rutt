@@ -54,7 +54,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '4 nov · 3.65 · texten i ordern frågar om extra hämtställe, varför-rader i planen, fråga kontoret, som Opter';
+const BUILD = '5 nov · 3.66 · återkallad som kvitterats i Opter-appen stängs i RUTT av sig själv';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -1084,6 +1084,30 @@ function AppInner(): React.JSX.Element {
       return next;
     });
   }, [revokedNow, demo]);
+  // 3.66: kvitterad i Opter-appen? Efter varje felfri synk läser RUTT Opters svar: fält 67 sant = kvitterad.
+  // Är ordern borta ur listan två synkar i rad (och listan har andra order) finns inget kvar att kvittera – raden stängs.
+  const goneSeen = useRef<Record<string, {n: number; d: any}>>({});
+  useEffect(() => {
+    if (demo || !live || !client || !client.revokedState || !revLog.some(e => e.open)) return;
+    const hit: {cid: string; via: string}[] = [];
+    for (const e of revLog) {
+      if (!e.open || e.sending) continue;
+      const lv: any = (e as any).lv;
+      // Utan sparad nyckel (äldre rad): borta = ordern finns inte bland dagens order i en felfri synk.
+      const st = lv && lv.shiId ? client.revokedState(lv.shiId) : cidsAll.includes(e.cid) ? null : client.revokedState(-1);
+      const d = client.lastDecoded, g = goneSeen.current[e.cid];
+      if (st === 'kvitterad') hit.push({cid: e.cid, via: 'opter'});
+      else if (st === 'borta') { if (!g || g.d !== d) goneSeen.current[e.cid] = {n: (g ? g.n : 0) + 1, d}; if (goneSeen.current[e.cid].n >= 2) hit.push({cid: e.cid, via: 'borta'}); }
+      else if (st === 'kvar') delete goneSeen.current[e.cid];
+    }
+    if (!hit.length) return;
+    const now = Date.now(), by = new Map(hit.map(h => [h.cid, h.via]));
+    setOst(o => { const n = {...o}; for (const h of hit) n[h.cid] = {...(o[h.cid] || {}), revokedAckAt: now}; return n; });
+    setRevLog(log => { const n = log.map(e => (by.has(e.cid) ? {...e, open: false, confirmedAt: now, sending: false, failed: false, via: by.get(e.cid)} : e)); saveJSON(REVOKED_KEY, n); return n; });
+    dlog('återkallad klar i Opter: ' + hit.map(h => h.cid + '/' + h.via).join(','));
+    const nos = hit.map(h => { const e = revLog.find(x => x.cid === h.cid); return (e && e.orderNo) || h.cid; }).join(', ');
+    flash(`Återkallad ${nos} är kvitterad i Opter`, null);
+  }, [orders, revLog, live, demo, cidsAll]);
   async function confirmRevoked(cid: string) {
     const {pick, drop} = fullSrc ? legs(cid) : ({} as any);
     const ent: any = revLog.find(e => e.cid === cid) || {};

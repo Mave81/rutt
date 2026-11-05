@@ -41,3 +41,18 @@ test('ordern fanns före och är borta i en felfri synk → kvitterad (kontoret 
   const c = client(() => ({type: P.MessageType.Synchronize, payload: sync([])}));
   expect((await c.confirmRevoked(live)).confirmed).toBe(true);
 });
+
+test('3.66: kvitterad i Opter-appen känns igen i RUTT', () => {
+  const c = new OpterClient();
+  c.lastDecoded = P.decodeSync(sync([shipRow(226815, [Buffer.from([7, 66, 1]), Buffer.from([7, 67, 1])]), shipRow(226900, [])]));
+  expect(c.revokedState(226815)).toBe('kvitterad');
+  c.lastDecoded = P.decodeSync(sync([shipRow(226815, [Buffer.from([7, 66, 1])])]));
+  expect(c.revokedState(226815)).toBe('kvar');
+  c.lastDecoded = P.decodeSync(sync([shipRow(226900, [])]));
+  expect(c.revokedState(226815)).toBe('borta');
+  // tom lista eller trasig synk: går inte att lita på
+  c.lastDecoded = P.decodeSync(sync([]));
+  expect(c.revokedState(226815)).toBe(null);
+  c.lastDecoded = {rows: [], error: 'x'};
+  expect(c.revokedState(226815)).toBe(null);
+});
