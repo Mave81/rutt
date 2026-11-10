@@ -134,7 +134,7 @@ test('Kamera: turlista blir stopp, en Inomec-sedel går vidare till "Gör till j
   await press(r, /^visa ›$/);
   const o1 = texts(r);
   expect(o1).toContain('KÖRNINGEN');
-  expect(o1).toContain('TEXT I ORDERN');
+  expect(o1).toContain('INTERNT MEDDELANDE · KONTORET'); // 3.69: kontorets interna meddelande har egen ruta
   expect(o1).toContain('skriv timmar');
   expect(o1).toContain('Adressen saknas i ordern');
   expect(o1).toContain('Läs in turleveranslistan');

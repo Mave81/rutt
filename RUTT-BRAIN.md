@@ -173,3 +173,12 @@ Acceptera och Neka går direkt.
 12. **Hämta-före-lämna på samma adress slås ihop till ett stopp** (OrdersView.tsx rad 262). BDX-sedeln hamnade
     under stopp 4 fast den hämtas på stopp 6.
 13. ~~Inscannade order har ingen tydlig märkning~~ – lagat 3.57 (INSCANNAD + Rensa inscannade).
+
+## 9. 3.65–3.69 (4–10 nov)
+
+- **Texten i ordern** (`src/opter/textcheck.js`): annan ort med gods/hämtord nära ("1 pall i Västberga sen en i Haninge") → fråga om extra hämtställe; svaret sparas i `ost[cid].textAsk`. Extra hämtställe = eget jobb med `extraOf`, bara hämtningen syns, Opter-lämningen får `after` så smart ordning hämtar först. Annat husnummer i texten → varning.
+- **Retur (3.69, se OPTER-BRAIN §23):** `ost[cid].returAt` + `returTo {who, adr, area, zip, tel, lat, lng}`. `fullSrc` byter Opter-lämningens adress till returTo (who "Retur · X"), allt annat (Lossad, kvittens) som vanligt → Opter får Lossad på ordern. `returTo` saknas = "ligger i bilen" → dold tills "Kör tillbaka" i Klart. 3.68:s egna returstopp flyttas in automatiskt; redan lossade får knappen "Skicka Lossad till Opter" i Klart (`sendOldRetur`, samma kvittens).
+- **Internt meddelande:** `st.officeMsg` (protocol.js), `ost[cid].msgSeen`. Ändras det → flash + notis.
+- **Ordning (Reorder.tsx):** pilar, siffran = nästa, dra. Listan sätts bara när bladet öppnas (förr nollställdes den vid varje omräkning).
+- **Signering (parts.tsx):** bara fingret som började strecket ritar (`touchOf`), hopp > 140 px ritas inte, prick med fler fingrar på rutan sparas inte, Chaikin-utjämning (`smooth`), gamla streck memo.
+- **Kvittera återkallad:** se OPTER-BRAIN §23.

@@ -217,3 +217,17 @@ Kartuppslag (Nominatim) som svarar med GATAN fast adressen har husnummer räknas
 
 [OVERIFIERAT mot servern]: kvittens vid hämtning och fraktsedels-ändringen har inte setts gå igenom hos Opter ännu.
 
+
+## 23. 3.65–3.69 (4–10 nov) – vad som lärts mot Opter
+
+**Retur / bomkörning (lärt 10 nov, Kentas order 239995 BYGG-OLLE → xxxxx):**
+- Kontoret markerar en bomkörning i orderns **Internt meddelande** (SHI_Message, fält 53), t.ex. "BOM kunden hade redan fått cement – troligtvis dubbelbokat". Opter Driver visar det under Mer → Ändringar → Internt meddelande.
+- Ordern ligger kvar som **Lastad** tills föraren lossar. Godset körs tillbaka till avsändaren och föraren drar **Lossad på samma order** med kvittens från den som tar emot där (10 nov: Christian Lundin på BYGG-OLLE). Ingen ny order, ingen Nekad.
+- Fel som hänt: 3.67 dolde ordern ur planen, 3.68 gjorde returen till ett eget RUTT-stopp vid sidan om – Opter fick aldrig Lossad. **Aldrig igen:** retur = Opter-orderns egen lämning flyttad till returadressen, Lossad där går via vanliga `sendUnload` (samma kö, kvittens, foton, frågor). Test: `__tests__/app-retur.test.tsx`.
+- Bomkörning som artikel (kontorets artikellista, "Bomkörning", finns hos Kentas kontor) läggs på ordern i samma veva, som Mer → Artiklar i Opter Driver.
+
+**Ordertexterna Opter Driver visar (Ändringar):** Volym (40), Pallplats, Flakmeter (42), Kollin (51), Tid (36), Avstånd (37), Fraktsedel (30), Littera (= kundreferens 23), Avsändarreferens (34), Mottagarreferens (35), **Internt meddelande (53)**, Godstyp (33). Externt meddelande = 52, förarmeddelande = 55, avsändarinstruktion = 54. RUTT 3.69 visar Internt meddelande i egen ruta överst på ordern, en orange rad "Kontoret: …" på kortet tills ordern öppnats, och en notis om kontoret ändrar det under dagen.
+
+**Återkallad som kvitterats i Opter-appen (3.66):** fält 67 (SAS_RevokedConfirmed) sant i synken, eller ordern borta ur listan två felfria synkar i rad → RUTT stänger raden. Tom/trasig synk → gör ingenting.
+
+**Kvar att bygga, rör protokollet (gör inte utan prov mot servern):** återuppta inloggningen (VerifyLogon), bara ändringar vid synk, serverns klocka på tidsstämplar, "mottagen av föraren"-raden.

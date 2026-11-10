@@ -228,7 +228,7 @@ function ClockField({label, value, onSet, placeholder = '--:--'}: {label: string
   );
 }
 
-export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell, me = '', onAddNum, onScan, timOf, onSetTim, onSetTimes, sedelOf, sheetOnly = false, openReq = null, onTextAsk, onAddExtra, onAsk, onRetur}: {
+export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnload, onEdit, onAvised, onRetry, live, later = [], onReorder, perm, tellTo = [], onTell, me = '', onAddNum, onScan, timOf, onSetTim, onSetTimes, sedelOf, sheetOnly = false, openReq = null, onTextAsk, onAddExtra, onAsk, onRetur, onMsgSeen}: {
   route: any; cargo: any; ost: Record<string, any>; allStops: any[];
   onLoaded: (st: any, more?: any[]) => void; onUnload: (st: any, more?: any[]) => void;
   onEdit: (cid: string, st: any) => void;
@@ -245,6 +245,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   sedelOf?: (cid: string) => any;
   onTextAsk?: (cid: string, place: string, v: 'nej' | 'lagt') => void; // 3.65: svar på "texten nämner X"
   onAsk?: (text: string) => boolean; // 3.65: fråga kontoret i chatten
+  onMsgSeen?: (cid: string, msg: string) => void; // 3.69: internt meddelande läst
   onRetur?: (cid: string, st: any, note: string, dest?: {mode: 'avs' | 'annan' | 'bil'; name?: string; adr?: string; area?: string}) => void; // 3.67: kunden hade redan fått godset → bomkörning
   onAddExtra?: (cid: string, st: any, x: {name: string; adr: string; area: string; goods: string}) => void;
   sheetOnly?: boolean; // bara bladen (används av Imorgon-planen: tryck på en order → samma blad som idag)
@@ -259,6 +260,9 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   const [sel, setSel] = useState<Record<string, boolean>>({});
   const [selMode, setSelMode] = useState(false);
   const [openRow, setOpenRow] = useState<JRow | null>(null);
+  // 3.69: kontorets interna meddelande (Opter: Internt meddelande). Olästa visas på kortet tills ordern öppnas.
+  const msgNew = (r: any) => { const m = r && r.st && r.st.officeMsg; return m && (ost[r.cid] || {}).msgSeen !== m ? m : ''; };
+  React.useEffect(() => { if (openRow && onMsgSeen && msgNew(openRow)) onMsgSeen(String(openRow.cid), openRow.st.officeMsg); }, [openRow]);
   const [bigText, setBigText] = useState<string | null>(null);
   const [asked, setAsked] = useState<Record<string, boolean>>({});
   const [retur, setRetur] = useState<{cid: string; st: any; note: string; mode: 'avs' | 'annan' | 'bil'; name: string; adr: string; area: string} | null>(null);
@@ -444,6 +448,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
           </View>
           <Text style={o.cMeta} numberOfLines={1}>{metaOf(pl)}{pl.eta ? <Text style={o.cEta}>  ·  ca {hhmm(pl.eta)}</Text> : null}{lateW(pl)}</Text>
           {flagLine(pl)}
+          {(() => { const r0: any = pl.rows.find((x: any) => msgNew(x)); return r0 ? <Text style={o.offLine} numberOfLines={2}>Kontoret: {r0.st.officeMsg}</Text> : null; })()}
           {one ? (
             <Pressable style={o.cOne} onPress={() => (selMode ? toggle(one) : setOpenRow(one))} onLongPress={() => (selMode ? toggle(one) : startSel(one))} delayLongPress={350}>
               {checkOrMark(one)}
@@ -617,7 +622,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
   const rowSheet = () => {
     const r = openRow; if (!r) return null;
     const pick = r.kind === 'pickup', other = otherOf(r), st = r.st, q = qty(r), act = r.state === 'act';
-    const notes = uniqNotes([st.adrMsg, st.info], goodsOf(r));
+    const notes = uniqNotes([st.adrMsg, st.officeMsg ? String(st.info || '').replace(st.officeMsg, '').trim() : st.info], goodsOf(r)); // internt meddelande har egen ruta
     const kv: [string, string, boolean?][] = [];
     if (st.service) kv.push(['Tjänst', String(st.service)]);
     if (st.customer && st.customer !== st.who) kv.push(['Kund', String(st.customer)]);
@@ -675,6 +680,12 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
           </Pressable>
         ) : null}
         {sedelBox(r, st)}
+        {st.officeMsg ? (
+          <Pressable style={o.offMsg} onPress={() => setBigText(st.officeMsg)} accessibilityLabel="Internt meddelande, visa stort">
+            <Text style={o.offMsgK}>INTERNT MEDDELANDE · KONTORET</Text>
+            <Text style={o.offMsgV}>{st.officeMsg}</Text>
+          </Pressable>
+        ) : null}
         {notes.length > 0 && (
           <Pressable style={o.fullTxt} onPress={() => setBigText(notes.join('\n\n'))} accessibilityLabel="Visa texten stort">
             <View style={{flexDirection: 'row', alignItems: 'center'}}><Text style={[o.fullK, {flex: 1}]}>TEXT I ORDERN</Text><Bi n="zoom-in" size={14} color={C.faint} /><Text style={[o.fullK, {marginLeft: 5}]}>STOR</Text></View>
@@ -722,7 +733,7 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
         </View>
         {peopleRows(st)}
         {onAddNum ? <Pressable hitSlop={6} style={o.addNum} onPress={() => setAddNum({cid: String(r.cid), label: '', num: ''})}><Bi n="plus-lg" size={13} color={C.accentInk} /><Text style={o.addNumT}>Lägg till nummer på jobbet</Text></Pressable> : null}
-        {!pick && !st.own && onRetur && r.state === 'act' ? (
+        {!pick && !st.own && !st.retur && onRetur && r.state === 'act' ? (
           <Pressable style={o.moreRow} onPress={() => { close(); const sp = (allStops || []).find((x: any) => String(x.pickup) === String(r.cid)); setRetur({cid: String(r.cid), st, note: '', mode: sp ? 'avs' : 'bil', name: '', adr: '', area: ''}); }}>
             <Bi n="reply-fill" size={16} color={C.warn} /><Text style={o.moreRowT}>Retur – kunden har redan fått godset</Text>
           </Pressable>
@@ -952,8 +963,8 @@ export default function OrdersView({route, cargo, ost, allStops, onLoaded, onUnl
           return (
             <View style={{gap: 8, marginTop: 4}}>
               <Text style={o.tWarnS}>Kunden hade redan fått godset. RUTT lägger Bomkörning på ordern i Opter och skriver till kontoret. Vart tar godset vägen?</Text>
-              {sp ? opt('avs', `Tillbaka till ${sp.who || 'avsändaren'}`, [sp.adr, sp.area].filter(Boolean).join(', ') + ' · blir ett stopp i planen') : null}
-              {opt('annan', 'Till en annan adress', 'Blir ett stopp i planen')}
+              {sp ? opt('avs', `Tillbaka till ${sp.who || 'avsändaren'}`, [sp.adr, sp.area].filter(Boolean).join(', ') + ' · lämningen flyttas dit, Lossad där går till Opter') : null}
+              {opt('annan', 'Till en annan adress', 'Lämningen flyttas dit, Lossad där går till Opter')}
               {retur.mode === 'annan' ? (
                 <View style={{gap: 8}}>
                   <TextInput style={o.numIn} value={retur.name} onChangeText={t => setRetur({...retur, name: t})} placeholder="Företag (t.ex. terminalen)" placeholderTextColor={C.faint} />
@@ -1062,6 +1073,10 @@ const o = themed(() => StyleSheet.create({
   cISub: {color: C.dim, fontSize: 12.5, marginTop: 1},
   cIQ: {color: C.ink, fontFamily: FONT.cond, fontSize: 16, fontWeight: '700'},
   cIU: {color: C.dim, fontSize: 12.5, fontWeight: '600'},
+  offMsg: {backgroundColor: C.warnSoft, borderRadius: 10, padding: 12, marginTop: 10},
+  offMsgK: {color: C.warn, fontSize: 11.5, fontWeight: '900', letterSpacing: 0.6},
+  offMsgV: {color: C.ink, fontSize: 16, fontWeight: '700', marginTop: 4},
+  offLine: {color: C.warn, fontSize: 14, fontWeight: '800', marginTop: 6, paddingLeft: 25},
   rOpt: {flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.panel2, borderRadius: 10, padding: 12, borderWidth: 1.5, borderColor: 'transparent'},
   rOptOn: {borderColor: C.accent},
   rOptT: {color: C.ink, fontSize: 15.5, fontWeight: '800'},
@@ -1392,7 +1407,7 @@ const o = themed(() => StyleSheet.create({
 
 
 /* ---- Klart: allt som är lossat (i RUTT eller i Opter). Tryck på en order = ändra i efterhand (som Opter). ---- */
-export function DoneView({done, onRetry, onOpen, scanned = [], onClearScanned, declined = [], onUndoRetur, onReturBack}: {done: any[]; onRetry: (cid: string) => void; onOpen: (d: any) => void; scanned?: any[]; onClearScanned?: () => void; declined?: any[]; onUndoRetur?: (cid: string) => void; onReturBack?: (cid: string) => void}) {
+export function DoneView({done, onRetry, onOpen, scanned = [], onClearScanned, declined = [], onUndoRetur, onReturBack, onOldRetur}: {done: any[]; onRetry: (cid: string) => void; onOpen: (d: any) => void; scanned?: any[]; onClearScanned?: () => void; declined?: any[]; onUndoRetur?: (cid: string) => void; onReturBack?: (cid: string) => void; onOldRetur?: (cid: string) => void}) {
   const bottom = useSafeAreaInsets().bottom + 24;
   // 3.57: KLART (helgrön) bara när Opter bekräftat. Innan dess SKICKAS… i guld. Röd bara när Opter inte fick det.
   // Inscannat (finns bara i telefonen) i en egen grupp som rensas med en knapp (Ångra i 8 s).
@@ -1446,9 +1461,10 @@ export function DoneView({done, onRetry, onOpen, scanned = [], onClearScanned, d
             <Text style={o.doneTime}>{d.at ? hhmm(new Date(d.at)) : ''}</Text>
           </View>
           <Text style={o.doneWho2} numberOfLines={1}>{d.who || '—'}{d.to && d.to !== d.who ? ` → ${d.to}` : ''}</Text>
-          <Text style={o.doneMeta} numberOfLines={1}>{d.orderNo ? `Order ${d.orderNo}` : ''}{d.givenTo ? `  ·  till ${d.givenTo}` : ''}{d.kind === 'retur' ? (d.back ? (d.back.doneAt ? `  ·  lämnad hos ${d.back.drop.name || d.back.drop.area} ${hhmm(new Date(d.back.doneAt))}` : `  ·  körs tillbaka till ${d.back.drop.name || d.back.drop.area}`) : '  ·  godset ligger i bilen') : ''}</Text>
-          {d.kind === 'retur' && !d.back && d.sender && onReturBack ? <Pressable style={[o.bigBtn, {backgroundColor: C.accent, height: 44, marginTop: 8}]} onPress={() => onReturBack(d.cid)}><Text style={[o.bigBtnT, {color: '#000000', fontSize: 15}]}>Kör tillbaka till {d.sender.who || 'avsändaren'}</Text></Pressable> : null}
-          {d.kind === 'retur' && onUndoRetur ? <Pressable hitSlop={8} onPress={() => onUndoRetur(d.cid)}><Text style={[o.doneMeta, {color: C.accentInk, fontWeight: '800', marginTop: 4}]}>Ångra – tillbaka i planen</Text></Pressable> : null}
+          <Text style={o.doneMeta} numberOfLines={2}>{d.orderNo ? `Order ${d.orderNo}` : ''}{d.givenTo ? `  ·  till ${d.givenTo}` : ''}{d.kind !== 'retur' ? '' : d.doneAt ? `  ·  Lossad hos ${(d.returTo && (d.returTo.who || d.returTo.area)) || 'avsändaren'} ${hhmm(new Date(d.doneAt))}${d.podName ? ' · mottagen av ' + d.podName : ''}${d.sync && d.sync.unload === 'ok' ? ' · Opter bekräftade' : ''}` : d.returTo ? `  ·  körs tillbaka till ${d.returTo.who || d.returTo.area} – ligger i planen` : d.old ? `  ·  lossad hos ${d.old.to} ${d.old.at ? hhmm(new Date(d.old.at)) : ''}${d.old.name ? ' · ' + d.old.name : ''} – inte skickad till Opter` : '  ·  godset ligger i bilen'}</Text>
+          {d.kind === 'retur' && d.old && onOldRetur ? <Pressable style={[o.bigBtn, {backgroundColor: C.accent, height: 44, marginTop: 8}]} onPress={() => onOldRetur(d.cid)}><Text style={[o.bigBtnT, {color: '#000000', fontSize: 15}]}>Skicka Lossad till Opter{d.old.name ? ` · ${d.old.name}` : ''}</Text></Pressable> : null}
+          {d.kind === 'retur' && !d.returTo && !d.old && !d.doneAt && d.sender && onReturBack ? <Pressable style={[o.bigBtn, {backgroundColor: C.accent, height: 44, marginTop: 8}]} onPress={() => onReturBack(d.cid)}><Text style={[o.bigBtnT, {color: '#000000', fontSize: 15}]}>Kör tillbaka till {d.sender.who || 'avsändaren'}</Text></Pressable> : null}
+          {d.kind === 'retur' && !d.doneAt && !d.old && onUndoRetur ? <Pressable hitSlop={8} onPress={() => onUndoRetur(d.cid)}><Text style={[o.doneMeta, {color: C.accentInk, fontWeight: '800', marginTop: 4}]}>Ångra – tillbaka i planen</Text></Pressable> : null}
         </View>
       ))}
     </ScrollView>
