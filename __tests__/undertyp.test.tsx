@@ -30,3 +30,24 @@ test('en enda undertyp väljs direkt', () => {
   const r = render(stopWith([sub(51, 'Mottaget')]));
   expect(texts(r)).not.toMatch(/Saknas: .*undertyp/);
 });
+
+test('3.71: BDX – sista egna stoppet + Opter-ordern: Opters undertyp syns och kan väljas', () => {
+  const opter = stopWith([sub(51, 'Avställt'), sub(52, 'Mottaget')]);
+  const kid = {drop: 'E1', who: 'Moby Modulärt', adr: 'Vårbergsvägen 69', own: {kind: 'bdx-frakt'}, parent: '240200', req: {}};
+  const r = render({...kid, group: [kid, opter]});
+  expect(texts(r)).toContain('Undertyp');
+  const chip = r.root.findAll((n: any) => n.props && n.props.testID === 'undertyp-51' && typeof n.props.onPress === 'function')[0];
+  ReactTestRenderer.act(() => { chip.props.onPress(); });
+  expect(texts(r)).not.toMatch(/Saknas: .*undertyp/);
+});
+test('3.71: valet ligger kvar när ordern uppdateras i bakgrunden', () => {
+  const stop = stopWith([sub(51, 'Avställt'), sub(52, 'Mottaget')]);
+  const M2 = {frame: {x: 0, y: 0, width: 390, height: 800}, insets: {top: 0, left: 0, right: 0, bottom: 0}};
+  const el = (saved: any) => <SafeAreaProvider initialMetrics={M2}><SignScreen stop={stop} savedNames={[]} saved={saved} onCancel={() => {}} onDone={() => {}} /></SafeAreaProvider>;
+  let r: any;
+  ReactTestRenderer.act(() => { r = ReactTestRenderer.create(el({loadedAt: 1})); });
+  const chip = r.root.findAll((n: any) => n.props && n.props.testID === 'undertyp-52' && typeof n.props.onPress === 'function')[0];
+  ReactTestRenderer.act(() => { chip.props.onPress(); });
+  ReactTestRenderer.act(() => { r.update(el({loadedAt: 1, sync: {load: 'ok'}})); }); // synken skriver på ordern
+  expect(texts(r)).not.toMatch(/Saknas: .*undertyp/);
+});

@@ -42,15 +42,20 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
   const [dmgE, setDmgE] = useState(0);
   const [dmgR, setDmgR] = useState(0);
 
+  // 3.71: nollställ bara när en NY kvittens öppnas. Förr nollställdes allt (undertyp, typ, signatur) varje gång
+  // ordern uppdaterades i bakgrunden (synk, fraktsedelsfoton) – då "gick det inte att trycka" på undertyp.
+  const session = stop ? [stop.drop, ...((stop.group || []) as any[]).map((g: any) => g.drop)].join(',') + (stop.pickSign ? ':p' : '') + (stop.repod ? ':r' : '') : '';
   useEffect(() => {
     setSig(null); setFsSig(false); setTidOpen(!!timjobb); setTid(null); setMode('sig'); setName(''); setPhotos([]); setComment(''); setComment2('');
-    setTypeId((stop && stop.pod && stop.pod.defaultId) || 0); setSubId(0);
+    const P0 = stop && (stop.pod || ((stop.group || []) as any[]).map((g: any) => g && g.live && g.pod).find(Boolean));
+    setTypeId((P0 && P0.defaultId) || 0); setSubId(0);
     setAdds({}); setExtOpen(false); setTfr(0); setTfText(''); setDmgT(0); setDmgE(0); setDmgR(0);
     setKolli((saved && saved.kolli) || (stop && stop.kolli) || 0);
-  }, [stop, saved]);
+  }, [session]);
 
   // Kvittenstyp väljer du själv (som i Opter). Krav = orderns krav OCH typens krav.
-  const P = (stop && stop.pod) || null;
+  // BDX-/turlista: sista egna stoppet lossas ihop med Opter-ordern → Opters kvittensregler (typ, undertyp) gäller.
+  const P = (stop && (stop.pod || ((stop.group || []) as any[]).map((g: any) => g && g.live && g.pod).find(Boolean))) || null;
   // Tilläggen som kontoret lagt på ordern (Opter: ShipmentAddServiceType). Demo: exempel.
   const addTypes: any[] = !addOk ? [] : stop && stop.live && stop.live.edit ? stop.live.edit.addTypes : stop && !stop.live && !stop.own && !stop.ownSign ? [{id: 1, name: 'Väntetid'}, {id: 2, name: 'Inbärning'}, {id: 3, name: 'Bomkörning'}] : [];
   const types: any[] = (P && P.types) || [];
@@ -147,18 +152,6 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
                   </Pressable>
                 ))}
               </View>
-              {type && type.showSub && subs.length > 0 && (
-                <View onLayout={e => { subY.current = e.nativeEvent.layout.y; }}>
-                  <View style={[st.secHead, {marginTop: 12}]}><Text style={st.sec}>Undertyp</Text>{req.sub ? <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View> : null}</View>
-                  <View style={st.chips}>
-                    {subs.map(x => (
-                      <Pressable key={x.id} testID={'undertyp-' + x.id} style={[st.chip, x.id === subId && st.chipOn]} onPress={() => setSubId(x.id === subId && !req.sub ? 0 : x.id)}>
-                        <Text style={[st.chipTxt, x.id === subId && st.chipTxtOn]}>{x.name}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </View>
-              )}
             </>
           )}
 
@@ -252,6 +245,18 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
             </>
           )}
 
+          {type && type.showSub && subs.length > 0 && (
+                <View onLayout={e => { subY.current = e.nativeEvent.layout.y; }}>
+                  <View style={[st.secHead, {marginTop: 12}]}><Text style={st.sec}>Undertyp</Text>{req.sub ? <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View> : null}</View>
+                  <View style={st.chips}>
+                    {subs.map(x => (
+                      <Pressable key={x.id} testID={'undertyp-' + x.id} style={[st.chip, x.id === subId && st.chipOn]} onPress={() => setSubId(x.id === subId && !req.sub ? 0 : x.id)}>
+                        <Text style={[st.chipTxt, x.id === subId && st.chipTxtOn]}>{x.name}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              )}
           {mode === 'sig' && <>
           <View style={st.secHead}>
             <Text style={st.sec}>Mottagarens underskrift</Text>
