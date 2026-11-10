@@ -4,7 +4,7 @@
  * eller väljer sitt namn, sen föraren: foto, avvikelse/extra tid, kommentar.
  * Kraven från ordern (signatur/namn/foto/kommentar obligatoriskt) styr "Klar".
  */
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {C, themed, R} from './theme';
@@ -57,6 +57,9 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
   const type = types.find(t => t.id === typeId) || null;
   const subs: any[] = type && P ? P.subTypes.filter((x: any) => x.mainId === type.id) : [];
   const sub = subs.find(x => x.id === subId) || null;
+  // 3.70: bara ett val → det är valt (samma som föraren måste göra i Opter, inget annat finns att välja).
+  useEffect(() => { if (subs.length === 1 && subId !== subs[0].id) setSubId(subs[0].id); }, [typeId, subs.length]);
+  const scroll = useRef<any>(null); const subY = useRef(0);
   const eff = sub || type;
   const sr = (P && P.shipReq) || {};
   const req: any = P ? (eff ? {sig: sr.sig && eff.req.sig, name: sr.name && eff.req.name, pic: sr.pic && eff.req.pic, remark: sr.remark && eff.req.remark, comment: sr.comment && eff.req.comment, sub: !!(type && type.showSub && type.requireSub && subs.length)} : {}) : ((stop && stop.req) || {});
@@ -130,7 +133,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
           <View style={{width: 60}} />
         </View>
 
-        <ScrollView style={{flex: 1}} contentContainerStyle={{paddingHorizontal: 16, paddingBottom: 20}} scrollEnabled={!drawing} keyboardShouldPersistTaps="handled">
+        <ScrollView ref={scroll} style={{flex: 1}} contentContainerStyle={{paddingHorizontal: 16, paddingBottom: 20}} scrollEnabled={!drawing} keyboardShouldPersistTaps="handled">
           <Text style={st.who} numberOfLines={2}>{stop.who || 'Mottagare'}</Text>
           <Text style={st.adr} numberOfLines={2}>{[stop.adr, stop.area].filter(Boolean).join(', ')}{stop.orderNo ? `  ·  Order ${stop.orderNo}` : ''}</Text>
 
@@ -145,12 +148,15 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
                 ))}
               </View>
               {type && type.showSub && subs.length > 0 && (
-                <View style={[st.chips, {marginTop: 8}]}>
-                  {subs.map(x => (
-                    <Pressable key={x.id} style={[st.chip, x.id === subId && st.chipOn]} onPress={() => setSubId(x.id === subId ? 0 : x.id)}>
-                      <Text style={[st.chipTxt, x.id === subId && st.chipTxtOn]}>{x.name}</Text>
-                    </Pressable>
-                  ))}
+                <View onLayout={e => { subY.current = e.nativeEvent.layout.y; }}>
+                  <View style={[st.secHead, {marginTop: 12}]}><Text style={st.sec}>Undertyp</Text>{req.sub ? <View style={st.reqBox}><Text style={st.reqTag}>KRÄVS</Text></View> : null}</View>
+                  <View style={st.chips}>
+                    {subs.map(x => (
+                      <Pressable key={x.id} testID={'undertyp-' + x.id} style={[st.chip, x.id === subId && st.chipOn]} onPress={() => setSubId(x.id === subId && !req.sub ? 0 : x.id)}>
+                        <Text style={[st.chipTxt, x.id === subId && st.chipTxtOn]}>{x.name}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
                 </View>
               )}
             </>
@@ -377,7 +383,7 @@ export default function SignScreen({stop, savedNames, saved, onCancel, onDone, a
         </ScrollView>
 
         <View style={[st.bottom, {paddingBottom: kb > 0 ? 10 : 12 + insets.bottom}]}>
-          {!ok && <Text style={st.missing}>Saknas: {missing.join(', ')}</Text>}
+          {!ok && <Pressable hitSlop={8} onPress={() => { if (missing[0] === 'undertyp' || (req.sub && !sub)) scroll.current && scroll.current.scrollTo({y: Math.max(0, subY.current - 40), animated: true}); }}><Text style={st.missing}>Saknas: {missing.join(', ')}{req.sub && !sub ? ' – tryck här' : ''}</Text></Pressable>}
           <Pressable style={[st.doneBtn, !ok && {opacity: 0.4}]} disabled={!ok} onPress={done}>
             <Text style={st.doneTxt}>{stop.repod ? 'Skicka kvittens' : stop.pickSign ? 'Klar – Lastad ✓' : 'Klar – Lossad ✓'}</Text>
           </Pressable>

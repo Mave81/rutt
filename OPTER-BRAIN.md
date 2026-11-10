@@ -231,3 +231,5 @@ Kartuppslag (Nominatim) som svarar med GATAN fast adressen har husnummer räknas
 **Återkallad som kvitterats i Opter-appen (3.66):** fält 67 (SAS_RevokedConfirmed) sant i synken, eller ordern borta ur listan två felfria synkar i rad → RUTT stänger raden. Tom/trasig synk → gör ingenting.
 
 **Kvar att bygga, rör protokollet (gör inte utan prov mot servern):** återuppta inloggningen (VerifyLogon), bara ändringar vid synk, serverns klocka på tidsstämplar, "mottagen av föraren"-raden.
+
+**Undertyp på kvittensen (3.70, 10 nov – "Saknas: undertyp" utan att valet syntes):** Opter (ProofOfDelivery.checkAndSetRequiredChanges ~1190, kontroll ~949): raden Undertyp syns om huvudtypens DPT_ShowSub, krävs om DPT_RequireSub; listan = DefaultPodType med DPT_DPT_Id_Main = huvudtypen. Klar går inte utan vald undertyp när den syns och krävs. RUTT: egen rubrik "Undertyp" + KRÄVS, "Saknas … – tryck här" scrollar dit, en enda undertyp väljs direkt. Test: `__tests__/undertyp.test.tsx`.
