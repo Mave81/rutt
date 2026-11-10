@@ -54,7 +54,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '5 nov · 3.66 · återkallad som kvitterats i Opter-appen stängs i RUTT av sig själv';
+const BUILD = '10 nov · 3.67 · retur på lämna = bomkörning i Opter, meddelande till kontoret';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -383,7 +383,7 @@ function AppInner(): React.JSX.Element {
   const legs = (cid: string) => ({pick: fullSrc.stops.find((s: any) => String(s.pickup) === cid), drop: fullSrc.stops.find((s: any) => String(s.drop) === cid)});
   const classOf = (cid: string): 'new' | 'todo' | 'done' | 'hidden' | 'revoked' => {
     const o = ost[cid] || {};
-    if (o.rejectedAt || o.givenAt) return 'hidden';
+    if (o.rejectedAt || o.givenAt || o.returAt) return 'hidden';
     const {pick, drop} = legs(cid);
     const L = (pick && pick.live) || (drop && drop.live);
     const t0 = L ? L.tab : 'todo'; // demo: allt är att göra
@@ -409,8 +409,8 @@ function AppInner(): React.JSX.Element {
   // 3.65: nekade och bortskickade idag syns i Klart (förut försvann de helt).
   const declinedToday = useMemo(() => {
     const day = new Date().toDateString();
-    return Object.keys(ost).map(cid => ({cid, o: ost[cid] || {}})).filter(({o}) => (o.rejectedAt && new Date(o.rejectedAt).toDateString() === day) || (o.givenAt && new Date(o.givenAt).toDateString() === day))
-      .map(({cid, o}) => ({cid, who: o.who || '', to: o.to || '', orderNo: o.orderNo || cid, at: o.rejectedAt || o.givenAt, kind: o.rejectedAt ? 'nekad' : 'skickad', givenTo: o.givenTo || ''}))
+    return Object.keys(ost).map(cid => ({cid, o: ost[cid] || {}})).filter(({o}) => [o.rejectedAt, o.givenAt, o.returAt].some(t => t && new Date(t).toDateString() === day))
+      .map(({cid, o}) => ({cid, who: o.who || '', to: o.to || '', orderNo: o.orderNo || cid, at: o.rejectedAt || o.givenAt || o.returAt, kind: o.rejectedAt ? 'nekad' : o.givenAt ? 'skickad' : 'retur', givenTo: o.givenTo || ''}))
       .sort((a, b) => b.at - a.at);
   }, [ost]);
   // Dagens plan: "att göra"-ordrar. Steg som ska göras en senare dag läggs under "Senare dagar".
@@ -873,6 +873,25 @@ function AppInner(): React.JSX.Element {
       lat: pos ? pos.lat : null, lng: pos ? pos.lng : null,
       image: first && first.b64 ? Buffer.from(first.b64, 'base64') : null,
     } : null;
+  }
+  // 3.67: retur – kunden hade redan fått godset. Som i Opter Driver: artikeln Bomkörning på ordern (Artiklar),
+  // finns den inte, tillägget Bomkörning. Plus ett meddelande till kontoret. Status i Opter ändras inte – kontoret avgör.
+  function returOrder(cid: string, st: any, note: string) {
+    const L = st && st.live, ed = (L && L.edit) || {};
+    const art = (ed.articles || []).find((a: any) => /bomk/i.test(String(a.name || '')));
+    const add = !art ? (ed.addTypes || []).find((a: any) => /bomk/i.test(String(a.name || ''))) : null;
+    const descr = ['Retur – kunden hade redan fått godset', note].filter(Boolean).join('. ');
+    const no = st.orderNo || cid;
+    setOst(o => ({...o, [cid]: {...(o[cid] || {}), returAt: Date.now(), who: st.who || '', orderNo: no, returNote: note}}));
+    if (art) sendEdit(cid, st, {changes: (P as any).articleChanges({sarId: art.id, q1: 1, descr})}, 'Bomkörning (retur)');
+    else if (add) sendEdit(cid, st, {addServices: [{satId: add.id, number: '1', descr}]}, 'Bomkörning (retur)');
+    else if (live && L) flash('Kontoret har ingen Bomkörning på ordern – bara meddelandet skickas', null);
+    if (live && L) toOffice(`Retur: ${st.who || ''}, order ${no} – kunden hade redan fått godset. Bomkörning${art || add ? ' lagd på ordern' : ''}. Godset ligger kvar i bilen.${note ? ' ' + note : ''}`);
+    else if (!art && !add) flash('Demo · retur markerad (skickas inte)', null);
+  }
+  function undoRetur(cid: string) {
+    setOst(o => { const c = {...(o[cid] || {})}; delete c.returAt; delete c.returNote; return {...o, [cid]: c}; });
+    flash('Tillbaka i planen. Bomkörningen ligger kvar i Opter – ta bort den under Mer → Artiklar om den ska bort', null);
   }
   function onAvised(cid: string) { setOst(o => ({...o, [cid]: {...(o[cid] || {}), avisedAt: Date.now()}})); }
 
@@ -1638,7 +1657,7 @@ function AppInner(): React.JSX.Element {
           )}
           {tab === 'klart' && klartView === 'aterkallade' && <RevokedView list={revLog} onConfirm={confirmRevoked} />}
           {tab === 'klart' && klartView === 'dagbok' && <DagbokView me={driverName || 'RUTT'} onSms={chefC ? (text: string) => { jobbet.send(chefC, text); flash(`Dagrapport till ${chefC.name.split(' ')[0]}`, null); } : undefined} />}
-          {tab === 'klart' && klartView === 'idag' && <DoneView declined={declinedToday} done={doneOrders} scanned={egna} onClearScanned={() => { const was = egna; saveEgna(() => []); flash(`${was.length} inscannade rensade`, () => saveEgna(() => was)); }} onRetry={retrySync} onOpen={(d: any) => (isEgen(d.cid) ? openOwn(d.cid) : setEditFor({cid: d.cid, st: d.st, done: true, start: (ost[d.cid] || {}).loadedAt || null}))} />}
+          {tab === 'klart' && klartView === 'idag' && <DoneView declined={declinedToday} onUndoRetur={undoRetur} done={doneOrders} scanned={egna} onClearScanned={() => { const was = egna; saveEgna(() => []); flash(`${was.length} inscannade rensade`, () => saveEgna(() => was)); }} onRetry={retrySync} onOpen={(d: any) => (isEgen(d.cid) ? openOwn(d.cid) : setEditFor({cid: d.cid, st: d.st, done: true, start: (ost[d.cid] || {}).loadedAt || null}))} />}
           {tab === 'nytt' && <NewOrdersView orders={newOrders} cargo={fullSrc ? fullSrc.cargo : {}} onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={(o: any) => setOrderStatus(o, 'reject')} onForward={(orders.perm && orders.perm.giveAway === false) ? undefined : setForwardFor} />}
           <RejectSheet o={rejectFor} onClose={() => setRejectFor(null)} onReject={(o: any) => setOrderStatus(o, 'reject')} />
           <ForwardSheet o={forwardFor} drivers={team.drivers} onClose={() => setForwardFor(null)} onForward={forwardOrder} />
@@ -1656,7 +1675,7 @@ function AppInner(): React.JSX.Element {
           {tab === 'plan' && planDay === 'imorgon' && laterRoute && !(laterRoute as any).error ? (
             <OrdersView sheetOnly openReq={planOpen} route={laterRoute} cargo={fullSrc ? fullSrc.cargo : {}} ost={ost} allStops={later} onLoaded={onLoaded} onUnload={openSign}
               onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live}
-              perm={demo ? null : orders.perm} me={driverName} onAddNum={addJobNum} timOf={timOf} onSetTim={setTim} onSetTimes={setTimes} sedelOf={(cid: string) => sedelInfo[cid] || null} onTextAsk={textAsk} onAddExtra={addExtra} onAsk={toOffice} />
+              perm={demo ? null : orders.perm} me={driverName} onAddNum={addJobNum} timOf={timOf} onSetTim={setTim} onSetTimes={setTimes} sedelOf={(cid: string) => sedelInfo[cid] || null} onTextAsk={textAsk} onAddExtra={addExtra} onAsk={toOffice} onRetur={returOrder} />
           ) : null}
           {tab === 'plan' && <RevokedBar list={revLog} onConfirm={confirmRevoked} onOpen={() => { setTab('klart'); setKlartView('aterkallade'); }} />}
           {tab === 'plan' && (planDay === 'idag' || !later.length) && !orders.stops.length && !demo && (
@@ -1668,7 +1687,7 @@ function AppInner(): React.JSX.Element {
           )}
 
           {tab === 'plan' && (planDay === 'idag' || !later.length) && route && !(route as any).error && (
-            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={openSign} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} me={driverName} onAddNum={addJobNum} onScan={() => { setScanPages(null); setScan(null); }} timOf={timOf} onSetTim={setTim} onSetTimes={setTimes} sedelOf={(cid: string) => sedelInfo[cid] || null} onTextAsk={textAsk} onAddExtra={addExtra} onAsk={toOffice} />
+            <OrdersView route={route} cargo={src.cargo} ost={ost} allStops={src.stops} onLoaded={onLoaded} onUnload={openSign} onEdit={(cid: string, st: any) => (isEgen(cid) ? openOwn(cid) : setEditFor({cid, st, done: false, start: (ost[cid] || {}).loadedAt || null}))} onAvised={onAvised} onRetry={retrySync} live={live} later={later} onReorder={saveManual} perm={demo ? null : orders.perm} tellTo={tellTo} onTell={tell} me={driverName} onAddNum={addJobNum} onScan={() => { setScanPages(null); setScan(null); }} timOf={timOf} onSetTim={setTim} onSetTimes={setTimes} sedelOf={(cid: string) => sedelInfo[cid] || null} onTextAsk={textAsk} onAddExtra={addExtra} onAsk={toOffice} onRetur={returOrder} />
           )}
           {tab === 'last' && src && <LoadView orders={loadOrders} cargo={src.cargo} route={route && !(route as any).error ? route : null} laterRoute={laterRoute} />}
           {tab === 'chat' && <JobbetView j={jobbet} onMakeJob={(m: any) => setSedelFor({media: m})} live={live} opterUnread={unread} opterLast={chatList[chatList.length - 1]} onOpenOpter={markOpterRead}
