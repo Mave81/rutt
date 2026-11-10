@@ -43,7 +43,7 @@ export function Sheet({open, onClose, title, sub, scroll, scrollEnabled = true, 
 // Papperet är vitt i båda lägena (3.57), så bläcket är alltid mörkt.
 const INK = '#0B1220';
 type Pt = {x: number; y: number};
-function Segments({stroke, w}: {stroke: Pt[]; w: number}) {
+const Segments = React.memo(function Segments({stroke, w}: {stroke: Pt[]; w: number}) {
   const out = [];
   for (let i = 1; i < stroke.length; i++) {
     const a = stroke[i - 1], b = stroke[i];
@@ -54,7 +54,24 @@ function Segments({stroke, w}: {stroke: Pt[]; w: number}) {
     out.push(<View key={i} pointerEvents="none" style={{position: 'absolute', left: mx - len / 2 - w / 4, top: my - w / 2, width: len + w / 2, height: w, borderRadius: w / 2, backgroundColor: INK, transform: [{rotate: `${ang}deg`}]}} />);
   }
   return <>{out}</>;
+});
+// 3.68: mjukare linje – ett varv Chaikin (hörn rundas av, inga taggiga hack när telefonen hinner med färre punkter).
+export function smooth(st: Pt[]): Pt[] {
+  if (st.length < 3) return st;
+  const out: Pt[] = [st[0]];
+  for (let i = 0; i < st.length - 1; i++) {
+    const a = st[i], b = st[i + 1];
+    out.push({x: 0.75 * a.x + 0.25 * b.x, y: 0.75 * a.y + 0.25 * b.y}, {x: 0.25 * a.x + 0.75 * b.x, y: 0.25 * a.y + 0.75 * b.y});
+  }
+  out.push(st[st.length - 1]);
+  return out;
 }
+// Fingret som började strecket – andra fingrar och handflatan räknas inte (de gav streck dit man inte skrev).
+export const touchOf = (n: any, id: any) => {
+  const ts = n && n.touches;
+  if (!ts || !ts.length || id == null) return n;
+  return ts.find((t: any) => t.identifier === id) || null;
+};
 export type SigData = {strokes: Pt[][]; w: number; h: number};
 /**
  * Stor signaturruta. Positionen räknas från sidkoordinater minus rutans ursprung
@@ -67,6 +84,7 @@ export function SignaturePad({height, onChange, onDrawing, hint = 'Signera här'
   const ref = useRef<Pt[]>([]);
   const all = useRef<Pt[][]>([]);
   const origin = useRef({x: 0, y: 0});
+  const touchId = useRef<any>(null), extra = useRef(false);
   const cb = useRef({onChange, onDrawing, width, height});
   cb.current = {onChange, onDrawing, width, height};
   const pan = useRef(
@@ -77,27 +95,38 @@ export function SignaturePad({height, onChange, onDrawing, hint = 'Signera här'
       onShouldBlockNativeResponder: () => true,
       onPanResponderGrant: e => {
         cb.current.onDrawing && cb.current.onDrawing(true);
-        const n = e.nativeEvent;
+        const n: any = e.nativeEvent;
+        touchId.current = n.identifier != null ? n.identifier : null; extra.current = false;
         origin.current = {x: n.pageX - n.locationX, y: n.pageY - n.locationY};
         const q = [{x: n.locationX, y: n.locationY}];
         ref.current = q; setCurr(q);
       },
-      onPanResponderMove: e => {
-        const q = {x: e.nativeEvent.pageX - origin.current.x, y: e.nativeEvent.pageY - origin.current.y};
+      onPanResponderMove: (e, g) => {
+        if (g.numberActiveTouches > 1) extra.current = true;
+        const t: any = touchOf(e.nativeEvent, touchId.current);
+        if (!t) return; // samma finger finns inte i händelsen – ignorera, rita aldrig till ett annat finger
+        const q = {x: t.pageX - origin.current.x, y: t.pageY - origin.current.y};
         const last = ref.current[ref.current.length - 1];
-        if (!last || Math.hypot(q.x - last.x, q.y - last.y) > 1.5) { const nx = [...ref.current, q]; ref.current = nx; setCurr(nx); }
+        if (!last) return;
+        const d = Math.hypot(q.x - last.x, q.y - last.y);
+        if (d > 140) return; // hopp (handflata/glapp) – inget streck tvärs över rutan
+        if (d > 2) { const nx = [...ref.current, q]; ref.current = nx; setCurr(nx); }
       },
       onPanResponderRelease: () => {
-        const st = ref.current.length === 1 ? [ref.current[0], {x: ref.current[0].x + 0.5, y: ref.current[0].y + 0.5}] : ref.current;
-        if (st.length > 1) {
+        const raw = ref.current;
+        const len = raw.reduce((a, q, i) => (i ? a + Math.hypot(q.x - raw[i - 1].x, q.y - raw[i - 1].y) : 0), 0);
+        // En prick när fler fingrar låg på rutan = handen som vilade, inte en underskrift.
+        const keep = !(extra.current && len < 12);
+        const st = raw.length === 1 ? [raw[0], {x: raw[0].x + 0.5, y: raw[0].y + 0.5}] : smooth(raw);
+        if (keep && st.length > 1) {
           all.current = [...all.current, st];
           setCommitted(all.current);
           cb.current.onChange({strokes: all.current, w: cb.current.width, h: cb.current.height});
         }
-        ref.current = []; setCurr([]);
+        ref.current = []; setCurr([]); touchId.current = null; extra.current = false;
         cb.current.onDrawing && cb.current.onDrawing(false);
       },
-      onPanResponderTerminate: () => { ref.current = []; setCurr([]); cb.current.onDrawing && cb.current.onDrawing(false); },
+      onPanResponderTerminate: () => { ref.current = []; setCurr([]); touchId.current = null; cb.current.onDrawing && cb.current.onDrawing(false); },
     }),
   ).current;
   function clear() { all.current = []; setCommitted([]); setCurr([]); ref.current = []; onChange(null); }

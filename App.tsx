@@ -54,7 +54,7 @@ const STARTS = [
   {id: 'ty', lat: 59.2437, lng: 18.2280, label: 'Willys, Tyresö', end: '15:00'},
 ];
 // Synlig bygg-stämpel så du alltid kan se vilket bygge du kör. Bumpas vid varje leverans.
-const BUILD = '10 nov · 3.67 · retur på lämna = bomkörning i Opter, meddelande till kontoret';
+const BUILD = '10 nov · 3.68 · retur kan köras tillbaka i planen, flytta stopp med pilar, lugnare signering';
 // Arbetstids-typer (RST) – matchar protokollet.
 const RST = {EndWork: 2, StartLunch: 3, EndLunch: 4, StartBreak: 5, EndBreak: 6};
 
@@ -410,9 +410,10 @@ function AppInner(): React.JSX.Element {
   const declinedToday = useMemo(() => {
     const day = new Date().toDateString();
     return Object.keys(ost).map(cid => ({cid, o: ost[cid] || {}})).filter(({o}) => [o.rejectedAt, o.givenAt, o.returAt].some(t => t && new Date(t).toDateString() === day))
-      .map(({cid, o}) => ({cid, who: o.who || '', to: o.to || '', orderNo: o.orderNo || cid, at: o.rejectedAt || o.givenAt || o.returAt, kind: o.rejectedAt ? 'nekad' : o.givenAt ? 'skickad' : 'retur', givenTo: o.givenTo || ''}))
+      .map(({cid, o}) => ({cid, who: o.who || '', to: o.to || '', orderNo: o.orderNo || cid, at: o.rejectedAt || o.givenAt || o.returAt, kind: o.rejectedAt ? 'nekad' : o.givenAt ? 'skickad' : 'retur', givenTo: o.givenTo || '',
+        back: o.returAt ? (egna.find(e => e.returOf === cid) || null) : null, sender: o.returAt && fullSrc ? (legs(cid).pick || null) : null}))
       .sort((a, b) => b.at - a.at);
-  }, [ost]);
+  }, [ost, egna, fullSrc]);
   // Dagens plan: "att göra"-ordrar. Steg som ska göras en senare dag läggs under "Senare dagar".
   const {src, later} = useMemo(() => {
     if (!fullSrc) return {src: null as any, later: [] as any[]};
@@ -876,23 +877,54 @@ function AppInner(): React.JSX.Element {
   }
   // 3.67: retur – kunden hade redan fått godset. Som i Opter Driver: artikeln Bomkörning på ordern (Artiklar),
   // finns den inte, tillägget Bomkörning. Plus ett meddelande till kontoret. Status i Opter ändras inte – kontoret avgör.
-  function returOrder(cid: string, st: any, note: string) {
+  // 3.68: vart godset tar vägen avgörs i samma blad: tillbaka till avsändaren (eller annan adress) = ett eget stopp i planen,
+  // annars ligger det kvar i bilen. Stoppet går aldrig till Opter; när det är lossat får kontoret ett meddelande.
+  type ReturDest = {mode: 'avs' | 'annan' | 'bil'; name?: string; adr?: string; area?: string};
+  function returStop(cid: string, d: {name: string; adr: string; area: string; zip?: string; tel?: string}, here: any) {
+    if (egna.some(e => e.returOf === cid && !e.doneAt)) return;
+    const pal = ((fullSrc && fullSrc.cargo && fullSrc.cargo[cid]) || {}).pal || 0;
+    const no = (here && here.orderNo) || (ost[cid] || {}).orderNo || cid;
+    const e = fromParsed({kind: 'retur', title: 'Retur', from: 'RETUR', ref: String(no), orderNo: '',
+      pick: {name: (here && here.who) || '', adr: (here && here.adr) || '', area: (here && here.area) || ''},
+      drop: {name: d.name, adr: d.adr, zip: d.zip || '', area: d.area, tel: d.tel || ''},
+      goods: pal ? [`${pal} pall`] : [], note: `Retur på order ${no} – kunden hade redan fått godset.`}, null, null, DB.ymdOf());
+    e.sms = false; e.pal = pal; e.returOf = cid; e.loadedAt = Date.now(); // ligger redan i bilen
+    saveEgna(l => [...l, e]);
+    flash(`Retur till ${d.name || d.area} ligger i planen`, null);
+  }
+  function returOrder(cid: string, st: any, note: string, dest?: ReturDest) {
     const L = st && st.live, ed = (L && L.edit) || {};
     const art = (ed.articles || []).find((a: any) => /bomk/i.test(String(a.name || '')));
     const add = !art ? (ed.addTypes || []).find((a: any) => /bomk/i.test(String(a.name || ''))) : null;
     const descr = ['Retur – kunden hade redan fått godset', note].filter(Boolean).join('. ');
     const no = st.orderNo || cid;
+    const pick = legs(cid).pick;
+    const to = !dest || dest.mode === 'bil' ? null
+      : dest.mode === 'avs' && pick ? {name: pick.who || '', adr: pick.adr || '', area: pick.area || '', zip: pick.zip || '', tel: (pick.tel || [])[0] || ''}
+      : {name: dest.name || '', adr: dest.adr || '', area: dest.area || ''};
     setOst(o => ({...o, [cid]: {...(o[cid] || {}), returAt: Date.now(), who: st.who || '', orderNo: no, returNote: note}}));
     if (art) sendEdit(cid, st, {changes: (P as any).articleChanges({sarId: art.id, q1: 1, descr})}, 'Bomkörning (retur)');
     else if (add) sendEdit(cid, st, {addServices: [{satId: add.id, number: '1', descr}]}, 'Bomkörning (retur)');
     else if (live && L) flash('Kontoret har ingen Bomkörning på ordern – bara meddelandet skickas', null);
-    if (live && L) toOffice(`Retur: ${st.who || ''}, order ${no} – kunden hade redan fått godset. Bomkörning${art || add ? ' lagd på ordern' : ''}. Godset ligger kvar i bilen.${note ? ' ' + note : ''}`);
+    const where = to ? `Godset körs tillbaka till ${[to.name, to.adr, to.area].filter(Boolean).join(', ')}.` : 'Godset ligger kvar i bilen.';
+    if (live && L) toOffice(`Retur: ${st.who || ''}, order ${no} – kunden hade redan fått godset. Bomkörning${art || add ? ' lagd på ordern' : ''}. ${where}${note ? ' ' + note : ''}`);
     else if (!art && !add) flash('Demo · retur markerad (skickas inte)', null);
+    if (to) returStop(cid, to, st);
   }
   function undoRetur(cid: string) {
     setOst(o => { const c = {...(o[cid] || {})}; delete c.returAt; delete c.returNote; return {...o, [cid]: c}; });
+    saveEgna(l => l.filter(e => !(e.returOf === cid && !e.doneAt)));
     flash('Tillbaka i planen. Bomkörningen ligger kvar i Opter – ta bort den under Mer → Artiklar om den ska bort', null);
   }
+  // Returen lossad hos avsändaren → kontoret får veta det (en gång).
+  useEffect(() => {
+    if (demo || !live) return;
+    const done = egna.filter(e => e.returOf && e.doneAt && !e.returSaid);
+    if (!done.length) return;
+    for (const e of done) toOffice(`Retur lämnad: ${e.drop.name || e.drop.area}${e.drop.adr ? ', ' + e.drop.adr : ''}, order ${e.ref || e.returOf} kl ${new Date(e.doneAt as number).toTimeString().slice(0, 5)}.`);
+    const ids = new Set(done.map(e => e.id));
+    saveEgna(l => l.map(e => (ids.has(e.id) ? {...e, returSaid: Date.now()} : e)));
+  }, [egna, live, demo]);
   function onAvised(cid: string) { setOst(o => ({...o, [cid]: {...(o[cid] || {}), avisedAt: Date.now()}})); }
 
   // Lossad: kvittensen sparas, ordern flyttar till Klart, namnet minns till nästa gång.
@@ -1657,7 +1689,7 @@ function AppInner(): React.JSX.Element {
           )}
           {tab === 'klart' && klartView === 'aterkallade' && <RevokedView list={revLog} onConfirm={confirmRevoked} />}
           {tab === 'klart' && klartView === 'dagbok' && <DagbokView me={driverName || 'RUTT'} onSms={chefC ? (text: string) => { jobbet.send(chefC, text); flash(`Dagrapport till ${chefC.name.split(' ')[0]}`, null); } : undefined} />}
-          {tab === 'klart' && klartView === 'idag' && <DoneView declined={declinedToday} onUndoRetur={undoRetur} done={doneOrders} scanned={egna} onClearScanned={() => { const was = egna; saveEgna(() => []); flash(`${was.length} inscannade rensade`, () => saveEgna(() => was)); }} onRetry={retrySync} onOpen={(d: any) => (isEgen(d.cid) ? openOwn(d.cid) : setEditFor({cid: d.cid, st: d.st, done: true, start: (ost[d.cid] || {}).loadedAt || null}))} />}
+          {tab === 'klart' && klartView === 'idag' && <DoneView declined={declinedToday} onUndoRetur={undoRetur} onReturBack={(cid: string) => { const p = legs(cid).pick; const o = ost[cid] || {}; if (p) returStop(cid, {name: p.who || '', adr: p.adr || '', area: p.area || '', zip: p.zip || '', tel: (p.tel || [])[0] || ''}, {orderNo: o.orderNo, who: o.who}); }} done={doneOrders} scanned={egna} onClearScanned={() => { const was = egna; saveEgna(() => []); flash(`${was.length} inscannade rensade`, () => saveEgna(() => was)); }} onRetry={retrySync} onOpen={(d: any) => (isEgen(d.cid) ? openOwn(d.cid) : setEditFor({cid: d.cid, st: d.st, done: true, start: (ost[d.cid] || {}).loadedAt || null}))} />}
           {tab === 'nytt' && <NewOrdersView orders={newOrders} cargo={fullSrc ? fullSrc.cargo : {}} onAccept={(o: any) => setOrderStatus(o, 'accept')} onReject={(o: any) => setOrderStatus(o, 'reject')} onForward={(orders.perm && orders.perm.giveAway === false) ? undefined : setForwardFor} />}
           <RejectSheet o={rejectFor} onClose={() => setRejectFor(null)} onReject={(o: any) => setOrderStatus(o, 'reject')} />
           <ForwardSheet o={forwardFor} drivers={team.drivers} onClose={() => setForwardFor(null)} onForward={forwardOrder} />

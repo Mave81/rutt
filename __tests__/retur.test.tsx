@@ -23,11 +23,12 @@ test('lämna-bladet: Retur → bekräfta → onRetur med kommentar', () => {
   const cards = r.root.findAll((n: any) => n.props && n.props.onLongPress && n.props.onPress);
   ReactTestRenderer.act(() => { cards[0].props.onPress(); });
   ReactTestRenderer.act(() => { btn(r, 'Retur – kunden har redan fått godset').props.onPress(); });
-  expect(txt(r)).toContain('Godset ligger kvar i bilen');
+  expect(txt(r)).toContain('Tillbaka till Alcro Länna');
+  expect(txt(r)).toContain('Ligger kvar i bilen');
   const inp = r.root.findAllByType(TextInput).find((i: any) => i.props.placeholder === 'Kommentar (valfritt)');
   ReactTestRenderer.act(() => { inp.props.onChangeText('Levererat i fredags'); });
   ReactTestRenderer.act(() => { btn(r, 'Markera retur').props.onPress(); });
-  expect(ret).toHaveBeenCalledWith('X', expect.objectContaining({drop: 'X'}), 'Levererat i fredags');
+  expect(ret).toHaveBeenCalledWith('X', expect.objectContaining({drop: 'X'}), 'Levererat i fredags', expect.objectContaining({mode: 'avs'}));
 });
 test('hämta-bladet har ingen returknapp', () => {
   const route = computeRoute([pick, drop], {X: {pal: 3}}, {lat: 59.3, lng: 18.0, end: '15:00'}, Date.now());
@@ -47,4 +48,12 @@ test('Klart: returen syns med Ångra', () => {
   expect(t).toContain('godset ligger i bilen');
   ReactTestRenderer.act(() => { btn(r, 'Ångra – tillbaka i planen').props.onPress(); });
   expect(undo).toHaveBeenCalledWith('X');
+});
+
+test('Klart: retur utan stopp kan köras tillbaka till avsändaren', () => {
+  const back = jest.fn();
+  let r: any;
+  ReactTestRenderer.act(() => { r = ReactTestRenderer.create(W(<DoneView done={[]} onRetry={() => {}} onOpen={() => {}} declined={[{cid: 'X', who: 'xxxxx', orderNo: 239995, at: Date.now(), kind: 'retur', back: null, sender: {who: 'BYGG-OLLE'}}]} onReturBack={back} />)); });
+  ReactTestRenderer.act(() => { btn(r, 'Kör tillbaka till BYGG-OLLE').props.onPress(); });
+  expect(back).toHaveBeenCalledWith('X');
 });
